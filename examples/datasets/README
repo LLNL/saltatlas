@@ -1,0 +1,9 @@
+- [point_5-4.dat](./point_5-4.dat)
+  - 5 communities. Each community contains 4 points.
+
+- [query_5-4.dat](./query_5-4.dat)
+  - Search queries corresponding to point_5-4.dat
+  - There is one point per community
+
+- [neighbor_5-4.dat](./neighbor_5-4.dat)
+  - Correct query result for the 5-4 dataset.

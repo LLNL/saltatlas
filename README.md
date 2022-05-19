@@ -160,6 +160,37 @@ for.
 While the second example should be faster, the first is easier to use and more easily supports variable length data
 (i.e. strings).
 
+
+## Running DNND (Distributed NNDescent) Example
+
+```bash
+./examples/dnnd_example \
+-k [int, required] Number of neighbors in a constructed k-NN index.
+-f [string, required] Distance metric name. "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
+-p [string] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv_with_id" (WSV format, the first column is point ID), "csv_with_id" (CSV, the first column is point ID).
+-r [double] Sample rate parameter (ρ) in NN-Descent.
+-d [double] Precision parameter (δ) in NN-Descent.
+-e  If specified, exchange reverse neighbors globally, which increases computation cost and accuracy.
+-b [long int] Batch size.
+-q [string] Path to a query file.
+-n [int] Number of nearest neighbors to find for each query point.
+-g [string] Path to a query ground truth file.
+-o [string] Prefix of the output files.
+-v  If specified, turn on the verbose mode.
+[string, required] List of input point files at the end. 
+```
+
+```shell
+cd build
+
+# Construct a k-NN index
+mpirun -n 2 ./examples/dnnd_example -k 4 -e -f l2 -p wsv ../examples/datasets/point_5-4.dat 
+
+# Construct a k-NN index, query nearest neighbors, and show the accuracy.
+mpirun -n 2 ./examples/dnnd_example -k 2 -e -f l2 -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat -p wsv ../examples/datasets/point_5-4.dat
+```
+
+
 # License
 saltatlas is distributed under the MIT license.
 
