@@ -164,10 +164,10 @@ While the second example should be faster, the first is easier to use and more e
 ## Running DNND (Distributed NNDescent) Example
 
 ```bash
-./examples/dnnd_example \
+./examples/dnnd_example (required options, see below) point_file_0 point_file_1...
 -k [int, required] Number of neighbors in a constructed k-NN index.
 -f [string, required] Distance metric name. "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
--p [string] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv_with_id" (WSV format, the first column is point ID), "csv_with_id" (CSV, the first column is point ID).
+-p [string, required] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv_with_id" (WSV format, the first column is point ID), "csv_with_id" (CSV format, the first column is point ID).
 -r [double] Sample rate parameter (ρ) in NN-Descent.
 -d [double] Precision parameter (δ) in NN-Descent.
 -e  If specified, exchange reverse neighbors globally, which increases computation cost and accuracy.
@@ -184,10 +184,10 @@ While the second example should be faster, the first is easier to use and more e
 cd build
 
 # Construct a k-NN index
-mpirun -n 2 ./examples/dnnd_example -k 4 -e -f l2 -p wsv ../examples/datasets/point_5-4.dat 
+mpirun -n 2 ./examples/dnnd_example -k 4 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
 
 # Construct a k-NN index, query nearest neighbors, and show the accuracy.
-mpirun -n 2 ./examples/dnnd_example -k 2 -e -f l2 -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat -p wsv ../examples/datasets/point_5-4.dat
+mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat -p wsv ../examples/datasets/point_5-4.dat
 ```
 
 
