@@ -6,6 +6,7 @@
 #include <math.h>
 #include <omp.h>
 #include <unistd.h>
+#include <saltatlas/partitioner/voronoi_partitioner.hpp>
 #include <saltatlas/saltatlas.hpp>
 #include <saltatlas/utility.hpp>
 #include <saltatlas_h5_io/h5_reader.hpp>
@@ -186,10 +187,12 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-void build_index(
-    ygm::container::bag<std::string>                     &bag_filenames,
-    saltatlas::dist_knn_index<float, std::vector<float>> &dist_index,
-    const size_t num_seeds, const std::vector<std::string> &data_col_names) {
+template <typename Partitioner>
+void build_index(ygm::container::bag<std::string>       &bag_filenames,
+                 saltatlas::dist_knn_index<float, std::vector<float>,
+                                           Partitioner> &dist_index,
+                 Partitioner &partitioner, const size_t num_seeds,
+                 const std::vector<std::string> &data_col_names) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -202,37 +205,41 @@ void build_index(
   dist_index.comm().barrier();
   dist_index.comm().cout0("Data reading time: ", step_timer.elapsed());
 
-  uint64_t num_points = bag_data.size();
+  /*
+uint64_t num_points = bag_data.size();
 
-  std::vector<std::vector<float>> seed_features;
-  seed_features.resize(num_seeds);
+std::vector<std::vector<float>> seed_features;
+seed_features.resize(num_seeds);
 
-  // uint64_t num_points = count_points_hdf5(bag_filenames);
+// uint64_t num_points = count_points_hdf5(bag_filenames);
 
-  dist_index.comm().cout0("Determining seed points");
-  step_timer.reset();
+dist_index.comm().cout0("Determining seed points");
+step_timer.reset();
 
-  // Determine seeds on rank 0 and distribute
-  std::vector<size_t> seed_ids(num_seeds);
-  if (dist_index.comm().rank0()) {
-    std::cout << "Selecting seeds" << std::endl;
-    saltatlas::utility::select_random_seed_ids(num_seeds, num_points, seed_ids);
-    std::sort(seed_ids.begin(), seed_ids.end());
-  }
-  // TODO: Change to a ygm::bcast to avoid direct MPI call and use of
-  // MPI_COMM_WORLD
-  MPI_Bcast(seed_ids.data(), num_seeds, MPI_UNSIGNED_LONG_LONG, 0,
-            MPI_COMM_WORLD);
+// Determine seeds on rank 0 and distribute
+std::vector<size_t> seed_ids(num_seeds);
+if (dist_index.comm().rank0()) {
+std::cout << "Selecting seeds" << std::endl;
+saltatlas::utility::select_random_seed_ids(num_seeds, num_points, seed_ids);
+std::sort(seed_ids.begin(), seed_ids.end());
+}
+// TODO: Change to a ygm::bcast to avoid direct MPI call and use of
+// MPI_COMM_WORLD
+MPI_Bcast(seed_ids.data(), num_seeds, MPI_UNSIGNED_LONG_LONG, 0,
+      MPI_COMM_WORLD);
 
-  saltatlas::utility::fill_seed_vector_from_hdf5(seed_ids, bag_filenames,
-                                                 data_col_names, seed_features,
-                                                 dist_index.comm());
-  dist_index.comm().cout0("Creating HNSW from seeds");
-  dist_index.set_seeds(seed_features);
-  dist_index.fill_seed_hnsw();
+saltatlas::utility::fill_seed_vector_from_hdf5(seed_ids, bag_filenames,
+                                           data_col_names, seed_features,
+                                           dist_index.comm());
+dist_index.comm().cout0("Creating HNSW from seeds");
+partitioner.set_seeds(seed_features);
+partitioner.fill_seed_hnsw();
 
-  dist_index.comm().barrier();
-  dist_index.comm().cout0("Seed setup time: ", step_timer.elapsed());
+dist_index.comm().barrier();
+dist_index.comm().cout0("Seed setup time: ", step_timer.elapsed());
+  */
+
+  dist_index.partition_data(bag_data, num_seeds);
 
   dist_index.comm().cout0("Distributing data across ranks");
 
@@ -260,11 +267,12 @@ void build_index(
   dist_index.comm().cout0("Finished creating index structure");
 }
 
-void benchmark_query_trial(
-    int voronoi_rank, int hops, int k,
-    saltatlas::dist_knn_index<float, std::vector<float>> &dist_index,
-    ygm::container::bag<std::string>                     &bag_query_files,
-    const std::vector<std::string>                       &data_col_names) {
+template <typename Partitioner>
+void benchmark_query_trial(int voronoi_rank, int hops, int k,
+                           saltatlas::dist_knn_index<float, std::vector<float>,
+                                                     Partitioner> &dist_index,
+                           ygm::container::bag<std::string> &bag_query_files,
+                           const std::vector<std::string>   &data_col_names) {
   if (dist_index.comm().rank() == 0) {
     std::cout << "\n****Beginning query trial****"
               << "\nVoronoi rank: " << voronoi_rank << "\nHops: " << hops
@@ -296,10 +304,12 @@ void benchmark_query_trial(
   return;
 }
 
+template <typename Partitioner>
 void benchmark_query_trial_ground_truth(
     int voronoi_rank, int hops, int k,
-    saltatlas::dist_knn_index<float, std::vector<float>> &dist_index,
-    ygm::container::bag<std::string>                     &bag_query_files,
+    saltatlas::dist_knn_index<float, std::vector<float>, Partitioner>
+                                     &dist_index,
+    ygm::container::bag<std::string> &bag_query_files,
     ygm::container::bag<std::string> &bag_ground_truth_files,
     const std::vector<std::string>   &data_col_names) {
   ygm::container::map<uint64_t, std::vector<uint64_t>> ground_truth(
@@ -477,15 +487,20 @@ int main(int argc, char **argv) {
 
     // Build index
     auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
-    saltatlas::dist_knn_index<float, std::vector<float>> dist_index(
-        voronoi_rank, num_seeds, &my_l2_space, &world);
+    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
+        world, my_l2_space);
+    saltatlas::dist_knn_index<
+        float, std::vector<float>,
+        saltatlas::voronoi_partitioner<float, std::vector<float>>>
+        dist_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
 
     // extra column for indices
     int num_cols =
         saltatlas::utility::get_num_columns(bag_index_filenames, world) - 1;
     auto data_col_names = generic_column_names(num_cols);
     step_timer.reset();
-    build_index(bag_index_filenames, dist_index, num_seeds, data_col_names);
+    build_index(bag_index_filenames, dist_index, partitioner, num_seeds,
+                data_col_names);
     dist_index.comm().barrier();
     world.cout0("Total index construction time: ", step_timer.elapsed());
 

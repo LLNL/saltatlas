@@ -11,14 +11,20 @@
 
 namespace saltatlas {
 
-template <typename DistType, typename Point>
+template <typename DistType, typename Point, typename Partitioner>
 class dist_knn_index {
  public:
   dist_knn_index(int max_voronoi_rank, int num_cells,
-                 hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm)
+                 hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
+                 Partitioner &p)
       : m_comm(comm),
-        m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm),
+        m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm, p),
         m_query_engine_impl(&m_index_impl){};
+
+  void partition_data(ygm::container::bag<std::pair<uint64_t, Point>> &data,
+                      const uint32_t num_partitions) {
+    m_index_impl.partition_data(data, num_partitions);
+  }
 
   void queue_data_point_insertion(const size_t pt_idx, const Point &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
@@ -40,9 +46,11 @@ class dist_knn_index {
     m_index_impl.fill_seed_hnsw();
   }
 
-  void set_seeds(const std::vector<Point> &seed_features) {
-    m_index_impl.store_seeds(seed_features);
-  }
+  /*
+void set_seeds(const std::vector<Point> &seed_features) {
+m_index_impl.store_seeds(seed_features);
+}
+  */
 
   template <typename Callback, typename... Callback_Args>
   void query(const Point &query_pt, const int k, const int hops,
@@ -62,9 +70,9 @@ class dist_knn_index {
   inline ygm::comm &comm() { return *m_comm; }
 
  private:
-  ygm::comm                                   *m_comm;
-  detail::dist_knn_index_impl<DistType, Point> m_index_impl;
-  detail::query_engine_impl<DistType, Point>   m_query_engine_impl;
+  ygm::comm                                                *m_comm;
+  detail::dist_knn_index_impl<DistType, Point, Partitioner> m_index_impl;
+  detail::query_engine_impl<DistType, Point, Partitioner>   m_query_engine_impl;
 };
 
 }  // namespace saltatlas

@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <saltatlas/hnswlib_space_wrapper.hpp>
+#include <saltatlas/partitioner/voronoi_partitioner.hpp>
 #include <saltatlas/saltatlas.hpp>
 #include <ygm/comm.hpp>
 
@@ -41,17 +42,22 @@ int main(int argc, char **argv) {
     // easy-to-write distance functions to be used with hnswlib
     auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
 
-    // Create indexing structure
-    int                                                  voronoi_rank = 2;
-    int                                                  num_seeds    = 2;
-    saltatlas::dist_knn_index<float, std::vector<float>> knn_index(
-        voronoi_rank, num_seeds, &my_l2_space, &world);
+    // Create partitioner
+    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
+        world, my_l2_space);
 
-    // Place Voronoi seeds in index structure on every rank and create seed HNSW
     std::vector<float>              s0{-5.0, 0.0}, s1{5.0, 0.0};
     std::vector<std::vector<float>> seeds{s0, s1};
-    knn_index.set_seeds(seeds);
-    knn_index.fill_seed_hnsw();
+    partitioner.set_seeds(seeds);
+    partitioner.fill_seed_hnsw();
+
+    // Create indexing structure
+    int voronoi_rank = 2;
+    int num_seeds    = 2;
+    saltatlas::dist_knn_index<
+        float, std::vector<float>,
+        saltatlas::voronoi_partitioner<float, std::vector<float>>>
+        knn_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
 
     // Insert points from rank 0
     if (mpi_rank == 0) {
