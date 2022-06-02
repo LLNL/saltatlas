@@ -62,8 +62,17 @@ class dnnd_kernel {
 
   template <typename allocator>
   void construct(nn_index<id_type, distance_type, allocator>& knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+    }
     priv_construct();
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nConverting the index data structure" << std::endl;
+    }
     priv_convert(knn_index);
+    if (m_option.verbose) {
+      m_comm.cout0() << "Finished index construction" << std::endl;
+    }
   }
 
   ygm::comm& comm() { return m_comm; }
