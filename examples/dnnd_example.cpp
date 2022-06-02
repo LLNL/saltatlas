@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/dnnd.hpp>
 
@@ -41,7 +42,8 @@ std::vector<std::vector<id_type>> read_neighbor_ids(
 
 /// \brief Gather query result to the root process.
 std::vector<std::vector<neighbor_type>> gather_query_result(
-    typename dnnd_type::query_result_store_type &local_result, ygm::comm &comm);
+    const typename dnnd_type::query_result_store_type &local_result,
+    ygm::comm                                         &comm);
 
 /// \brief Calculate and show accuracy
 void show_accuracy(const std::vector<std::vector<id_type>> &ground_truth_result,
@@ -77,10 +79,17 @@ int main(int argc, char **argv) {
 
     dnnd_type dnnd(distance_metric_name, point_file_names, point_file_format,
                    comm, verbose);
+    comm.cf_barrier();
 
     comm.cout0() << "<<Index Construction>>" << std::endl;
-    dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
-                         batch_size);
+    {
+      ygm::timer step_timer;
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size);
+      comm.cf_barrier();
+      comm.cout0() << "Index construction took (s)\t" << step_timer.elapsed()
+                   << std::endl;
+    }
 
     if (!out_file_prefix.empty()) {
       dnnd.dump_index(out_file_prefix + "-index");
@@ -95,7 +104,12 @@ int main(int argc, char **argv) {
       comm.cf_barrier();
 
       comm.cout0() << "Executing queries" << std::endl;
-      auto query_result = dnnd.query_batch(query_points, query_k, batch_size);
+      ygm::timer step_timer;
+      const auto query_result =
+          dnnd.query_batch(query_points, query_k, batch_size);
+      comm.cf_barrier();
+      comm.cout0() << "Processing queries took (s)\t" << step_timer.elapsed()
+                   << std::endl;
 
       if (!ground_truth_neighbor_ids_file_name.empty() ||
           !out_file_prefix.empty()) {
@@ -218,8 +232,8 @@ inline void read_query(const std::string                 &query_file,
 }
 
 inline std::vector<std::vector<neighbor_type>> gather_query_result(
-    typename dnnd_type::query_result_store_type &local_result,
-    ygm::comm                                   &comm) {
+    const typename dnnd_type::query_result_store_type &local_result,
+    ygm::comm                                         &comm) {
   const std::size_t num_total_queries =
       comm.all_reduce_sum(local_result.size());
 
@@ -289,12 +303,12 @@ inline void show_accuracy(
 
   std::sort(accuracies.begin(), accuracies.end());
 
-  std::cout << "Min\t" << accuracies.front() << std::endl;
-  std::cout << "Mean\t"
+  std::cout << "Min accuracy\t" << accuracies.front() << std::endl;
+  std::cout << "Mean accuracy\t"
             << std::accumulate(accuracies.begin(), accuracies.end(), 0.0) /
                    accuracies.size()
             << std::endl;
-  std::cout << "Max\t" << accuracies.back() << std::endl;
+  std::cout << "Max accuracy\t" << accuracies.back() << std::endl;
 }
 
 inline void dump_query_result(
