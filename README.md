@@ -167,7 +167,7 @@ While the second example should be faster, the first is easier to use and more e
 ./examples/dnnd_example (required options, see below) point_file_0 point_file_1...
 -k [int, required] Number of neighbors in a constructed k-NN index.
 -f [string, required] Distance metric name. "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
--p [string, required] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv_with_id" (WSV format, the first column is point ID), "csv_with_id" (CSV format, the first column is point ID).
+-p [string, required] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv-id" (WSV format, the first column is point ID), "csv-id" (CSV format, the first column is point ID).
 -r [double] Sample rate parameter (ρ) in NN-Descent.
 -d [double] Precision parameter (δ) in NN-Descent.
 -e  If specified, exchange reverse neighbors globally, which increases computation cost and accuracy.

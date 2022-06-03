@@ -250,11 +250,11 @@ void read_points(
       comm.cout0() << "Read WSV format (whitespace separated, no ID) files"
                    << std::endl;
     dndetail::read_points_wsv(point_file_names, local_point_store, comm);
-  } else if (format == "csv_with_id") {
+  } else if (format == "csv-id") {
     if (verbose) comm.cout0() << "Read CSV-ID format files" << std::endl;
     dndetail::read_points_with_id_and_delimiter(point_file_names, ',',
                                                 local_point_store, comm);
-  } else if (format == "wsv_with_id") {
+  } else if (format == "wsv-id") {
     if (verbose)
       comm.cout0() << "Read WSV-ID (whitespace separated with ID) format files"
                    << std::endl;
