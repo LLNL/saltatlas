@@ -335,7 +335,8 @@ class dnnd_kernel {
             if (u1 >= u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 && targets.size() > m_option.mini_batch_size) {
+            if (m_option.mini_batch_size > 0 &&
+                targets.size() > m_option.mini_batch_size) {
               return false;
             }
           }
@@ -375,7 +376,8 @@ class dnnd_kernel {
             if (u1 == u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 && targets.size() > m_option.mini_batch_size) {
+            if (m_option.mini_batch_size > 0 &&
+                targets.size() > m_option.mini_batch_size) {
               return false;
             }
           }
@@ -460,12 +462,23 @@ class dnnd_kernel {
                               m_comm.rank(), m_comm.size(), m_option.verbose);
     assert(local_mini_batch_size <= targets.size());
 
+#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+    std::vector<std::size_t> msg_dst_count(m_comm.size(), 0);
+#endif
+
     for (std::size_t i = 0; i < local_mini_batch_size; ++i) {
       const auto pair = targets.front();
       targets.pop();
+#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+      ++msg_dst_count[m_point_partitioner(pair.first)];
+      ++msg_dst_count[m_point_partitioner(pair.second)];
+#endif
       m_comm.async(m_point_partitioner(pair.first), neighbor_updater{}, m_this,
                    pair.first, pair.second);
     }
+#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+    priv_show_msg_dst_count_statistics(msg_dst_count);
+#endif
     m_comm.barrier();
   }
 
@@ -486,6 +499,41 @@ class dnnd_kernel {
       }
     }
     m_knn_heap_table.clear();
+    m_comm.cf_barrier();
+  }
+
+  void priv_show_msg_dst_count_statistics(
+      const std::vector<std::size_t>& local_table) const {
+    std::vector<std::size_t> root_table;
+    if (m_comm.rank0()) root_table.resize(m_comm.size(), 0);
+    m_comm.cf_barrier();
+
+    SALTATLAS_DNND_CHECK_MPI(MPI_Reduce(local_table.data(), root_table.data(),
+                                        m_comm.size(), MPI_UNSIGNED_LONG,
+                                        MPI_SUM, 0, MPI_COMM_WORLD));
+
+    if (m_comm.rank0()) {
+      std::cout << "Statistics #of messages each process will receive "
+                   "(ignoring pruned messages)."
+                << std::endl;
+      const auto sum =
+          std::accumulate(root_table.begin(), root_table.end(), std::size_t(0));
+      const auto mean = (double)sum / (double)root_table.size();
+      std::cout << "#of total messages " << sum << " with " << root_table.size()
+                << " workers" << std::endl;
+      std::cout << "Max, Mean, Min:\t"
+                << "" << *std::max_element(root_table.begin(), root_table.end())
+                << ", " << mean << ", "
+                << *std::min_element(root_table.begin(), root_table.end())
+                << std::endl;
+      double x = 0;
+      for (const auto n : root_table) x += std::pow(n - mean, 2);
+      const auto dv = std::sqrt(x / root_table.size());
+      std::cout << "Standard Deviation " << dv << std::endl;
+
+      for (const auto& n : root_table) std::cout << n << " ";
+      std::cout << std::endl;
+    }
     m_comm.cf_barrier();
   }
 
