@@ -306,18 +306,27 @@ class dnnd_kernel {
     return received;
   }
 
-  void priv_update_neighbors(const adj_lsit_type& old_table,
-                             const adj_lsit_type& new_table) {
-    std::vector<id_type> srcs;
+  void priv_update_neighbors(adj_lsit_type& old_table,
+                             adj_lsit_type& new_table) {
+    // Shuffle table elements to avoid sending messages to the same process
+    // from many ranks at a time.
+    std::vector<id_type> new_msg_srcs;
     for (const auto& item : new_table) {
-      srcs.push_back(item.first);
+      new_msg_srcs.push_back(item.first);
     }
-    std::shuffle(srcs.begin(), srcs.end(), m_rnd_generator);
+    std::shuffle(new_msg_srcs.begin(), new_msg_srcs.end(), m_rnd_generator);
 
+    for (auto& item : old_table) {
+      std::shuffle(item.second.begin(), item.second.end(), m_rnd_generator);
+    }
+    for (auto& item : new_table) {
+      std::shuffle(item.second.begin(), item.second.end(), m_rnd_generator);
+    }
     m_mini_batch_no = 0;
+    m_comm.cf_barrier();
 
-    priv_update_neighbors_new_new(srcs, new_table);
-    priv_update_neighbors_old_new(srcs, old_table, new_table);
+    priv_update_neighbors_new_new(new_msg_srcs, new_table);
+    priv_update_neighbors_old_new(new_msg_srcs, old_table, new_table);
   }
 
   void priv_update_neighbors_new_new(const std::vector<id_type>& srcs,
@@ -357,15 +366,15 @@ class dnnd_kernel {
     }
   }
 
-  void priv_update_neighbors_old_new(const std::vector<id_type>& srcs,
+  void priv_update_neighbors_old_new(const std::vector<id_type>& new_srcs,
                                      const adj_lsit_type&        old_table,
                                      const adj_lsit_type&        new_table) {
     std::queue<std::pair<id_type, id_type>> targets;
-    auto generator = [this, &srcs, &old_table, &new_table, &targets](
+    auto generator = [this, &new_srcs, &old_table, &new_table, &targets](
                          std::size_t& pos_src, std::size_t& pos_old,
                          std::size_t& pos_new) {
-      for (; pos_src < srcs.size(); ++pos_src) {
-        const auto& src  = srcs[pos_src];
+      for (; pos_src < new_srcs.size(); ++pos_src) {
+        const auto& src  = new_srcs[pos_src];
         const auto& news = new_table.at(src);
         if (old_table.count(src) == 0) continue;
         const auto& olds = old_table.at(src);
@@ -513,9 +522,10 @@ class dnnd_kernel {
                                         MPI_SUM, 0, MPI_COMM_WORLD));
 
     if (m_comm.rank0()) {
-      std::cout << "Statistics #of messages each process will receive "
-                   "(ignoring pruned messages)."
-                << std::endl;
+      std::cout
+          << "Statistics of the number of messages each process will receive "
+             "(ignoring the effectiveness of the pruning techniques)."
+          << std::endl;
       const auto sum =
           std::accumulate(root_table.begin(), root_table.end(), std::size_t(0));
       const auto mean = (double)sum / (double)root_table.size();
