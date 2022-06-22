@@ -43,8 +43,7 @@ class nn_index_optimizer {
         m_point_partitioner(partitioner),
         m_distance_metric(metric),
         m_nn_index(nn_index),
-        m_comm(comm),
-        m_tmp_index(m_nn_index.get_allocator()) {
+        m_comm(comm) {
     m_this.check(m_comm);
   }
 
@@ -85,8 +84,15 @@ class nn_index_optimizer {
 
   /// \warning Generated index is not sorted by distance.
   nn_index_type priv_generate_reverse_index() {
-    m_tmp_index.clear();
+    // Only one call is allowed at a time within a process.
+    static std::mutex           mutex;
+    std::lock_guard<std::mutex> guard(mutex);
+
+    nn_index_type reversed_index(m_nn_index.get_allocator());
+    static nn_index_type &ref_reversed_index(reversed_index);
+    ref_reversed_index.clear();
     m_comm.cf_barrier();
+
     for (auto sitr = m_nn_index.points_begin(), send = m_nn_index.points_end();
          sitr != send; ++sitr) {
       const auto& source = sitr->first;
@@ -98,17 +104,18 @@ class nn_index_optimizer {
         // Assumes that reverse path has the same distance as the original one.
         m_comm.async(
             m_point_partitioner(neighbor.id),
-            [](self_pointer_type local_this, const id_type reverse_neighbor,
-               const id_type reverse_source, const distance_type distance) {
+            [](const id_type reverse_neighbor, const id_type reverse_source,
+               const distance_type distance) {
               neighbor_type neighbor{.id       = reverse_neighbor,
                                      .distance = distance};
-              local_this->m_tmp_index.insert(reverse_source, neighbor);
+              ref_reversed_index.insert(reverse_source, neighbor);
             },
-            m_this, source, neighbor.id, neighbor.distance);
+            source, neighbor.id, neighbor.distance);
       }
     }
     m_comm.barrier();
-    return m_tmp_index;
+
+    return reversed_index;
   }
 
   void priv_prune_neighbors() {
@@ -123,8 +130,21 @@ class nn_index_optimizer {
   }
 
   void priv_remove_long_paths() {
-    // TODO: implement later.
-    assert(false);
+    //    std::size_t num_removed        = 0;
+    //    std::size_t num_retained_edges = 0;
+    //
+    //    for (auto sitr = m_nn_index.points_begin(), send =
+    //    m_nn_index.points_end();
+    //         sitr != send; ++sitr) {
+    //      const auto& source = sitr->first;
+    //      for (auto nitr = m_nn_index.neighbors_begin(source),
+    //                nend = m_nn_index.neighbors_end(source);
+    //           nitr != nend; ++nitr) {
+    //      }
+    //    }
+    //
+    //    std::cout << "#of removed edge\t" << num_removed << std::endl;
+    //    std::cout << "#of retained edge\t" << num_retained_edges << std::endl;
   }
 
   const option            m_option;
@@ -133,7 +153,6 @@ class nn_index_optimizer {
   const distance_metric&  m_distance_metric;
   nn_index_type&          m_nn_index;
   ygm::comm&              m_comm;
-  nn_index_type           m_tmp_index;
   self_pointer_type       m_this{this};
 };
 
