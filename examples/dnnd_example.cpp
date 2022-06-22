@@ -21,6 +21,8 @@ static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
 
 void parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,
                    double &delta, bool &exchange_reverse_neighbors,
+                   bool   &make_index_undirected,
+                   double &pruning_degree_multiplier, bool &remove_long_paths,
                    std::size_t &batch_size, std::string &distance_metric_name,
                    std::vector<std::string> &point_file_names,
                    std::string              &query_file_name,
@@ -62,6 +64,9 @@ int main(int argc, char **argv) {
     double                   r{0.8};
     double                   delta{0.001};
     bool                     exchange_reverse_neighbors{false};
+    bool                     make_index_undirected{false};
+    double                   pruning_degree_multiplier{1.5};
+    bool                     remove_long_paths{false};
     std::size_t              batch_size{0};
     std::string              distance_metric_name;
     std::vector<std::string> point_file_names;
@@ -72,8 +77,9 @@ int main(int argc, char **argv) {
     bool                     verbose{false};
 
     parse_options(argc, argv, index_k, query_k, r, delta,
-                  exchange_reverse_neighbors, batch_size, distance_metric_name,
-                  point_file_names, query_file_name,
+                  exchange_reverse_neighbors, make_index_undirected,
+                  pruning_degree_multiplier, remove_long_paths, batch_size,
+                  distance_metric_name, point_file_names, query_file_name,
                   ground_truth_neighbor_ids_file_name, point_file_format,
                   out_file_prefix, verbose);
 
@@ -97,6 +103,11 @@ int main(int argc, char **argv) {
 
     if (!query_file_name.empty()) {
       comm.cout0() << "\n<<Query>>" << std::endl;
+
+      comm.cout0() << "Preparing for query" << std::endl;
+      dnnd.prepare_for_query(index_k, make_index_undirected,
+                             pruning_degree_multiplier, remove_long_paths);
+      comm.cf_barrier();
 
       comm.cout0() << "Reading queries" << std::endl;
       dnnd_type::query_point_store_type query_points;
@@ -131,24 +142,26 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-inline void parse_options(int argc, char **argv, int &index_k, int &query_k,
-                          double &r, double &delta,
-                          bool                     &exchange_reverse_neighbors,
-                          std::size_t              &batch_size,
-                          std::string              &distance_metric_name,
-                          std::vector<std::string> &point_file_names,
-                          std::string              &query_file_name,
-                          std::string &ground_truth_neighbor_ids_file_name,
-                          std::string &point_file_format,
-                          std::string &out_file_prefix, bool &verbose) {
+inline void parse_options(
+    int argc, char **argv, int &index_k, int &query_k, double &r, double &delta,
+    bool &exchange_reverse_neighbors, bool &make_index_undirected,
+    double &pruning_degree_multiplier, bool &remove_long_paths,
+    std::size_t &batch_size, std::string &distance_metric_name,
+    std::vector<std::string> &point_file_names, std::string &query_file_name,
+    std::string &ground_truth_neighbor_ids_file_name,
+    std::string &point_file_format, std::string &out_file_prefix,
+    bool &verbose) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
   out_file_prefix.clear();
-  verbose = false;
+  exchange_reverse_neighbors = false;
+  make_index_undirected      = false;
+  remove_long_paths          = false;
+  verbose                    = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:o:f:p:eb:vq:n:g:")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:o:f:p:eb:vq:n:g:m:ul")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -192,6 +205,18 @@ inline void parse_options(int argc, char **argv, int &index_k, int &query_k,
 
       case 'g':
         ground_truth_neighbor_ids_file_name = optarg;
+        break;
+
+      case 'u':
+        make_index_undirected = true;
+        break;
+
+      case 'm':
+        pruning_degree_multiplier = std::stod(optarg);
+        break;
+
+      case 'l':
+        remove_long_paths = true;
         break;
 
       case 'v':

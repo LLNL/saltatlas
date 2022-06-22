@@ -11,6 +11,7 @@
 
 #include <saltatlas/dnnd/detail/dnnd_kernel.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
+#include <saltatlas/dnnd/detail/nn_index_query_preparator.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
 #include <saltatlas/dnnd/distance.hpp>
@@ -35,15 +36,17 @@ class dnnd {
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
   using query_kernel_type =
       dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
+  using nn_index_query_preparator_type =
+      dndetail::nn_index_query_preparator<point_store_type, knn_index_type>;
 
  public:
   using query_point_store_type =
       typename query_kernel_type::query_point_store_type;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
-  dnnd(const std::string&              distance_metric_name,
+  dnnd(const std::string_view          distance_metric_name,
        const std::vector<std::string>& point_file_names,
-       const std::string& point_file_format, ygm::comm& comm,
+       const std::string_view point_file_format, ygm::comm& comm,
        const bool verbose)
       : m_distance_metric(
             distance::metric<feature_vector_type>(distance_metric_name)),
@@ -68,6 +71,35 @@ class dnnd {
     nn_kernel_type kernel(option, *m_point_store, priv_get_point_partitioner(),
                           m_distance_metric, m_comm);
     kernel.construct(*m_knn_index);
+  }
+
+  /// \brief
+  /// \param pruning_degree_multiplier 1.0 does no pruning.
+  void prepare_for_query(const std::size_t index_k,
+                         const bool        make_index_undirected     = false,
+                         const double      pruning_degree_multiplier = 1.0,
+                         const bool        remove_long_paths         = false) {
+    if (m_verbose) {
+      m_comm.cout0() << "Prepare index" << std::endl;
+    }
+
+    const typename nn_index_query_preparator_type::option opt{
+        .index_k                   = index_k,
+        .undirected                = make_index_undirected,
+        .pruning_degree_multiplier = pruning_degree_multiplier,
+        .remove_long_paths         = remove_long_paths,
+        .verbose                   = m_verbose};
+    nn_index_query_preparator_type preparator{opt,
+                                              *m_point_store,
+                                              priv_get_point_partitioner(),
+                                              m_distance_metric,
+                                              *m_knn_index,
+                                              m_comm};
+    preparator.run();
+
+    if (m_verbose) {
+      m_comm.cout0() << "Finished index preparation" << std::endl;
+    }
   }
 
   query_result_store_type query_batch(

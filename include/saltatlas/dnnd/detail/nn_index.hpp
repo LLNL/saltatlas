@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
@@ -37,8 +38,30 @@ class nn_index {
   using const_neighbor_iterator = typename neighbor_list_type::const_iterator;
 
  public:
-  void insert(const id_type &source, const neighbor_type& neighbor) {
+  explicit nn_index(const allocator_type &allocator = allocator_type{})
+      : m_index(allocator) {}
+
+  void insert(const id_type &source, const neighbor_type &neighbor) {
     m_index[source].push_back(neighbor);
+  }
+
+  void sort_neighbors(const id_type &source) {
+    std::sort(m_index[source].begin(), m_index[source].end());
+  }
+
+  void sort_and_remove_duplicate_neighbors(const id_type &source) {
+    sort_neighbors(source);
+    m_index[source].erase(
+        std::unique(m_index[source].begin(), m_index[source].end()),
+        m_index[source].end());
+  }
+
+  /// \warning The neighbor list must be sorted beforehand.
+  void prune_neighbors(const id_type    &source,
+                       const std::size_t num_max_neighbors) {
+    if (m_index.at(source).size() > num_max_neighbors) {
+      m_index[source].resize(num_max_neighbors);
+    }
   }
 
   auto points_begin() { return m_index.begin(); }
@@ -75,6 +98,8 @@ class nn_index {
   void clear() { m_index.clear(); }
 
   void clear_neighbors(const id_type &source) { m_index[source].clear(); }
+
+  allocator_type get_allocator() const { return m_index.get_allocator(); }
 
  private:
   point_table_type m_index;

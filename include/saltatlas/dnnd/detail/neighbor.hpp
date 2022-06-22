@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
+#include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -20,13 +21,26 @@ struct neighbor {
   using distance_type = Distance;
 
   friend bool operator<(const neighbor& lhd, const neighbor& rhd) {
-    if (lhd.distance != rhd.distance) return lhd.distance < rhd.distance;
+    if (!nearly_equal(lhd.distance, rhd.distance))
+      return lhd.distance < rhd.distance;
     return lhd.id < rhd.id;
   }
 
   id_type       id;
   distance_type distance;
 };
+
+template <typename Id, typename Distance>
+inline bool operator==(const neighbor<Id, Distance>& lhs,
+                       const neighbor<Id, Distance>& rhs) {
+  return lhs.id == rhs.id && nearly_equal(lhs.distance, rhs.distance);
+}
+
+template <typename Id, typename Distance>
+inline bool operator!=(const neighbor<Id, Distance>& lhs,
+                       const neighbor<Id, Distance>& rhs) {
+  return !(lhs == rhs);
+}
 
 // TODO: make a version that deos not take value?
 template <typename Id = uint64_t, typename Distance = double,

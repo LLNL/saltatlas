@@ -10,6 +10,7 @@
 #include <mutex>
 #include <random>
 #include <type_traits>
+#include <algorithm>
 
 #include <ygm/comm.hpp>
 
@@ -499,13 +500,10 @@ class dnnd_kernel {
       auto&                      heap = item.second;
       std::vector<neighbor_type> wk;
       while (!heap.empty()) {
-        wk.push_back(heap.top());
+        knn_index.insert(src, heap.top());
         heap.pop();
       }
-      std::sort(wk.begin(), wk.end());
-      for (const auto& neighbor : wk) {
-        knn_index.insert(src, neighbor);
-      }
+      knn_index.sort_neighbors(src);
     }
     m_knn_heap_table.clear();
     m_comm.cf_barrier();
