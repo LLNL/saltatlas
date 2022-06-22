@@ -8,7 +8,7 @@
 namespace saltatlas::dndetail {
 
 template <typename PointStore, typename KNNIndex>
-class nn_index_query_preparator {
+class nn_index_optimizer {
  public:
   using id_type              = typename PointStore::id_type;
   using distance_type        = typename KNNIndex::distance_type;
@@ -34,18 +34,17 @@ class nn_index_query_preparator {
     bool        verbose{false};
   };
 
-  nn_index_query_preparator(const option&            opt,
-                            const point_store_type&  point_store,
-                            const point_partitioner& partitioner,
-                            const distance_metric&   metric,
-                            nn_index_type& nn_index, ygm::comm& comm)
+  nn_index_optimizer(const option& opt, const point_store_type& point_store,
+                     const point_partitioner& partitioner,
+                     const distance_metric& metric, nn_index_type& nn_index,
+                     ygm::comm& comm)
       : m_option(opt),
         m_point_store(point_store),
         m_point_partitioner(partitioner),
         m_distance_metric(metric),
         m_nn_index(nn_index),
         m_comm(comm),
-        m_reverse_index(m_nn_index.get_allocator()) {
+        m_tmp_index(m_nn_index.get_allocator()) {
     m_this.check(m_comm);
   }
 
@@ -63,30 +62,30 @@ class nn_index_query_preparator {
   }
 
  private:
-  using self_type         = nn_index_query_preparator<PointStore, KNNIndex>;
+  using self_type         = nn_index_optimizer<PointStore, KNNIndex>;
   using self_pointer_type = ygm::ygm_ptr<self_type>;
 
   void priv_make_index_undirected() {
-    priv_generate_reverse_index();
-    for (auto sitr = m_reverse_index.points_begin(),
-              send = m_reverse_index.points_end();
+    auto reversed_index = priv_generate_reverse_index();
+    for (auto sitr = reversed_index.points_begin(),
+              send = reversed_index.points_end();
          sitr != send; ++sitr) {
       const auto& source = sitr->first;
       assert(m_point_partitioner(source) == m_comm.rank());
-      for (auto nitr = m_reverse_index.neighbors_begin(source),
-                nend = m_reverse_index.neighbors_end(source);
+      for (auto nitr = reversed_index.neighbors_begin(source),
+                nend = reversed_index.neighbors_end(source);
            nitr != nend; ++nitr) {
         m_nn_index.insert(source, *nitr);
       }
-      m_reverse_index.clear_neighbors(source);
+      reversed_index.clear_neighbors(source);  // reduce memory usage
       m_nn_index.sort_and_remove_duplicate_neighbors(source);
     }
     m_comm.cf_barrier();
   }
 
   /// \warning Generated index is not sorted by distance.
-  void priv_generate_reverse_index() {
-    m_reverse_index.clear();
+  nn_index_type priv_generate_reverse_index() {
+    m_tmp_index.clear();
     m_comm.cf_barrier();
     for (auto sitr = m_nn_index.points_begin(), send = m_nn_index.points_end();
          sitr != send; ++sitr) {
@@ -103,13 +102,13 @@ class nn_index_query_preparator {
                const id_type reverse_source, const distance_type distance) {
               neighbor_type neighbor{.id       = reverse_neighbor,
                                      .distance = distance};
-              local_this->m_reverse_index.insert(reverse_source,
-                                                 neighbor);
+              local_this->m_tmp_index.insert(reverse_source, neighbor);
             },
             m_this, source, neighbor.id, neighbor.distance);
       }
     }
     m_comm.barrier();
+    return m_tmp_index;
   }
 
   void priv_prune_neighbors() {
@@ -124,7 +123,7 @@ class nn_index_query_preparator {
   }
 
   void priv_remove_long_paths() {
-    //TODO: implement later.
+    // TODO: implement later.
     assert(false);
   }
 
@@ -134,7 +133,7 @@ class nn_index_query_preparator {
   const distance_metric&  m_distance_metric;
   nn_index_type&          m_nn_index;
   ygm::comm&              m_comm;
-  nn_index_type           m_reverse_index;
+  nn_index_type           m_tmp_index;
   self_pointer_type       m_this{this};
 };
 

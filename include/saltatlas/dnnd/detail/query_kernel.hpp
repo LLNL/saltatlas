@@ -54,8 +54,8 @@ class dknn_batch_query_kernel {
   struct option {
     int         k{4};
     std::size_t batch_size{0};
-    bool        verbose{false};
     uint64_t    rnd_seed{128};
+    bool        verbose{false};
   };
 
   dknn_batch_query_kernel(const option&            opt,

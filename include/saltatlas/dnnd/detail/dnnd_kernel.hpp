@@ -42,8 +42,8 @@ class dnnd_kernel {
     double      delta{0.1};
     bool        exchange_reverse_neighbors{false};
     std::size_t mini_batch_size{std::numeric_limits<std::size_t>::max()};
-    bool        verbose{false};
     uint64_t    rnd_seed{1238};
+    bool        verbose{false};
   };
 
  public:

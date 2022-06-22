@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
                   out_file_prefix, verbose);
 
     dnnd_type dnnd(distance_metric_name, point_file_names, point_file_format,
-                   comm, verbose);
+                   comm, std::random_device{}(), verbose);
     comm.cf_barrier();
 
     comm.cout0() << "<<Index Construction>>" << std::endl;
@@ -101,13 +101,20 @@ int main(int argc, char **argv) {
       dnnd.dump_index(out_file_prefix + "-index");
     }
 
-    if (!query_file_name.empty()) {
-      comm.cout0() << "\n<<Query>>" << std::endl;
+    if (query_file_name.empty()) goto SKIP_QUERY;
 
-      comm.cout0() << "Preparing for query" << std::endl;
-      dnnd.prepare_for_query(index_k, make_index_undirected,
+    {
+      comm.cout0() << "\n<<Optimizing the index for query>>" << std::endl;
+      ygm::timer step_timer;
+      dnnd.optimize_index(index_k, make_index_undirected,
                              pruning_degree_multiplier, remove_long_paths);
       comm.cf_barrier();
+      comm.cout0() << "Index optimization took (s)\t" << step_timer.elapsed()
+                   << std::endl;
+    }
+
+    {
+      comm.cout0() << "\n<<Query>>" << std::endl;
 
       comm.cout0() << "Reading queries" << std::endl;
       dnnd_type::query_point_store_type query_points;
@@ -138,6 +145,8 @@ int main(int argc, char **argv) {
         }
       }
     }
+
+  SKIP_QUERY:;
   }
   return 0;
 }
