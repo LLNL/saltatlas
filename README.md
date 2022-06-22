@@ -171,6 +171,9 @@ While the second example should be faster, the first is easier to use and more e
 -r [double] Sample rate parameter (ρ) in NN-Descent.
 -d [double] Precision parameter (δ) in NN-Descent.
 -e  If specified, exchange reverse neighbors globally, which increases computation cost and accuracy.
+-u  If specified, make the index undirected before the query.
+-m [double] Pruning degree multiplier in PyNNDescent.
+-l  If specified, remove long paths before the query.
 -b [long int] Batch size.
 -q [string] Path to a query file.
 -n [int] Number of nearest neighbors to find for each query point.
