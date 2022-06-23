@@ -5,12 +5,24 @@
 
 #pragma once
 
+#ifndef SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+#define SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS 1
+#endif
+
+#ifndef SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
+#define SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS 0
+#endif
+
+#ifndef SALTATLAS_DNND_PRUNE_LONG_DISTANCE_MSGS
+#define SALTATLAS_DNND_PRUNE_LONG_DISTANCE_MSGS 1
+#endif
+
+#include <algorithm>
 #include <functional>
 #include <iostream>
 #include <mutex>
 #include <random>
 #include <type_traits>
-#include <algorithm>
 
 #include <ygm/comm.hpp>
 
@@ -95,6 +107,12 @@ class dnnd_kernel {
     }
     priv_init_knn_heap_random();
 
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+    m_num_neighbor_suggestion_msgs = 0;
+    m_num_feature_msgs             = 0;
+    m_num_distance_msgs            = 0;
+    m_num_pruned_distance_msgs     = 0;
+#endif
     std::size_t epoch_no = 0;
     while (true) {
       // Test the terminal condition
@@ -108,6 +126,7 @@ class dnnd_kernel {
         m_comm.cout0() << "\n[Epoch\t" << epoch_no << "]" << std::endl;
         m_comm.cout0() << "#of new neighbors\t" << num_global_news << std::endl;
       }
+      ygm::timer epoch_timer;
 
       adj_lsit_type old_table;
       adj_lsit_type new_table;
@@ -115,9 +134,30 @@ class dnnd_kernel {
       m_comm.cf_barrier();
 
       priv_update_neighbors(old_table, new_table);
+      m_comm.cf_barrier();
+
+      if (m_option.verbose) {
+        m_comm.cout0() << "\nepoch " << epoch_no << " took (s)\t"
+                       << epoch_timer.elapsed() << std::endl;
+      }
       ++epoch_no;
     }
     m_comm.cf_barrier();
+    if (m_option.verbose) {
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+      m_comm.cout0() << "\nMessage Statistics" << std::endl;
+      m_comm.cout0() << "#of sent neighbor suggestions\t"
+                     << m_comm.all_reduce_sum(m_num_neighbor_suggestion_msgs)
+                     << std::endl;
+      m_comm.cout0() << "#of sent feature vectors\t"
+                     << m_comm.all_reduce_sum(m_num_feature_msgs) << std::endl;
+      m_comm.cout0() << "#of returned distance\t"
+                     << m_comm.all_reduce_sum(m_num_distance_msgs) << std::endl;
+      m_comm.cout0() << "#of pruned messages due to longer distance\t"
+                     << m_comm.all_reduce_sum(m_num_pruned_distance_msgs)
+                     << std::endl;
+#endif
+    }
   }
 
   void priv_init_knn_heap_random() {
@@ -422,17 +462,25 @@ class dnnd_kernel {
       const auto max_distance = heap.size() < local_this->m_option.k
                                     ? std::numeric_limits<distance_type>::max()
                                     : heap.top().distance;
-
-      local_this->comm().async(
-          local_this->m_point_partitioner(u2), neighbor_updater{}, local_this,
-          u1, u2, local_this->m_point_store.feature_vector(u1), max_distance);
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+      ++local_this->m_num_feature_msgs;
+#endif
+      local_this->comm().async(local_this->m_point_partitioner(u2),
+                               neighbor_updater{}, local_this, u1, u2,
+                               local_this->m_point_store.feature_vector(u1)
+#if SALTATLAS_DNND_PRUNE_LONG_DISTANCE_MSGS
+                                   ,
+                               max_distance
+#endif
+      );
     }
 
     // 2nd call.
     // Update u2's knn heap and sends the computed distance to u1, if needed.
     void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
                     const id_type u2, const featur_vector_type& u1_feature,
-                    const distance_type& u1_max_distance) {
+                    const distance_type& u1_max_distance =
+                        std::numeric_limits<distance_type>::max()) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u2);
 
       // If u1 is already one of the nearest neighbors,
@@ -448,6 +496,13 @@ class dnnd_kernel {
       if (d < u1_max_distance) {
         local_this->comm().async(local_this->m_point_partitioner(u1),
                                  neighbor_updater{}, local_this, u1, u2, d);
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+        ++local_this->m_num_distance_msgs;
+#endif
+      } else {
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+        ++local_this->m_num_pruned_distance_msgs;
+#endif
       }
     }
 
@@ -472,21 +527,24 @@ class dnnd_kernel {
                               m_comm.rank(), m_comm.size(), m_option.verbose);
     assert(local_mini_batch_size <= targets.size());
 
-#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+#if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
     std::vector<std::size_t> msg_dst_count(m_comm.size(), 0);
 #endif
 
     for (std::size_t i = 0; i < local_mini_batch_size; ++i) {
       const auto pair = targets.front();
       targets.pop();
-#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+#if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
       ++msg_dst_count[m_point_partitioner(pair.first)];
       ++msg_dst_count[m_point_partitioner(pair.second)];
+#endif
+#if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
+      ++m_num_neighbor_suggestion_msgs;
 #endif
       m_comm.async(m_point_partitioner(pair.first), neighbor_updater{}, m_this,
                    pair.first, pair.second);
     }
-#if SALTATLAS_DNND_SHOW_MSG_STATISTICS
+#if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
     priv_show_msg_dst_count_statistics(msg_dst_count);
 #endif
     m_comm.barrier();
@@ -555,6 +613,12 @@ class dnnd_kernel {
   knn_heap_table_type     m_knn_heap_table{};
   id_type                 m_global_max_id{0};
   std::size_t             m_mini_batch_no{0};
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+  std::size_t m_num_neighbor_suggestion_msgs{0};
+  std::size_t m_num_feature_msgs{0};
+  std::size_t m_num_distance_msgs{0};
+  std::size_t m_num_pruned_distance_msgs{0};
+#endif
 };
 
 }  // namespace saltatlas::dndetail
