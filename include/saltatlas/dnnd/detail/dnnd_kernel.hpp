@@ -137,7 +137,7 @@ class dnnd_kernel {
       m_comm.cf_barrier();
 
       if (m_option.verbose) {
-        m_comm.cout0() << "\nepoch " << epoch_no << " took (s)\t"
+        m_comm.cout0() << "\nepoch took (s)\t"
                        << epoch_timer.elapsed() << std::endl;
       }
       ++epoch_no;
@@ -538,7 +538,7 @@ class dnnd_kernel {
       ++msg_dst_count[m_point_partitioner(pair.first)];
       ++msg_dst_count[m_point_partitioner(pair.second)];
 #endif
-#if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
       ++m_num_neighbor_suggestion_msgs;
 #endif
       m_comm.async(m_point_partitioner(pair.first), neighbor_updater{}, m_this,
