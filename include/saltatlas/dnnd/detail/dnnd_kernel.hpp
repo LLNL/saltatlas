@@ -115,16 +115,8 @@ class dnnd_kernel {
 #endif
     std::size_t epoch_no = 0;
     while (true) {
-      // Test the terminal condition
-      const auto num_global_news = priv_count_global_new_neighbors();
-      if ((double)num_global_news <
-          m_option.delta * (m_global_max_id + 1) * m_option.k) {
-        break;
-      }
-
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Epoch\t" << epoch_no << "]" << std::endl;
-        m_comm.cout0() << "#of new neighbors\t" << num_global_news << std::endl;
       }
       ygm::timer epoch_timer;
 
@@ -133,12 +125,23 @@ class dnnd_kernel {
       priv_select_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
 
+      m_cnt_new_neighbors = 0;
       priv_update_neighbors(old_table, new_table);
       m_comm.cf_barrier();
 
       if (m_option.verbose) {
-        m_comm.cout0() << "\nepoch took (s)\t"
-                       << epoch_timer.elapsed() << std::endl;
+        m_comm.cout0() << "\nepoch took (s)\t" << epoch_timer.elapsed()
+                       << std::endl;
+      }
+      // Test the terminal condition
+      const auto num_global_news = m_comm.all_reduce_sum(m_cnt_new_neighbors);
+      if (m_option.verbose) {
+        m_comm.cout0() << "#of neighbor updates\t" << num_global_news
+                       << std::endl;
+      }
+      if ((double)num_global_news <
+          m_option.delta * (m_global_max_id + 1) * m_option.k) {
+        break;
       }
       ++epoch_no;
     }
@@ -213,19 +216,6 @@ class dnnd_kernel {
       local_this->m_knn_heap_table.at(sid).push_unique(nid, d, true);
     }
   };
-
-  std::size_t priv_count_global_new_neighbors() const {
-    std::size_t num_local_new_neighbors = 0;
-    for (const auto& item : m_knn_heap_table) {
-      const auto& neighbors = item.second;
-      for (auto nitr = neighbors.ids_begin(), nend = neighbors.ids_end();
-           nitr != nend; ++nitr) {
-        const bool new_neighbor = nitr->second;
-        num_local_new_neighbors += new_neighbor;
-      }
-    }
-    return m_comm.all_reduce_sum(num_local_new_neighbors);
-  }
 
   void priv_select_old_and_new(adj_lsit_type& old_table,
                                adj_lsit_type& new_table) {
@@ -491,7 +481,7 @@ class dnnd_kernel {
       // current neighbors.
       const auto& u2_feature = local_this->m_point_store.feature_vector(u2);
       const auto  d = local_this->m_distance_function(u1_feature, u2_feature);
-      nn_heap.push_unique(u1, d, true);
+      local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
 
       if (d < u1_max_distance) {
         local_this->comm().async(local_this->m_point_partitioner(u1),
@@ -511,7 +501,7 @@ class dnnd_kernel {
     void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
                     const id_type u2, const distance_type& d) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u1);
-      nn_heap.push_unique(u2, d, true);
+      local_this->m_cnt_new_neighbors += nn_heap.push_unique(u2, d, true);
     }
   };
 
@@ -613,6 +603,7 @@ class dnnd_kernel {
   knn_heap_table_type     m_knn_heap_table{};
   id_type                 m_global_max_id{0};
   std::size_t             m_mini_batch_no{0};
+  std::size_t             m_cnt_new_neighbors{0};
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
   std::size_t m_num_neighbor_suggestion_msgs{0};
   std::size_t m_num_feature_msgs{0};
