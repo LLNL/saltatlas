@@ -144,91 +144,123 @@ class nn_index_optimizer {
     static std::mutex           mutex;
     std::lock_guard<std::mutex> guard(mutex);
 
-    static point_store<id_type, feature_element_type> tmp_point_store;
+    static point_store<id_type, feature_element_type> point_store;
     m_comm.cf_barrier();
 
-    std::size_t num_removed        = 0;
-    std::size_t num_retained_edges = 0;
+    std::size_t num_retained_paths = 0;
+    std::size_t num_removed_paths  = 0;
 
     auto sitr = m_nn_index.points_begin();
     auto send = m_nn_index.points_end();
     while (true) {
-      std::size_t                 count = 0;
-      std::unordered_set<id_type> checked;
-      auto                        sitr2 = sitr;
+      auto sitr2 = sitr;
 
-      // Get feature vectors from remote
-      for (; sitr != send; ++sitr) {
-        const auto& source = sitr->first;
-        for (auto nitr = m_nn_index.neighbors_begin(source),
-                  nend = m_nn_index.neighbors_end(source);
-             nitr != nend; ++nitr) {
-          const auto& neighbor = *nitr;
-          if (checked.count(neighbor.id)) continue;
-          checked.insert(neighbor.id);
-          m_comm.async(
-              m_point_partitioner(neighbor.id),
-              [](self_pointer_type local_this, const id_type targe_id,
-                 const int return_rank, const id_type source_id) {
-                local_this->m_comm.async(
-                    return_rank,
-                    [](const id_type             targe_id,
-                       const featur_vector_type& feature) {
-                      tmp_point_store.feature_vector(targe_id) = feature;
-                    },
-                    targe_id,
-                    local_this->m_point_store.feature_vector(targe_id));
-              },
-              m_this, neighbor.id, m_comm.rank(), source);
-        }
-        if (++count > k_batch_size) break;
-      }
-      m_comm.barrier();
+      // Gather 'some' feature vectors from remote
+      sitr = priv_gather_feature_vectors(sitr, send);
 
-      // Remove long paths
-      for (; sitr2 != sitr; ++sitr2) {
-        const auto&                source = sitr2->first;
-        std::vector<neighbor_type> retained_neighbors;
-        for (auto nitr = m_nn_index.neighbors_begin(source),
-                  nend = m_nn_index.neighbors_end(source);
-             nitr != nend; ++nitr) {
-          const auto& neighbor        = *nitr;
-          const auto  distance_to_src = neighbor.distance;
-          bool        remove          = false;
-          for (const auto& rn : retained_neighbors) {
-            const auto distance_to_retained_neighbor =
-                m_distance_metric(tmp_point_store.feature_vector(rn.id),
-                                  tmp_point_store.feature_vector(neighbor.id));
-            if (distance_to_src > distance_to_retained_neighbor) {
-              remove = true;
-              break;
-            }
-          }
-          if (remove) {
-            ++num_removed;
-          } else {
-            retained_neighbors.push_back(neighbor);
-            ++num_retained_edges;
-          }
-        }
-        m_nn_index.clear_neighbors(source);
-        for (const auto n : retained_neighbors) {
-          m_nn_index.insert(source, n);
-        }
-      }
+      // Remove long paths of points from 'sitr2' to 'sitr',
+      // using the feature vectors corrected in above
+      const auto counts = priv_remove_long_paths_core(sitr2, sitr);
+      num_retained_paths += counts.first;
+      num_removed_paths += counts.second;
 
       const bool finished = sitr == send;
       if (m_comm.template all_reduce_sum((int)finished) == m_comm.size()) {
         break;
       }
-      tmp_point_store.clear();
+      point_store.clear();
     }
     if (m_option.verbose) {
-      m_comm.cout0() << "#of removed paths\t"
-                     << m_comm.all_reduce_sum(num_removed) << std::endl;
       m_comm.cout0() << "#of retained paths\t"
-                     << m_comm.all_reduce_sum(num_retained_edges) << std::endl;
+                     << m_comm.all_reduce_sum(num_retained_paths) << std::endl;
+      m_comm.cout0() << "#of removed paths\t"
+                     << m_comm.all_reduce_sum(num_removed_paths) << std::endl;
     }
+  }
+
+  template <typename iterator_type>
+  iterator_type priv_gather_feature_vectors(iterator_type sitr,
+                                            iterator_type send) {
+    std::size_t                 count = 0;
+    std::unordered_set<id_type> requested;
+    // Get up to 'k_batch_size' feature vectors from remote
+    for (; sitr != send; ++sitr) {
+      const auto& source = sitr->first;
+      for (auto nitr = m_nn_index.neighbors_begin(source),
+                nend = m_nn_index.neighbors_end(source);
+           nitr != nend; ++nitr) {
+        const auto& neighbor = *nitr;
+
+        // Avoid requesting the same feature vector multiple times
+        if (requested.count(neighbor.id)) continue;
+        requested.insert(neighbor.id);
+
+        // Get a feature vector from remote asynchronously
+        m_comm.async(m_point_partitioner(neighbor.id), feature_vector_gather{},
+                     m_this, neighbor.id, m_comm.rank());
+      }
+
+      if (++count > k_batch_size) break;
+    }
+    m_comm.barrier();
+
+    return sitr;
+  }
+
+  struct feature_vector_gather {
+    // First call,
+    // send back the feature vector of targe_id to 'rank_to_return'.
+    void operator()(self_pointer_type local_this, const id_type targe_id,
+                    const int rank_to_return) {
+      local_this->m_comm.async(
+          rank_to_return, feature_vector_gather{}, local_this, targe_id,
+          local_this->m_point_store.feature_vector(targe_id));
+    }
+
+    // Second call,
+    // store a received feature vector.
+    void operator()(self_pointer_type local_this, const id_type targe_id,
+                    const featur_vector_type& feature) {
+      local_this->m_remote_point_store.feature_vector(targe_id) = feature;
+    }
+  };
+
+  template <typename iterator_type>
+  std::pair<std::size_t, std::size_t> priv_remove_long_paths_core(
+      iterator_type sitr, iterator_type send) {
+    std::size_t num_retained_paths = 0;
+    std::size_t num_removed_paths  = 0;
+    for (; sitr != send; ++sitr) {
+      const auto&                source = sitr->first;
+      std::vector<neighbor_type> retained_neighbors;
+      for (auto nitr = m_nn_index.neighbors_begin(source),
+                nend = m_nn_index.neighbors_end(source);
+           nitr != nend; ++nitr) {
+        const auto& neighbor        = *nitr;
+        const auto  distance_to_src = neighbor.distance;
+        bool        remove          = false;
+        for (const auto& rn : retained_neighbors) {
+          const auto distance_to_retained_neighbor = m_distance_metric(
+              m_remote_point_store.feature_vector(rn.id),
+              m_remote_point_store.feature_vector(neighbor.id));
+          if (distance_to_src > distance_to_retained_neighbor) {
+            remove = true;
+            break;
+          }
+        }
+        if (remove) {
+          ++num_removed_paths;
+        } else {
+          retained_neighbors.push_back(neighbor);
+          ++num_retained_paths;
+        }
+      }
+      m_nn_index.clear_neighbors(source);
+      for (const auto n : retained_neighbors) {
+        m_nn_index.insert(source, n);
+      }
+    }
+    return std::make_pair(num_retained_paths, num_removed_paths);
   }
 
   const option            m_option;
@@ -238,6 +270,8 @@ class nn_index_optimizer {
   nn_index_type&          m_nn_index;
   ygm::comm&              m_comm;
   self_pointer_type       m_this{this};
+  // Use this point store to store feature vectors in remotes.
+  point_store<id_type, feature_element_type> m_remote_point_store;
 };
 
 }  // namespace saltatlas::dndetail
