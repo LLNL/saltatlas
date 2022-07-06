@@ -16,4 +16,7 @@
   - Four neighbors per query point.
 
 - [distance_5-4.dat](./distance_5-4.dat)
-  - All distance pairs.
+  - Distances from each query point to the all input points.
+
+- [point-distance_5-4.dat](./point-distance_5-4.dat)
+  - All distance pairs of the input points.
