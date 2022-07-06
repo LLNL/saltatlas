@@ -5,6 +5,7 @@
   - White-space separated file.
   - There are 5 communities in this dataset. 
   - Each community contains 4 points.
+  - L2 (euclidean) distance.
 
 - [query_5-4.dat](./query_5-4.dat)
   - Search queries.
