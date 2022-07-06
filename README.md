@@ -163,22 +163,29 @@ While the second example should be faster, the first is easier to use and more e
 
 ## Running DNND (Distributed NNDescent) Example
 
-```bash
-./examples/dnnd_example (required options, see below) point_file_0 point_file_1...
+```shell
+./examples/dnnd_example (options, see below) point_file_0 point_file_1...
 -k [int, required] Number of neighbors in a constructed k-NN index.
--f [string, required] Distance metric name. "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
--p [string, required] Format of input point files. Supported formats are "wsv" (whitespace-separated values), "wsv-id" (WSV format, the first column is point ID), "csv-id" (CSV format, the first column is point ID).
+-f [string, required] Distance metric name.
+    "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
+-p [string, required] Format of input point files.
+    Supported formats are "wsv" (whitespace-separated values),
+    "wsv-id" (WSV format and the first column is point ID),
+    "csv-id" (CSV format and the first column is point ID).
 -r [double] Sample rate parameter (ρ) in NN-Descent.
 -d [double] Precision parameter (δ) in NN-Descent.
--e  If specified, exchange reverse neighbors globally, which increases computation cost and accuracy.
+-e  If specified, exchange reverse neighbors globally.
+    This feature will cause heavy communication.
+    May be able to achieve a better conversion speed and query accuracy.
 -u  If specified, make the index undirected before the query.
--m [double] Pruning degree multiplier in PyNNDescent.
+-m [double] Pruning degree multiplier (m) in PyNNDescent.
+    Each point keeps up to 'k' x 'm' nearest neighbors.****
 -l  If specified, remove long paths before the query.
 -b [long int] Batch size.
 -q [string] Path to a query file.
 -n [int] Number of nearest neighbors to find for each query point.
 -g [string] Path to a query ground truth file.
--o [string] Prefix of the output files.
+-o [string] Prefix of the output files (constructed index, optimized index, and query results).
 -v  If specified, turn on the verbose mode.
 [string, required] List of input point files at the end. 
 ```
@@ -190,7 +197,9 @@ cd build
 mpirun -n 2 ./examples/dnnd_example -k 4 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
 
 # Construct a k-NN index, query nearest neighbors, and show the accuracy.
-mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat -p wsv ../examples/datasets/point_5-4.dat
+mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 \
+  -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat \ 
+  -p wsv ../examples/datasets/point_5-4.dat
 ```
 
 
