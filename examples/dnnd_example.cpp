@@ -87,33 +87,35 @@ int main(int argc, char **argv) {
                    comm, std::random_device{}(), verbose);
     comm.cf_barrier();
 
-    comm.cout0() << "<<Index Construction>>" << std::endl;
     {
+      comm.cout0() << "<<Index Construction>>" << std::endl;
       ygm::timer step_timer;
       dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
                            batch_size);
       comm.cf_barrier();
-      comm.cout0() << "Index construction took (s)\t" << step_timer.elapsed()
+      comm.cout0() << "\nIndex construction took (s)\t" << step_timer.elapsed()
                    << std::endl;
+      if (!out_file_prefix.empty()) {
+        comm.cout0() << "Dumping the index" << std::endl;
+        dnnd.dump_index(out_file_prefix + "-index");
+      }
     }
-
-    if (!out_file_prefix.empty()) {
-      dnnd.dump_index(out_file_prefix + "-index");
-    }
-
-    if (query_file_name.empty()) goto SKIP_QUERY;
 
     {
       comm.cout0() << "\n<<Optimizing the index for query>>" << std::endl;
       ygm::timer step_timer;
-      dnnd.optimize_index(index_k, make_index_undirected,
-                             pruning_degree_multiplier, remove_long_paths);
+      dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
+                          remove_long_paths);
       comm.cf_barrier();
-      comm.cout0() << "Index optimization took (s)\t" << step_timer.elapsed()
+      comm.cout0() << "\nIndex optimization took (s)\t" << step_timer.elapsed()
                    << std::endl;
+      if (!out_file_prefix.empty()) {
+        comm.cout0() << "Dumping the optimized index" << std::endl;
+        dnnd.dump_index(out_file_prefix + "-optimized-index");
+      }
     }
 
-    {
+    if (!query_file_name.empty()) {
       comm.cout0() << "\n<<Query>>" << std::endl;
 
       comm.cout0() << "Reading queries" << std::endl;
@@ -126,7 +128,7 @@ int main(int argc, char **argv) {
       const auto query_result =
           dnnd.query_batch(query_points, query_k, batch_size);
       comm.cf_barrier();
-      comm.cout0() << "Processing queries took (s)\t" << step_timer.elapsed()
+      comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
                    << std::endl;
 
       if (!ground_truth_neighbor_ids_file_name.empty() ||
@@ -145,8 +147,6 @@ int main(int argc, char **argv) {
         }
       }
     }
-
-  SKIP_QUERY:;
   }
   return 0;
 }

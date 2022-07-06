@@ -149,9 +149,6 @@ class dknn_batch_query_kernel {
                        << std::endl;
       }
     }
-    if (m_option.verbose) {
-      m_comm.cout0() << "Finished all queries" << std::endl;
-    }
   }
 
   template <typename random_generator_type>

@@ -66,6 +66,9 @@ class nn_index_optimizer {
   static constexpr std::size_t k_batch_size = 1000000;
 
   void priv_make_index_undirected() {
+    if (m_option.verbose) {
+      m_comm.cout0() << "Making the index undirected" << std::endl;
+    }
     auto reversed_index = priv_generate_reverse_index();
     for (auto sitr = reversed_index.points_begin(),
               send = reversed_index.points_end();
@@ -81,9 +84,6 @@ class nn_index_optimizer {
       m_nn_index.sort_and_remove_duplicate_neighbors(source);
     }
     m_comm.cf_barrier();
-    if (m_option.verbose) {
-      m_comm.cout0() << "Made the index undirected" << std::endl;
-    }
   }
 
   /// \warning Generated index is not sorted by distance.
@@ -125,6 +125,12 @@ class nn_index_optimizer {
   void priv_prune_neighbors() {
     const std::size_t num_max_neighbors_to_retain =
         m_option.index_k * m_option.pruning_degree_multiplier;
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nPruning neighbors"
+                     << "\nEach point keeps up to "
+                     << num_max_neighbors_to_retain << " neighbors"
+                     << std::endl;
+    }
     std::size_t count = 0;
     for (auto sitr = m_nn_index.points_begin(), send = m_nn_index.points_end();
          sitr != send; ++sitr) {
@@ -140,6 +146,9 @@ class nn_index_optimizer {
   }
 
   void priv_remove_long_paths() {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRemoving long paths" << std::endl;
+    }
     // Only one call is allowed at a time within a process.
     static std::mutex           mutex;
     std::lock_guard<std::mutex> guard(mutex);

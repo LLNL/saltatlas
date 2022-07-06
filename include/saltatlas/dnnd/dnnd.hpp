@@ -78,16 +78,26 @@ class dnnd {
     nn_kernel_type kernel(option, *m_point_store, priv_get_point_partitioner(),
                           m_distance_metric, m_comm);
     kernel.construct(*m_knn_index);
+    m_index_k = k;
   }
 
-  /// \brief
-  /// \param pruning_degree_multiplier 1.0 does no pruning.
-  void optimize_index(const std::size_t index_k,
-                      const bool        make_index_undirected     = false,
-                      const double      pruning_degree_multiplier = 1.0,
-                      const bool        remove_long_paths         = false) {
+  /// \brief Apply some optimizations to an already constructed index aiming at
+  /// improving the query quality and performance.
+  /// \param make_index_undirected If true, make the index undirected.
+  /// \param pruning_degree_multiplier
+  /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
+  /// where k is the number of neighbors each point in the index has.
+  /// \param remove_long_paths If true, remove long paths.
+  void optimize_index(const bool   make_index_undirected     = false,
+                      const double pruning_degree_multiplier = 1.5,
+                      const bool   remove_long_paths         = false) {
+    if (!m_knn_index) {
+      m_comm.cerr0() << "The source index is empty." << std::endl;
+      return;
+    }
+
     const typename nn_index_optimizer_type::option opt{
-        .index_k                   = index_k,
+        .index_k                   = m_index_k,
         .undirected                = make_index_undirected,
         .pruning_degree_multiplier = pruning_degree_multiplier,
         .remove_long_paths         = remove_long_paths,
@@ -147,8 +157,6 @@ class dnnd {
 
   void priv_dump_index_distributed_file(const knn_index_type& knn_index,
                                         const std::string& knn_out_file_name) {
-    m_comm.cout0() << "Dump k-NN graph independently" << std::endl;
-
     std::stringstream file_name;
     file_name << knn_out_file_name << "-" << m_comm.rank();
     std::ofstream ofs(file_name.str());
@@ -191,6 +199,7 @@ class dnnd {
   bool                                              m_verbose;
   std::unique_ptr<point_store_type>                 m_point_store;
   std::unique_ptr<knn_index_type>                   m_knn_index;
+  std::size_t                                       m_index_k{0};
 };
 
 }  // namespace saltatlas
