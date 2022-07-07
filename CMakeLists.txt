@@ -52,6 +52,33 @@ endif ()
 
 include(FetchContent)
 
+option(SALTATLAS_USE_METALL "Use Metall" OFF)
+
+#
+# Boost
+#
+find_package(Boost 1.64 QUIET)
+if (NOT Boost_FOUND)
+    FetchContent_Declare(Boost
+            URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2)
+    FetchContent_GetProperties(Boost)
+    if (Boost_POPULATED)
+        message(STATUS ${PROJECT_NAME}
+                " found already populated Boost dependency: "
+                ${boost_SOURCE_DIR})
+    else ()
+        if (SALTATLAS_USE_METALL) # Only Metall requires Boost
+            FetchContent_Populate(Boost)
+            message(STATUS ${PROJECT_NAME} " cloned Boost dependency: "
+                    ${boost_SOURCE_DIR})
+        endif ()
+    endif ()
+    set(BOOST_ROOT ${boost_SOURCE_DIR})
+    find_package(Boost 1.64)
+else()
+    message(STATUS ${PROJECT_NAME} " found Boost dependency: " ${Boost_INCLUDE_DIR})
+endif ()
+
 #
 # hnswlib
 #
@@ -236,6 +263,35 @@ if (SALTATLAS_USE_HDF5)
     target_link_libraries(saltatlas INTERFACE saltatlas_h5_io::saltatlas_h5_io)
 else ()
     message(STATUS ${PROJECT_NAME} " building without saltatlas_h5_io and HDF5")
+endif ()
+
+#
+# Metall
+#
+if (SALTATLAS_USE_METALL)
+    find_package(Metall QUIET CONFIG)
+    if (NOT Metall_FOUND)
+        FetchContent_Declare(Metall
+                GIT_REPOSITORY https://github.com/LLNL/metall.git
+                GIT_TAG master
+                )
+        FetchContent_GetProperties(Metall)
+        if (Metall_POPULATED)
+            message(STATUS ${PROJECT_NAME}
+                    " found already populated Metall dependency: "
+                    ${metall_SOURCE_DIR}
+                    )
+        else ()
+            # Do not compile anything in Metall
+            set(JUST_INSTALL_METALL_HEADER ON)
+            FetchContent_MakeAvailable(Metall)
+            message(STATUS ${PROJECT_NAME} " cloned Metall dependency "
+                    ${metall_SOURCE_DIR}
+                    )
+        endif ()
+    else ()
+        message(STATUS ${PROJECT_NAME} " found Metall dependency: " ${Metall_INCLUDE_DIRS})
+    endif ()
 endif ()
 
 option(TEST_WITH_SLURM "Run tests with Slurm" OFF)
