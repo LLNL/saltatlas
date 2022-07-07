@@ -61,6 +61,13 @@ class dnnd {
         m_rnd_seed(rnd_seed),
         m_verbose(verbose) {}
 
+  /// \brief Construct an k-NN index.
+  /// \param k The number of nearest neighbors each point in the index has.
+  /// \param r Sample rate parameter in NN-Descent.
+  /// \param delta Precision parameter in NN-Descent.
+  /// \param exchange_reverse_neighbors If true is specified, exchange reverse
+  /// neighbors globally.
+  /// \param mini_batch_size Mini batch size.
   void construct_index(const int k, const double r, const double delta,
                        const bool        exchange_reverse_neighbors,
                        const std::size_t mini_batch_size) {
@@ -111,6 +118,12 @@ class dnnd {
     optimizer.run();
   }
 
+  /// \brief Query nearest neighbors of given points.
+  /// \param query_point_store Query points. All ranks have to have the same
+  /// points.
+  /// \param k The number of neighbors to search for each point.
+  /// \param batch_size The number of queries to process at a time.
+  /// \return Query results.
   query_result_store_type query_batch(
       const query_point_store_type& query_point_store, const int k,
       const std::size_t batch_size) {
@@ -129,8 +142,10 @@ class dnnd {
     return query_result;
   }
 
-  void dump_index(const std::string& knn_out_file_name) {
-    priv_dump_index_distributed_file(*m_knn_index, knn_out_file_name);
+  /// \brief Dump the k-NN index to files.
+  /// \param out_file_prefix File path prefix.
+  void dump_index(const std::string& out_file_prefix) {
+    priv_dump_index_distributed_file(*m_knn_index, out_file_prefix);
   }
 
  private:
@@ -156,9 +171,9 @@ class dnnd {
   }
 
   void priv_dump_index_distributed_file(const knn_index_type& knn_index,
-                                        const std::string& knn_out_file_name) {
+                                        const std::string& out_file_prefix) {
     std::stringstream file_name;
-    file_name << knn_out_file_name << "-" << m_comm.rank();
+    file_name << out_file_prefix << "-" << m_comm.rank();
     std::ofstream ofs(file_name.str());
     if (!ofs.is_open()) {
       std::cerr << "Failed to create: " << file_name.str() << std::endl;
