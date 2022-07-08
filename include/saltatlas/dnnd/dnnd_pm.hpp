@@ -29,30 +29,30 @@ namespace dnndpmdetail {
 template <typename Id, typename FeatureElement, typename Distance,
           typename Allocator>
 struct data_core {
-  using id_type                  = Id;
-  using feature_element_type     = FeatureElement;
-  using distance_type            = Distance;
-  using allocator_type = Allocator;
-  using point_store_type = dndetail::point_store<id_type, feature_element_type,
-                                                 allocator_type>;
+  using id_type              = Id;
+  using feature_element_type = FeatureElement;
+  using distance_type        = Distance;
+  using allocator_type       = Allocator;
+  using point_store_type =
+      dndetail::point_store<id_type, feature_element_type, allocator_type>;
   using knn_index_type =
       dndetail::nn_index<id_type, distance_type, allocator_type>;
 
-  data_core(const saltatlas::distance::metric_id& _metric_id,
-            const uint64_t _rnd_seed, const bool _verbose,
+  data_core(const distance::metric_id _metric_id, const uint64_t _rnd_seed,
+            const bool           _verbose,
             const allocator_type allocator = allocator_type())
-      : metric_id(metric_id),
+      : metric_id(_metric_id),
         rnd_seed(_rnd_seed),
         verbose(_verbose),
         point_store(allocator),
         knn_index(allocator) {}
 
-  saltatlas::distance::metric_id metric_id;
-  uint64_t                       rnd_seed;
-  bool                           verbose;
-  point_store_type               point_store;
-  knn_index_type                 knn_index;
-  std::size_t                    index_k{0};
+  distance::metric_id metric_id;
+  uint64_t            rnd_seed;
+  bool                verbose;
+  point_store_type    point_store;
+  knn_index_type      knn_index;
+  std::size_t         index_k{0};
 };
 }  // namespace dnndpmdetail
 
@@ -115,6 +115,13 @@ class dnnd_pm {
   dnnd_pm(open_t, const std::string_view datastore_path, ygm::comm& comm)
       : m_comm(comm) {
     priv_open(datastore_path);
+    comm.cf_barrier();
+  }
+
+  dnnd_pm(open_read_only_t, const std::string_view datastore_path,
+          ygm::comm& comm)
+      : m_comm(comm) {
+    priv_open_read_only(datastore_path);
     comm.cf_barrier();
   }
 
@@ -215,6 +222,7 @@ class dnnd_pm {
     m_data_core = lmgr.construct<data_core_type>(metall::unique_instance)(
         distance::convert_to_metric_id(distance_metric_name), rnd_seed, verbose,
         lmgr.get_allocator());
+    assert(m_data_core);
   }
 
   void priv_open_metall(const std::string_view path) {
@@ -222,14 +230,22 @@ class dnnd_pm {
         metall::open_only, path.data(), MPI_COMM_WORLD);
   }
 
+  void priv_open(const std::string_view datastore_path) {
+    priv_open_metall(datastore_path);
+    auto& local_manager = m_metall->get_local_manager();
+    m_data_core =
+        local_manager.find<data_core_type>(metall::unique_instance).first;
+    assert(m_data_core);
+  }
+
   void priv_open_read_only_metall(const std::string_view path) {
     m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
         metall::open_read_only, path.data(), MPI_COMM_WORLD);
   }
 
-  void priv_open(const std::string_view datastore_path) {
-    priv_open_metall(datastore_path);
-    auto& local_manager = m_metall->get_local_manager();
+  void priv_open_read_only(const std::string_view datastore_path) {
+    priv_open_read_only_metall(datastore_path);
+    const auto& local_manager = m_metall->get_local_manager();
     m_data_core =
         local_manager.find<data_core_type>(metall::unique_instance).first;
     assert(m_data_core);

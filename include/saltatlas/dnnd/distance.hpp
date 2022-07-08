@@ -67,25 +67,25 @@ inline auto jaccard_index(const std::size_t len, const T *const f0,
 enum class metric_id : uint8_t { invalid, l2, cosine, jaccard };
 
 inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
-  if (metric_name == "l2")
+  if (metric_name == "l2") {
     return metric_id::l2;
-  else if (metric_name == "cosine")
+  } else if (metric_name == "cosine") {
     return metric_id::cosine;
-  else if (metric_name == "jaccard")
+  } else if (metric_name == "jaccard") {
     return metric_id::jaccard;
-
+  }
   return metric_id::invalid;
 }
 
 template <typename T>
 inline metric_type<T> &metric(const metric_id &id) {
-  if (id == metric_id::l2)
+  if (id == metric_id::l2) {
     return l2<T>;
-  else if (id == metric_id::cosine)
+  } else if (id == metric_id::cosine) {
     return cosine<T>;
-  else if (id == metric_id::jaccard)
+  } else if (id == metric_id::jaccard) {
     return jaccard_index<T>;
-
+  }
   return invalid<T>;
 }
 

@@ -64,14 +64,14 @@ int main(int argc, char **argv) {
       comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                    << std::endl;
 
-      comm.cout0() << "<<Index Optimization>>" << std::endl;
+      comm.cout0() << "\n<<Index Optimization>>" << std::endl;
       ygm::timer optimization_timer;
       dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
                           remove_long_paths);
       comm.cout0() << "\nIndex optimization took (s)\t"
                    << optimization_timer.elapsed() << std::endl;
     }
-    comm.cout0() << "\nThe index is ready for using." << std::endl;
+    comm.cout0() << "\nThe index is ready for query." << std::endl;
   }
   return 0;
 }
