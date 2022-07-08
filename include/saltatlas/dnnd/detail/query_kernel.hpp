@@ -42,11 +42,12 @@ class dknn_batch_query_kernel {
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
-  using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = saltatlas::distance::metric_type<featur_vector_type>;
-  using neighbor_type   = typename nn_index_type::neighbor_type;
+  using distance_metric =
+      saltatlas::distance::metric_type<feature_element_type>;
+  using neighbor_type = typename nn_index_type::neighbor_type;
 
+  // Store these data stores on DRAM
   using query_point_store_type = point_store<id_type, feature_element_type>;
   using knn_store_type =
       std::unordered_map<id_type, std::vector<neighbor_type>>;
@@ -197,7 +198,8 @@ class dknn_batch_query_kernel {
       assert(local_this->m_point_store.contains(trg_id));
       const auto& trg_feature =
           local_this->m_point_store.feature_vector(trg_id);
-      const auto d = local_this->m_distance_metric(query_feature, trg_feature);
+      const auto d = local_this->m_distance_metric(
+          query_feature.size(), query_feature.data(), trg_feature.data());
       if (d >= max_distance) return;
 
       local_this->comm().async(query_owner_rank, neighbor_updator{}, local_this,

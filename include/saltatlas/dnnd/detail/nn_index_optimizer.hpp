@@ -23,8 +23,9 @@ class nn_index_optimizer {
 
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = saltatlas::distance::metric_type<featur_vector_type>;
-  using neighbor_type   = typename nn_index_type::neighbor_type;
+  using distance_metric =
+      saltatlas::distance::metric_type<feature_element_type>;
+  using neighbor_type = typename nn_index_type::neighbor_type;
 
   struct option {
     std::size_t index_k{0};
@@ -221,16 +222,21 @@ class nn_index_optimizer {
     // send back the feature vector of targe_id to 'rank_to_return'.
     void operator()(self_pointer_type local_this, const id_type targe_id,
                     const int rank_to_return) {
-      local_this->m_comm.async(
-          rank_to_return, feature_vector_gather{}, local_this, targe_id,
-          local_this->m_point_store.feature_vector(targe_id));
+      const auto& f = local_this->m_point_store.feature_vector(targe_id);
+      const std::vector<feature_element_type> shipping_feature(f.begin(),
+                                                              f.end());
+      local_this->m_comm.async(rank_to_return, feature_vector_gather{},
+                               local_this, targe_id, shipping_feature);
     }
 
     // Second call,
     // store a received feature vector.
     void operator()(self_pointer_type local_this, const id_type targe_id,
-                    const featur_vector_type& feature) {
-      local_this->m_remote_point_store.feature_vector(targe_id) = feature;
+                    const std::vector<feature_element_type>& feature) {
+      auto& target_feature =
+          local_this->m_remote_point_store.feature_vector(targe_id);
+      target_feature.insert(target_feature.begin(), feature.begin(),
+                            feature.end());
     }
   };
 
@@ -249,9 +255,11 @@ class nn_index_optimizer {
         const auto  distance_to_src = neighbor.distance;
         bool        remove          = false;
         for (const auto& rn : retained_neighbors) {
+          const auto& rt_feature = m_remote_point_store.feature_vector(rn.id);
+          const auto& n_feature =
+              m_remote_point_store.feature_vector(neighbor.id);
           const auto distance_to_retained_neighbor = m_distance_metric(
-              m_remote_point_store.feature_vector(rn.id),
-              m_remote_point_store.feature_vector(neighbor.id));
+              rt_feature.size(), rt_feature.data(), n_feature.data());
           if (distance_to_src > distance_to_retained_neighbor) {
             remove = true;
             break;

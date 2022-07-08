@@ -292,6 +292,10 @@ if (SALTATLAS_USE_METALL)
     else ()
         message(STATUS ${PROJECT_NAME} " found Metall dependency: " ${Metall_INCLUDE_DIRS})
     endif ()
+
+    find_package(Threads REQUIRED)
+    target_include_directories(saltatlas INTERFACE ${Boost_INCLUDE_DIRS})
+    target_link_libraries(saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall)
 endif ()
 
 option(TEST_WITH_SLURM "Run tests with Slurm" OFF)

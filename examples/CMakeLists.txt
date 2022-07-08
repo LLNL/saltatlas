@@ -19,6 +19,8 @@ add_saltatlas_example(knn_dpockets_array_test)
 add_saltatlas_example(space_wrapper_example)
 add_saltatlas_example(saltatlas_example)
 add_saltatlas_example(dnnd_example)
+add_saltatlas_example(dnnd_pm_const_example)
+add_saltatlas_example(dnnd_pm_query_example)
 
 if (SALTATLAS_USE_HDF5)
     add_saltatlas_example(benchmark_hdf5)

@@ -6,13 +6,35 @@
 #pragma once
 
 #include <algorithm>
+
+#if __has_include(<metall/container/unordered_map.hpp>) \
+  && __has_include(<metall/container/vector.hpp>)
+#ifndef SALTATLAS_DNND_USE_METALL_CONTAINER
+#define SALTATLAS_DNND_USE_METALL_CONTAINER 1
+#endif
+#endif
+
+#if SALTATLAS_DNND_USE_METALL_CONTAINER
+#include <metall/container/unordered_map.hpp>
+#include <metall/container/vector.hpp>
+#else
 #include <unordered_map>
 #include <vector>
+#endif
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 
 namespace saltatlas::dndetail {
+
+namespace {
+namespace container =
+#if SALTATLAS_DNND_USE_METALL_CONTAINER
+    metall::container;
+#else
+    std;
+#endif
+}  // namespace
 
 template <typename IdType = uint64_t, typename DistanceType = double,
           typename Allocator = std::allocator<std::byte>>
@@ -25,9 +47,9 @@ class nn_index {
 
  private:
   using neighbor_list_type =
-      std::vector<neighbor_type,
-                  other_allocator<allocator_type, neighbor_type>>;
-  using point_table_type = std::unordered_map<
+      container::vector<neighbor_type,
+                        other_allocator<allocator_type, neighbor_type>>;
+  using point_table_type = container::unordered_map<
       id_type, neighbor_list_type, std::hash<id_type>, std::equal_to<>,
       other_scoped_allocator<allocator_type,
                              std::pair<const id_type, neighbor_list_type>>>;

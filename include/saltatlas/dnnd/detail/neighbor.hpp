@@ -7,13 +7,35 @@
 
 #include <cstdlib>
 #include <memory>
+
+#if __has_include(<metall/container/unordered_map.hpp>) \
+  && __has_include(<metall/container/queue.hpp>)
+#ifndef SALTATLAS_DNND_USE_METALL_CONTAINER
+#define SALTATLAS_DNND_USE_METALL_CONTAINER 1
+#endif
+#endif
+
+#if SALTATLAS_DNND_USE_METALL_CONTAINER
+#include <metall/container/priority_queue.hpp>
+#include <metall/container/unordered_map.hpp>
+#else
 #include <queue>
 #include <unordered_map>
+#endif
 
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::dndetail {
+
+namespace {
+namespace container =
+#if SALTATLAS_DNND_USE_METALL_CONTAINER
+    metall::container;
+#else
+    std;
+#endif
+}  // namespace
 
 template <typename Id = uint64_t, typename Distance = double>
 struct neighbor {
@@ -55,11 +77,11 @@ class unique_knn_heap {
   using nenghbor_type  = neighbor<id_type, distance_type>;
 
  private:
-  using heap_type = std::priority_queue<
+  using heap_type = container::priority_queue<
       nenghbor_type,
-      std::vector<nenghbor_type,
-                  other_allocator<allocator_type, nenghbor_type>>>;
-  using map_type = std::unordered_map<
+      container::vector<nenghbor_type,
+                        other_allocator<allocator_type, nenghbor_type>>>;
+  using map_type = container::unordered_map<
       id_type, value_type, std::hash<id_type>, std::equal_to<>,
       other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
 

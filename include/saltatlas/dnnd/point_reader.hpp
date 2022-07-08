@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ygm/comm.hpp"
@@ -33,7 +34,6 @@ void read_points_wsv(const std::vector<std::string>          &sorted_file_names,
                      ygm::comm                               &comm) {
   using point_store_type =
       point_store<id_type, feature_element_type, point_store_allocator_type>;
-  using feature_vec_type = typename point_store_type::feature_vector_type;
 
   std::size_t count_points = 0;
   const auto  range =
@@ -90,16 +90,18 @@ void read_points_wsv(const std::vector<std::string>          &sorted_file_names,
 
     std::string buf;
     while (std::getline(ifs, buf)) {
-      std::stringstream    ss(buf);
-      feature_element_type p;
-      feature_vec_type     feature;
+      std::stringstream                 ss(buf);
+      feature_element_type              p;
+      std::vector<feature_element_type> feature;
       while (ss >> p) {
         feature.push_back(p);
       }
 
       auto receiver = []([[maybe_unused]] auto pcomm, const id_type id,
-                         const auto &feature) {
-        ref_point_store.feature_vector(id) = feature;
+                         const auto &sent_feature) {
+        auto &feature = ref_point_store.feature_vector(id);
+        feature.insert(feature.begin(), sent_feature.begin(),
+                       sent_feature.end());
       };
       comm.async(id % comm.size(), receiver, id, feature);
       ++id;
@@ -122,7 +124,6 @@ void read_points_with_id(
     ygm::comm &comm) {
   using point_store_type =
       point_store<id_type, feature_element_type, point_store_allocator_type>;
-  using feature_vec_type = typename point_store_type::feature_vector_type;
 
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
   local_point_store.clear();
@@ -140,21 +141,23 @@ void read_points_with_id(
 
     std::string line_buf;
     while (std::getline(ifs, line_buf)) {
-      id_type          id{};
-      feature_vec_type feature{};
-      const auto       ret = converter(line_buf, &id, &feature);
+      id_type                           id{};
+      std::vector<feature_element_type> feature;
+      const auto ret = converter(line_buf, &id, &feature);
       if (!ret || feature.empty()) {
         std::cerr << "Invalid line " << line_buf << std::endl;
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
       }
 
       // Send to the corresponding rank
-      auto receiver = [](auto, const id_type id, const auto &feature) {
+      auto receiver = [](auto, const id_type id, const auto &sent_feature) {
         if (ref_point_store.contains(id)) {
           std::cerr << "Duplicate ID " << id << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        ref_point_store.feature_vector(id) = feature;
+        auto &feature = ref_point_store.feature_vector(id);
+        feature.insert(feature.begin(), sent_feature.begin(),
+                       sent_feature.end());
       };
       comm.async(id % comm.size(), receiver, id, feature);
     }
@@ -173,26 +176,22 @@ void read_points_with_id_and_delimiter(
     point_store<id_type, feature_element_type, point_store_allocator_type>
               &local_point_store,
     ygm::comm &comm) {
-  using point_store_type =
-      point_store<id_type, feature_element_type, point_store_allocator_type>;
-  using feature_vec_type = typename point_store_type::feature_vector_type;
-
-  static const auto converter = [delimiter](const std::string &input,
-                                            id_type           *id,
-                                            feature_vec_type  *feature) {
-    std::vector<std::string> result;
-    std::string              buf;
-    bool                     first = true;
-    feature->clear();
-    for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
-      if (first)
-        *id = str_cast<id_type>(buf);
-      else
-        feature->push_back(str_cast<feature_element_type>(buf));
-      first = false;
-    }
-    return true;
-  };
+  static const auto converter =
+      [delimiter](const std::string &input, id_type *id,
+                  std::vector<feature_element_type> *feature) {
+        std::vector<std::string> result;
+        std::string              buf;
+        bool                     first = true;
+        feature->clear();
+        for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
+          if (first)
+            *id = str_cast<id_type>(buf);
+          else
+            feature->push_back(str_cast<feature_element_type>(buf));
+          first = false;
+        }
+        return true;
+      };
 
   read_points_with_id(file_names, converter, local_point_store, comm);
 }
@@ -211,12 +210,8 @@ void read_points_whitespace_separated_with_id(
     point_store<id_type, feature_element_type, point_store_allocator_type>
               &local_point_store,
     ygm::comm &comm) {
-  using point_store_type =
-      point_store<id_type, feature_element_type, point_store_allocator_type>;
-  using feature_vec_type = typename point_store_type::feature_vector_type;
-
   static const auto converter = [](const std::string &input, id_type *id,
-                                   feature_vec_type *feature) {
+                                   std::vector<feature_element_type> *feature) {
     std::vector<std::string> result;
     std::string              buf;
     bool                     first = true;
@@ -239,9 +234,9 @@ void read_points_whitespace_separated_with_id(
 namespace saltatlas {
 template <typename id_type, typename feature_element_type,
           typename point_store_allocator_type>
-void read_points(
-    const std::vector<std::string> &point_file_names, const std::string &format,
-    const bool                                         verbose,
+inline void read_points(
+    const std::vector<std::string> &point_file_names,
+    const std::string_view &format, const bool verbose,
     dndetail::point_store<id_type, feature_element_type,
                           point_store_allocator_type> &local_point_store,
     ygm::comm                                         &comm) {

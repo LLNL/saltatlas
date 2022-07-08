@@ -54,7 +54,7 @@ class dnnd {
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
       : m_distance_metric(
-            distance::metric<feature_vector_type>(distance_metric_name)),
+            distance::metric<feature_element_type>(distance_metric_name)),
         m_point_file_names(point_file_names),
         m_point_file_format(point_file_format),
         m_comm(comm),
@@ -162,16 +162,19 @@ class dnnd {
   }
 
   void priv_allocate() {
-    if (!m_point_store) {
-      m_point_store = std::make_unique<point_store_type>();
+    if (m_point_store) {
+      m_point_store.reset(nullptr);
     }
-    if (!m_knn_index) {
-      m_knn_index = std::make_unique<knn_index_type>();
+    m_point_store = std::make_unique<point_store_type>();
+
+    if (m_knn_index) {
+      m_knn_index.reset(nullptr);
     }
+    m_knn_index = std::make_unique<knn_index_type>();
   }
 
   void priv_dump_index_distributed_file(const knn_index_type& knn_index,
-                                        const std::string& out_file_prefix) {
+                                        const std::string&    out_file_prefix) {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();
     std::ofstream ofs(file_name.str());
@@ -206,15 +209,15 @@ class dnnd {
     m_comm.cf_barrier();
   }
 
-  const distance::metric_type<feature_vector_type>& m_distance_metric;
-  const std::vector<std::string>                    m_point_file_names;
-  const std::string                                 m_point_file_format;
-  ygm::comm&                                        m_comm;
-  uint64_t                                          m_rnd_seed;
-  bool                                              m_verbose;
-  std::unique_ptr<point_store_type>                 m_point_store;
-  std::unique_ptr<knn_index_type>                   m_knn_index;
-  std::size_t                                       m_index_k{0};
+  const distance::metric_type<feature_element_type>& m_distance_metric;
+  const std::vector<std::string>                     m_point_file_names;
+  const std::string                                  m_point_file_format;
+  ygm::comm&                                         m_comm;
+  uint64_t                                           m_rnd_seed;
+  bool                                               m_verbose;
+  std::unique_ptr<point_store_type>                  m_point_store;
+  std::unique_ptr<knn_index_type>                    m_knn_index;
+  std::size_t                                        m_index_k{0};
 };
 
 }  // namespace saltatlas

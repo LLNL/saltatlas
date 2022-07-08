@@ -38,15 +38,16 @@ namespace saltatlas::dndetail {
 template <typename PointStore, typename Distance>
 class dnnd_kernel {
  public:
-  using id_type       = typename PointStore::id_type;
-  using distance_type = Distance;
+  using id_type              = typename PointStore::id_type;
+  using distance_type        = Distance;
+  using feature_element_type = typename PointStore::feature_element_type;
   // Redefine point store type so that autocompletion works when writing code.
-  using point_store_type =
-      point_store<id_type, typename PointStore::feature_element_type,
-                  typename PointStore::allocator_type>;
+  using point_store_type   = point_store<id_type, feature_element_type,
+                                       typename PointStore::allocator_type>;
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = saltatlas::distance::metric_type<featur_vector_type>;
+  using distance_metric =
+      saltatlas::distance::metric_type<feature_element_type>;
 
   struct option {
     int         k{4};
@@ -171,8 +172,9 @@ class dnnd_kernel {
     assert(m_option.k < m_global_max_id);
 
     for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
-      const auto  sid            = itr->first;
-      const auto& feature_vector = itr->second;
+      const auto                              sid     = itr->first;
+      const auto&                             feature = itr->second;
+      const std::vector<feature_element_type> tmp_feature(feature.begin(), feature.end());
 
       std::unordered_set<id_type> unique_table;
       while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?
@@ -183,7 +185,7 @@ class dnnd_kernel {
         }
         unique_table.insert(nid);
         m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
-                     sid, nid, feature_vector);
+                     sid, nid, tmp_feature);
       }
     }
     m_comm.barrier();
@@ -193,12 +195,13 @@ class dnnd_kernel {
     // Calculate the distance between sid and nid on the rank nid is assigned.
     // Then, send back the calculated distance value to sid.
     void operator()(ygm::ygm_ptr<self_type> local_this, const id_type sid,
-                    const id_type             nid,
-                    const featur_vector_type& src_feature_vec) {
+                    const id_type                            nid,
+                    const std::vector<feature_element_type>& src_feature_vec) {
       const auto& nbr_feature_vec =
           local_this->m_point_store.feature_vector(nid);
-      const auto d =
-          local_this->m_distance_function(src_feature_vec, nbr_feature_vec);
+      const auto d = local_this->m_distance_function(src_feature_vec.size(),
+                                                     src_feature_vec.data(),
+                                                     nbr_feature_vec.data());
       local_this->comm().async(local_this->m_point_partitioner(sid),
                                distance_calculator{}, local_this, sid, nid, d);
     }
@@ -449,11 +452,13 @@ class dnnd_kernel {
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
       ++local_this->m_num_feature_msgs;
 #endif
+      std::vector<feature_element_type> f(
+          local_this->m_point_store.feature_vector(u1).begin(),
+          local_this->m_point_store.feature_vector(u1).end());
       local_this->comm().async(local_this->m_point_partitioner(u2),
-                               neighbor_updater{}, local_this, u1, u2,
-                               local_this->m_point_store.feature_vector(u1)
+                               neighbor_updater{}, local_this, u1, u2, f
 #if SALTATLAS_DNND_PRUNE_LONG_DISTANCE_MSGS
-                                   ,
+                               ,
                                max_distance
 #endif
       );
@@ -462,8 +467,9 @@ class dnnd_kernel {
     // 2nd call.
     // Update u2's knn heap and sends the computed distance to u1, if needed.
     void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
-                    const id_type u2, const featur_vector_type& u1_feature,
-                    const distance_type& u1_max_distance =
+                    const id_type                            u2,
+                    const std::vector<feature_element_type>& u1_feature,
+                    const distance_type&                     u1_max_distance =
                         std::numeric_limits<distance_type>::max()) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u2);
 
@@ -474,7 +480,8 @@ class dnnd_kernel {
       // Update u2's heap (nearest neighbors list) if 'u1' is closer than the
       // current neighbors.
       const auto& u2_feature = local_this->m_point_store.feature_vector(u2);
-      const auto  d = local_this->m_distance_function(u1_feature, u2_feature);
+      const auto  d          = local_this->m_distance_function(
+                    u1_feature.size(), u1_feature.data(), u2_feature.data());
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
 
       if (d < u1_max_distance) {
