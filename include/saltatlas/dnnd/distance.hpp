@@ -11,7 +11,7 @@
 
 #include <saltatlas/dnnd/detail/utilities/blas.hpp>
 
-namespace saltatlas::distance {
+namespace saltatlas::dndetail::distance {
 template <typename feature_vector_type>
 using metric_type = std::remove_cv_t<typename feature_vector_type::value_type>(
     const feature_vector_type &, const feature_vector_type &);
@@ -89,4 +89,4 @@ inline const metric_type<feature_vector_type> &metric(
 
   return invalid<feature_vector_type>;
 }
-}  // namespace saltatlas::distance
+}  // namespace saltatlas::dndetail::distance

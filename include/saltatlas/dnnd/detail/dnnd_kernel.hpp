@@ -46,7 +46,7 @@ class dnnd_kernel {
                   typename PointStore::allocator_type>;
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = saltatlas::distance::metric_type<featur_vector_type>;
+  using distance_metric    = distance::metric_type<featur_vector_type>;
 
   struct option {
     int         k{4};
