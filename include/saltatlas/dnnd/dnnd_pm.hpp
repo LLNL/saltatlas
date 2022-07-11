@@ -26,6 +26,11 @@
 namespace saltatlas {
 
 namespace dnndpmdetail {
+/// \brief The class the holds member variables of dnnd_pm that are stored in Metall datastore.
+/// \tparam Id Point ID type.
+/// \tparam FeatureElement Feature Vector's element type.
+/// \tparam Distance Distance type.
+/// \tparam Allocator Allocator type.
 template <typename Id, typename FeatureElement, typename Distance,
           typename Allocator>
 struct data_core {
@@ -103,6 +108,13 @@ class dnnd_pm {
       typename query_kernel_type::query_point_store_type;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
+  /// \brief Constructor. Create a new persistent index.
+  /// \param datastore_path Path to store data.
+  /// It is not allowed to contain another index at the path.
+  /// \param distance_metric_name Distance metric name.
+  /// \param comm YGM comm instance.
+  /// \param rnd_seed Seed for random generators.
+  /// \param verbose If true, enable the verbose mode.
   dnnd_pm(create_t, const std::string_view datastore_path,
           const std::string_view distance_metric_name, ygm::comm& comm,
           const uint64_t rnd_seed = std::random_device{}(),
@@ -112,12 +124,18 @@ class dnnd_pm {
     comm.cf_barrier();
   }
 
+  /// \brief Constructor. Opens an already stored index.
+  /// \param datastore_path Path to existing index.
+  /// \param comm YGM comm instance.
   dnnd_pm(open_t, const std::string_view datastore_path, ygm::comm& comm)
       : m_comm(comm) {
     priv_open(datastore_path);
     comm.cf_barrier();
   }
 
+  /// \brief Constructor. Opens an already stored index with the read-only mode.
+  /// \param datastore_path Path to existing index.
+  /// \param comm YGM comm instance.
   dnnd_pm(open_read_only_t, const std::string_view datastore_path,
           ygm::comm& comm)
       : m_comm(comm) {
