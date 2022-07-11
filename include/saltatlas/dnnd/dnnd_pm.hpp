@@ -25,12 +25,11 @@
 
 namespace saltatlas {
 
-namespace dnndpmdetail {
-/// \brief The class the holds member variables of dnnd_pm that are stored in Metall datastore.
-/// \tparam Id Point ID type.
-/// \tparam FeatureElement Feature Vector's element type.
-/// \tparam Distance Distance type.
-/// \tparam Allocator Allocator type.
+namespace dnpmdetail {
+/// \brief The class the holds member variables of dnnd_pm that are stored in
+/// Metall datastore. \tparam Id Point ID type. \tparam FeatureElement Feature
+/// Vector's element type. \tparam Distance Distance type. \tparam Allocator
+/// Allocator type.
 template <typename Id, typename FeatureElement, typename Distance,
           typename Allocator>
 struct data_core {
@@ -43,8 +42,8 @@ struct data_core {
   using knn_index_type =
       dndetail::nn_index<id_type, distance_type, allocator_type>;
 
-  data_core(const distance::metric_id _metric_id, const uint64_t _rnd_seed,
-            const bool           _verbose,
+  data_core(const dndetail::distance::metric_id _metric_id,
+            const uint64_t _rnd_seed, const bool _verbose,
             const allocator_type allocator = allocator_type())
       : metric_id(_metric_id),
         rnd_seed(_rnd_seed),
@@ -52,22 +51,22 @@ struct data_core {
         point_store(allocator),
         knn_index(allocator) {}
 
-  distance::metric_id metric_id;
-  uint64_t            rnd_seed;
-  bool                verbose;
-  point_store_type    point_store;
-  knn_index_type      knn_index;
-  std::size_t         index_k{0};
+  dndetail::distance::metric_id metric_id;
+  uint64_t                      rnd_seed;
+  bool                          verbose;
+  point_store_type              point_store;
+  knn_index_type                knn_index;
+  std::size_t                   index_k{0};
 };
-}  // namespace dnndpmdetail
+}  // namespace dnpmdetail
 
 template <typename Id = uint64_t, typename FeatureElement = double,
           typename Distance = double>
 class dnnd_pm {
  private:
   using data_core_type =
-      dnndpmdetail::data_core<Id, FeatureElement, Distance,
-                              metall::manager::allocator_type<std::byte>>;
+      dnpmdetail::data_core<Id, FeatureElement, Distance,
+                            metall::manager::allocator_type<std::byte>>;
 
  public:
   using id_type              = typename data_core_type::id_type;
@@ -166,9 +165,11 @@ class dnnd_pm {
         .rnd_seed                   = m_data_core->rnd_seed,
         .verbose                    = m_data_core->verbose};
 
-    nn_kernel_type kernel(
-        option, m_data_core->point_store, priv_get_point_partitioner(),
-        distance::metric<feature_element_type>(m_data_core->metric_id), m_comm);
+    nn_kernel_type kernel(option, m_data_core->point_store,
+                          priv_get_point_partitioner(),
+                          dndetail::distance::metric<feature_element_type>(
+                              m_data_core->metric_id),
+                          m_comm);
     kernel.construct(m_data_core->knn_index);
     m_data_core->index_k = k;
   }
@@ -195,7 +196,8 @@ class dnnd_pm {
         opt,
         m_data_core->point_store,
         priv_get_point_partitioner(),
-        distance::metric<feature_element_type>(m_data_core->metric_id),
+        dndetail::distance::metric<feature_element_type>(
+            m_data_core->metric_id),
         m_data_core->knn_index,
         m_comm};
     optimizer.run();
@@ -215,10 +217,11 @@ class dnnd_pm {
                                               .rnd_seed = m_data_core->rnd_seed,
                                               .verbose  = m_data_core->verbose};
 
-    query_kernel_type kernel(
-        option, m_data_core->point_store, priv_get_point_partitioner(),
-        distance::metric<feature_element_type>(m_data_core->metric_id),
-        m_data_core->knn_index, m_comm);
+    query_kernel_type kernel(option, m_data_core->point_store,
+                             priv_get_point_partitioner(),
+                             dndetail::distance::metric<feature_element_type>(
+                                 m_data_core->metric_id),
+                             m_data_core->knn_index, m_comm);
 
     query_result_store_type query_result;
     kernel.query_batch(query_point_store, query_result);
@@ -238,8 +241,8 @@ class dnnd_pm {
     priv_create_metall(path);
     auto& lmgr  = m_metall->get_local_manager();
     m_data_core = lmgr.construct<data_core_type>(metall::unique_instance)(
-        distance::convert_to_metric_id(distance_metric_name), rnd_seed, verbose,
-        lmgr.get_allocator());
+        dndetail::distance::convert_to_metric_id(distance_metric_name),
+        rnd_seed, verbose, lmgr.get_allocator());
     assert(m_data_core);
   }
 

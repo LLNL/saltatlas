@@ -11,7 +11,7 @@
 
 #include <saltatlas/dnnd/detail/utilities/blas.hpp>
 
-namespace saltatlas::distance {
+namespace saltatlas::dndetail::distance {
 template <typename T>
 using metric_type = T(const std::size_t, const T *const, const T *const);
 
@@ -93,4 +93,4 @@ template <typename T>
 inline metric_type<T> &metric(const std::string_view metric_name) {
   return metric<T>(convert_to_metric_id(metric_name));
 }
-}  // namespace saltatlas::distance
+}  // namespace saltatlas::dndetail::distance

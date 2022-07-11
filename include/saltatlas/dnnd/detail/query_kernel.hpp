@@ -43,8 +43,7 @@ class dknn_batch_query_kernel {
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric =
-      saltatlas::distance::metric_type<feature_element_type>;
+  using distance_metric = distance::metric_type<feature_element_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   // Store these data stores on DRAM

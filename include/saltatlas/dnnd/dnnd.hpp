@@ -53,8 +53,8 @@ class dnnd {
        const std::string_view point_file_format, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : m_distance_metric(
-            distance::metric<feature_element_type>(distance_metric_name)),
+      : m_distance_metric(dndetail::distance::metric<feature_element_type>(
+            distance_metric_name)),
         m_point_file_names(point_file_names),
         m_point_file_format(point_file_format),
         m_comm(comm),
@@ -209,7 +209,7 @@ class dnnd {
     m_comm.cf_barrier();
   }
 
-  const distance::metric_type<feature_element_type>& m_distance_metric;
+  const dndetail::distance::metric_type<feature_element_type>& m_distance_metric;
   const std::vector<std::string>                     m_point_file_names;
   const std::string                                  m_point_file_format;
   ygm::comm&                                         m_comm;

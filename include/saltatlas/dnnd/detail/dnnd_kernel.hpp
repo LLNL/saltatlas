@@ -46,8 +46,7 @@ class dnnd_kernel {
                                        typename PointStore::allocator_type>;
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric =
-      saltatlas::distance::metric_type<feature_element_type>;
+  using distance_metric    = distance::metric_type<feature_element_type>;
 
   struct option {
     int         k{4};
@@ -174,7 +173,8 @@ class dnnd_kernel {
     for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
       const auto                              sid     = itr->first;
       const auto&                             feature = itr->second;
-      const std::vector<feature_element_type> tmp_feature(feature.begin(), feature.end());
+      const std::vector<feature_element_type> tmp_feature(feature.begin(),
+                                                          feature.end());
 
       std::unordered_set<id_type> unique_table;
       while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?

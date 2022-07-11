@@ -23,8 +23,7 @@ class nn_index_optimizer {
 
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric =
-      saltatlas::distance::metric_type<feature_element_type>;
+  using distance_metric = distance::metric_type<feature_element_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   struct option {
