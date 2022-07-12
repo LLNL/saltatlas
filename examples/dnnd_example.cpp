@@ -112,7 +112,6 @@ int main(int argc, char **argv) {
         const auto all_query_result =
             gather_query_result<neighbor_type>(query_result, comm);
         if (!ground_truth_neighbor_ids_file_name.empty() && comm.rank0()) {
-          comm.cout0() << "\nCalculate accuracy (%)" << std::endl;
           const auto ground_truth_neighbors =
               read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
           show_accuracy(ground_truth_neighbors, all_query_result);

@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
       const auto query_result =
           dnnd.query_batch(query_points, query_k, batch_size);
       comm.cf_barrier();
-      comm.cout0() << "\nProcessing the queries took (s)\t" << step_timer.elapsed()
+      comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
                    << std::endl;
 
       if (!ground_truth_neighbor_ids_file_name.empty() ||
@@ -65,14 +65,13 @@ int main(int argc, char **argv) {
         const auto all_query_result =
             gather_query_result<neighbor_type>(query_result, comm);
         if (!ground_truth_neighbor_ids_file_name.empty() && comm.rank0()) {
-          comm.cout0() << "\nCalculating accuracy (%)" << std::endl;
           const auto ground_truth_neighbors =
               read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
           show_accuracy(ground_truth_neighbors, all_query_result);
         }
 
         if (!query_result_file_name.empty()) {
-          comm.cout0() << "\nDumping the query results" << std::endl;
+          comm.cout0() << "\nDumping query results" << std::endl;
           dump_query_result(all_query_result, query_result_file_name, comm);
         }
       }

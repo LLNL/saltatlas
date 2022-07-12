@@ -19,7 +19,7 @@
 
 /// \brief Reads a file that contain queries.
 /// Each line is the feature vector of a query point.
-/// Can read the white space separated format.
+/// Can read the white space separated format (without ID).
 template <typename dnnd_type>
 inline void read_query(
     const std::string                          &query_file,
@@ -48,7 +48,7 @@ inline void read_query(
   }
 }
 
-/// \brief Gather query result to the root process.
+/// \brief Gather query results to the root rank.
 template <typename neighbor_type, typename query_result_store_type>
 inline std::vector<std::vector<neighbor_type>> gather_query_result(
     const query_result_store_type &local_result, ygm::comm &comm) {
@@ -79,8 +79,8 @@ inline std::vector<std::vector<neighbor_type>> gather_query_result(
 }
 
 /// \brief Read a file that contain a list of nearest neighbor IDs.
-/// Each line is the nearest neighbor IDs a point.
-/// Can read the white space separated format.
+/// Each line is the nearest neighbor IDs of a point.
+/// Can read the white space separated format (no source point IDs).
 template <typename id_type>
 inline std::vector<std::vector<id_type>> read_neighbor_ids(
     const std::string &neighbors_file) {
@@ -108,14 +108,14 @@ inline std::vector<std::vector<id_type>> read_neighbor_ids(
 /// \brief Calculate and show accuracy
 template <typename id_type, typename neighbor_type>
 inline void show_accuracy(
-    const std::vector<std::vector<id_type>>       &ground_truth_result,
+    const std::vector<std::vector<id_type>>       &ground_truth,
     const std::vector<std::vector<neighbor_type>> &test_result) {
-  assert(ground_truth_result.size() == test_result.size());
+  assert(ground_truth.size() == test_result.size());
 
   std::vector<double> accuracies;
   for (std::size_t i = 0; i < test_result.size(); ++i) {
     std::unordered_set<id_type> true_set;
-    for (const auto &n : ground_truth_result[i]) true_set.insert(n);
+    for (const auto &n : ground_truth[i]) true_set.insert(n);
 
     std::size_t num_corrects = 0;
     for (const auto &n : test_result[i]) {
