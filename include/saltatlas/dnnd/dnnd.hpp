@@ -19,7 +19,6 @@
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
 #include <saltatlas/dnnd/distance.hpp>
-#include "point_reader.hpp"
 
 namespace saltatlas {
 
@@ -66,6 +65,14 @@ class dnnd {
         m_rnd_seed(rnd_seed),
         m_verbose(verbose) {}
 
+  /// \brief Return a reference to the point store instance.
+  /// \return  A reference to the point store instance.
+  point_store_type& get_point_store() { return m_point_store; }
+
+  /// \brief Return a reference to the point store instance.
+  /// \return  A reference to the point store instance.
+  point_store_type& get_point_store() const { return m_point_store; }
+
   /// \brief Construct an k-NN index.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
@@ -73,13 +80,9 @@ class dnnd {
   /// \param exchange_reverse_neighbors If true is specified, exchange reverse
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
-  void construct_index(const std::vector<std::string>& point_file_names,
-                       const std::string_view point_file_format, const int k,
-                       const double r, const double delta,
+  void construct_index(const int k, const double r, const double delta,
                        const bool        exchange_reverse_neighbors,
                        const std::size_t mini_batch_size) {
-    priv_read_points(point_file_names, point_file_format);
-
     typename nn_kernel_type::option option{
         .k                          = k,
         .r                          = r,
@@ -89,9 +92,9 @@ class dnnd {
         .rnd_seed                   = m_rnd_seed,
         .verbose                    = m_verbose};
 
-    nn_kernel_type kernel(option, *m_point_store, priv_get_point_partitioner(),
+    nn_kernel_type kernel(option, m_point_store, priv_get_point_partitioner(),
                           m_distance_metric, m_comm);
-    kernel.construct(*m_knn_index);
+    kernel.construct(m_knn_index);
     m_index_k = k;
   }
 
@@ -105,7 +108,7 @@ class dnnd {
   void optimize_index(const bool   make_index_undirected     = false,
                       const double pruning_degree_multiplier = 1.5,
                       const bool   remove_long_paths         = false) {
-    if (!m_knn_index) {
+    if (m_knn_index.empty()) {
       m_comm.cerr0() << "The source index is empty." << std::endl;
       return;
     }
@@ -117,10 +120,10 @@ class dnnd {
         .remove_long_paths         = remove_long_paths,
         .verbose                   = m_verbose};
     nn_index_optimizer_type optimizer{opt,
-                                      *m_point_store,
+                                      m_point_store,
                                       priv_get_point_partitioner(),
                                       m_distance_metric,
-                                      *m_knn_index,
+                                      m_knn_index,
                                       m_comm};
     optimizer.run();
   }
@@ -139,9 +142,9 @@ class dnnd {
                                               .rnd_seed   = m_rnd_seed,
                                               .verbose    = m_verbose};
 
-    query_kernel_type kernel(option, *m_point_store,
+    query_kernel_type kernel(option, m_point_store,
                              priv_get_point_partitioner(), m_distance_metric,
-                             *m_knn_index, m_comm);
+                             m_knn_index, m_comm);
 
     query_result_store_type query_result;
     kernel.query_batch(query_point_store, query_result);
@@ -152,7 +155,7 @@ class dnnd {
   /// \brief Dump the k-NN index to files.
   /// \param out_file_prefix File path prefix.
   void dump_index(const std::string& out_file_prefix) {
-    priv_dump_index_distributed_file(*m_knn_index, out_file_prefix);
+    priv_dump_index_distributed_file(m_knn_index, out_file_prefix);
   }
 
  private:
@@ -163,22 +166,9 @@ class dnnd {
 
   void priv_read_points(const std::vector<std::string>& point_file_names,
                         const std::string_view          point_file_format) {
-    priv_allocate();
-    m_point_store->clear();
-    read_points(point_file_names, point_file_format, m_verbose, *m_point_store,
+    m_point_store.clear();
+    read_points(point_file_names, point_file_format, m_verbose, m_point_store,
                 m_comm);
-  }
-
-  void priv_allocate() {
-    if (m_point_store) {
-      m_point_store.reset(nullptr);
-    }
-    m_point_store = std::make_unique<point_store_type>();
-
-    if (m_knn_index) {
-      m_knn_index.reset(nullptr);
-    }
-    m_knn_index = std::make_unique<knn_index_type>();
   }
 
   void priv_dump_index_distributed_file(const knn_index_type& knn_index,
@@ -218,13 +208,13 @@ class dnnd {
   }
 
   const dndetail::distance::metric_type<feature_element_type>&
-                                    m_distance_metric;
-  ygm::comm&                        m_comm;
-  uint64_t                          m_rnd_seed;
-  bool                              m_verbose;
-  std::unique_ptr<point_store_type> m_point_store;
-  std::unique_ptr<knn_index_type>   m_knn_index;
-  std::size_t                       m_index_k{0};
+                   m_distance_metric;
+  ygm::comm&       m_comm;
+  uint64_t         m_rnd_seed{123};
+  bool             m_verbose{false};
+  point_store_type m_point_store{};
+  knn_index_type   m_knn_index{};
+  std::size_t      m_index_k{0};
 };
 
 }  // namespace saltatlas

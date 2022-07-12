@@ -21,7 +21,6 @@
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
 #include <saltatlas/dnnd/distance.hpp>
-#include "point_reader.hpp"
 
 namespace saltatlas {
 
@@ -148,6 +147,14 @@ class dnnd_pm {
     comm.cf_barrier();
   }
 
+  /// \brief Return a reference to the point store instance.
+  /// \return  A reference to the point store instance.
+  point_store_type& get_point_store() { return m_data_core->point_store; }
+
+  /// \brief Return a reference to the point store instance.
+  /// \return  A reference to the point store instance.
+  point_store_type& get_point_store() const { return m_data_core->point_store; }
+
   /// \brief Construct an k-NN index.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
@@ -155,13 +162,9 @@ class dnnd_pm {
   /// \param exchange_reverse_neighbors If true is specified, exchange reverse
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
-  void construct_index(const std::vector<std::string>& point_file_names,
-                       const std::string_view point_file_format, const int k,
-                       const double r, const double delta,
+  void construct_index(const int k, const double r, const double delta,
                        const bool        exchange_reverse_neighbors,
                        const std::size_t mini_batch_size) {
-    priv_read_points(point_file_names, point_file_format);
-
     typename nn_kernel_type::option option{
         .k                          = k,
         .r                          = r,
@@ -235,6 +238,30 @@ class dnnd_pm {
     return query_result;
   }
 
+  /// \brief Takes a snapshot.
+  /// \param destination_path Destination path.
+  /// \return Returns true on success; otherwise, false.
+  bool snapshot(const std::string_view& destination_path) {
+    return m_metall->snapshot(destination_path.data());
+  }
+
+  /// \brief Copies a datastore.
+  /// \param source_path Source data store path.
+  /// \param destination_path Destination data store path.
+  /// \return Returns true on success; otherwise, false.
+  static bool copy(const std::string_view& source_path,
+                       const std::string_view& destination_path) {
+    return metall::utility::metall_mpi_adaptor::copy(source_path.data(),
+                                                     destination_path.data());
+  }
+
+  /// \brief Removes a datastore.
+  /// \param datastore_path Datastore path.
+  /// \return Returns true on success; otherwise, false.
+  static bool remove(const std::string_view& datastore_path) {
+    return metall::utility::metall_mpi_adaptor::remove(datastore_path.data());
+  }
+
  private:
   void priv_create_metall(const std::string_view path) {
     m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
@@ -281,12 +308,6 @@ class dnnd_pm {
   auto priv_get_point_partitioner() const {
     const int size = m_comm.size();
     return [size](const id_type& id) { return id % size; };
-  }
-
-  void priv_read_points(const std::vector<std::string>& point_file_names,
-                        const std::string_view          point_file_format) {
-    read_points(point_file_names, point_file_format, m_data_core->verbose,
-                m_data_core->point_store, m_comm);
   }
 
   ygm::comm&                                           m_comm;

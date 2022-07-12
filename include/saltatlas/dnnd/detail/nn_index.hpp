@@ -123,6 +123,8 @@ class nn_index {
 
   allocator_type get_allocator() const { return m_index.get_allocator(); }
 
+  bool empty() const { return m_index.empty(); }
+
  private:
   point_table_type m_index;
 };

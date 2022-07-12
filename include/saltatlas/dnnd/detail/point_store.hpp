@@ -51,35 +51,69 @@ class point_store {
                              std::pair<const id_type, feature_vector_type>>>;
 
  public:
-  explicit point_store(const allocator_type& allocator = allocator_type{})
+  using iterator       = typename point_table_type::iterator;
+  using const_iterator = typename point_table_type::const_iterator;
+
+ public:
+
+  /// \brief Constructor.
+  /// \param allocator Allocator instance.
+  explicit point_store(const allocator_type &allocator = allocator_type{})
       : m_point_table(allocator) {}
 
+  /// \brief Checks if a point is contained.
+  /// \param id Point ID.
+  /// \return Returns true if point with 'id' is contained; otherwise, returns
+  /// false.
   bool contains(const id_type &id) const { return m_point_table.count(id); }
 
+  /// \brief Returns the number of points contained.
+  /// \return The number of points contained.
   std::size_t size() const { return m_point_table.size(); }
 
+  /// \brief Returns the feature vector of point 'id'.
+  /// A new instance is allocated if the corresponding item does not exist.
+  /// \param id Point ID.
+  /// \return The feature vector of point 'id'.
   feature_vector_type &feature_vector(const id_type &id) {
     m_max_id = std::max(id, m_max_id);
     return m_point_table[id];
   }
 
+  /// \brief Returns the feature vector of point 'id'. Const version.
+  /// \param id Point ID.
+  /// \return The feature vector of point 'id'.
   const feature_vector_type &feature_vector(const id_type &id) const {
     assert(m_point_table.count(id) > 0);
     return m_point_table.at(id);
   }
 
-  auto begin() { return m_point_table.begin(); }
+  /// \brief Returns an iterator that points the first element.
+  /// \return An iterator that points the first element.
+  iterator begin() { return m_point_table.begin(); }
 
-  auto end() { return m_point_table.end(); }
+  /// \brief Returns an iterator that points the next element of the last one.
+  /// \return An iterator that points the next element of the last one.
+  iterator end() { return m_point_table.end(); }
 
-  auto begin() const { return m_point_table.begin(); }
+  /// \brief Returns an iterator that points the first element. Const version.
+  /// \return An iterator that points the first element.
+  const_iterator begin() const { return m_point_table.begin(); }
 
-  auto end() const { return m_point_table.end(); }
+  /// \brief Returns an iterator that points the next element of the last one.
+  /// Const version.
+  /// \return An iterator that points the next element of the last one.
+  const_iterator end() const { return m_point_table.end(); }
 
+  /// \brief Clear contents.
   void clear() { m_point_table.clear(); }
 
+  /// \brief Reserve internal storage to hold 'n' elements.
+  /// \param n Reservation size.
   void reserve(const std::size_t n) { m_point_table.reserve(n); }
 
+  /// \brief Returns the max point ID.
+  /// \return Max point ID.
   id_type max_id() const { return m_max_id; }
 
  private:

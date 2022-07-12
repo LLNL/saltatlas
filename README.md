@@ -234,6 +234,7 @@ Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
     Each point keeps up to 'k' x 'm' nearest neighbors.****
 -l  If specified, remove long paths before the query.
 -b [long int] Batch size (0 is full batch mode).
+-x [string] If specified, transfer index to this path at the end.
 -v  If specified, turn on the verbose mode.
 [string, required] List of input point files at the end. 
 ```
@@ -248,6 +249,7 @@ Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
 -b [long int] Batch size (0 is full batch mode).
 -g [string] Path to a query ground truth file.
 -o [string] Path to store query results.
+-x [string] If specified, transfer an already constructed index from this path to path 'z' at the begining.
 ```
 
 

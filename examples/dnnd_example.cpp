@@ -12,6 +12,7 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/dnnd.hpp>
+#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 using id_type              = uint32_t;
@@ -64,10 +65,19 @@ int main(int argc, char **argv) {
     comm.cf_barrier();
 
     {
+      comm.cout0() << "<<Read Points>>" << std::endl;
+      ygm::timer step_timer;
+      saltatlas::read_points(point_file_names, point_file_format, verbose,
+                             dnnd.get_point_store(), comm);
+      comm.cout0() << "\nReading points took (s)\t" << step_timer.elapsed()
+                   << std::endl;
+    }
+
+    {
       comm.cout0() << "<<Index Construction>>" << std::endl;
       ygm::timer step_timer;
-      dnnd.construct_index(point_file_names, point_file_format, index_k, r,
-                           delta, exchange_reverse_neighbors, batch_size);
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size);
       comm.cf_barrier();
       comm.cout0() << "\nIndex construction took (s)\t" << step_timer.elapsed()
                    << std::endl;

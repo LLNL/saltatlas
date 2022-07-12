@@ -12,6 +12,7 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/dnnd_pm.hpp>
+#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 using id_type              = uint32_t;
@@ -27,7 +28,8 @@ void parse_options(int argc, char **argv, int &index_k, double &r,
                    std::size_t &batch_size, std::string &distance_metric_name,
                    std::vector<std::string> &point_file_names,
                    std::string &point_file_format, std::string &datastore_path,
-                   bool   &make_index_undirected,
+                   std::string &datastore_transfer_path,
+                   bool        &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
                    bool &verbose);
 
@@ -43,6 +45,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> point_file_names;
     std::string              point_file_format;
     std::string              datastore_path;
+    std::string              datastore_transfer_path;
     bool                     make_index_undirected{false};
     double                   pruning_degree_multiplier{1.5};
     bool                     remove_long_paths{false};
@@ -50,17 +53,25 @@ int main(int argc, char **argv) {
 
     parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
                   batch_size, distance_metric_name, point_file_names,
-                  point_file_format, datastore_path, make_index_undirected,
-                  pruning_degree_multiplier, remove_long_paths, verbose);
+                  point_file_format, datastore_path, datastore_transfer_path,
+                  make_index_undirected, pruning_degree_multiplier,
+                  remove_long_paths, verbose);
 
     {
       dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
                      comm, std::random_device{}(), verbose);
 
+      comm.cout0() << "<<Read Points>>" << std::endl;
+      ygm::timer point_read_timer;
+      saltatlas::read_points(point_file_names, point_file_format, verbose,
+                             dnnd.get_point_store(), comm);
+      comm.cout0() << "\nReading points took (s)\t"
+                   << point_read_timer.elapsed() << std::endl;
+
       comm.cout0() << "<<Index Construction>>" << std::endl;
       ygm::timer const_timer;
-      dnnd.construct_index(point_file_names, point_file_format, index_k, r,
-                           delta, exchange_reverse_neighbors, batch_size);
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size);
       comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                    << std::endl;
 
@@ -72,7 +83,16 @@ int main(int argc, char **argv) {
                    << optimization_timer.elapsed() << std::endl;
     }
     comm.cout0() << "\nThe index is ready for query." << std::endl;
+
+    if (!datastore_transfer_path.empty()) {
+      if (dnnd_type::copy(datastore_path, datastore_transfer_path)) {
+        comm.cout0() << "\nTransferred index data store." << std::endl;
+      } else {
+        comm.cerr0() << "\nFailed to transfer index." << std::endl;
+      }
+    }
   }
+
   return 0;
 }
 
@@ -81,17 +101,19 @@ inline void parse_options(
     bool &exchange_reverse_neighbors, std::size_t &batch_size,
     std::string              &distance_metric_name,
     std::vector<std::string> &point_file_names, std::string &point_file_format,
-    std::string &datastore_path, bool &make_index_undirected,
-    double &pruning_degree_multiplier, bool &remove_long_paths, bool &verbose) {
+    std::string &datastore_path, std::string &datastore_transfer_path,
+    bool &make_index_undirected, double &pruning_degree_multiplier,
+    bool &remove_long_paths, bool &verbose) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
   datastore_path.clear();
+  datastore_transfer_path.clear();
   exchange_reverse_neighbors = false;
   verbose                    = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:f:p:eb:um:lv")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:eb:um:lv")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -115,6 +137,10 @@ inline void parse_options(
 
       case 'z':
         datastore_path = optarg;
+        break;
+
+      case 'x':
+        datastore_transfer_path = optarg;
         break;
 
       case 'p':
