@@ -18,7 +18,7 @@ using id_type              = uint32_t;
 using feature_element_type = float;
 using distance_type        = float;
 using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;
-using neighbor_type       = typename dnnd_type::neighbor_type;
+using neighbor_type = typename dnnd_type::neighbor_type;
 
 static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
 
@@ -60,15 +60,14 @@ int main(int argc, char **argv) {
                   ground_truth_neighbor_ids_file_name, point_file_format,
                   out_file_prefix, verbose);
 
-    dnnd_type dnnd(distance_metric_name, point_file_names, point_file_format,
-                   comm, std::random_device{}(), verbose);
+    dnnd_type dnnd(distance_metric_name, comm, std::random_device{}(), verbose);
     comm.cf_barrier();
 
     {
       comm.cout0() << "<<Index Construction>>" << std::endl;
       ygm::timer step_timer;
-      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
-                           batch_size);
+      dnnd.construct_index(point_file_names, point_file_format, index_k, r,
+                           delta, exchange_reverse_neighbors, batch_size);
       comm.cf_barrier();
       comm.cout0() << "\nIndex construction took (s)\t" << step_timer.elapsed()
                    << std::endl;

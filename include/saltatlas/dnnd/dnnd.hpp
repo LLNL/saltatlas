@@ -23,6 +23,10 @@
 
 namespace saltatlas {
 
+/// \brief Distributed NNDescent.
+/// \tparam Id Point ID type.
+/// \tparam FeatureElement Feature vector element type.
+/// \tparam Distance Distance type.
 template <typename Id = uint64_t, typename FeatureElement = double,
           typename Distance = double>
 class dnnd {
@@ -48,15 +52,16 @@ class dnnd {
       typename query_kernel_type::query_point_store_type;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
-  dnnd(const std::string_view          distance_metric_name,
-       const std::vector<std::string>& point_file_names,
-       const std::string_view point_file_format, ygm::comm& comm,
+  /// \brief Constructor.
+  /// \param distance_metric_name Distance metric name.
+  /// \param comm YGM comm instance.
+  /// \param rnd_seed Seed for random generators.
+  /// \param verbose If true, enable the verbose mode.
+  dnnd(const std::string_view distance_metric_name, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
       : m_distance_metric(dndetail::distance::metric<feature_element_type>(
             distance_metric_name)),
-        m_point_file_names(point_file_names),
-        m_point_file_format(point_file_format),
         m_comm(comm),
         m_rnd_seed(rnd_seed),
         m_verbose(verbose) {}
@@ -68,10 +73,12 @@ class dnnd {
   /// \param exchange_reverse_neighbors If true is specified, exchange reverse
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
-  void construct_index(const int k, const double r, const double delta,
+  void construct_index(const std::vector<std::string>& point_file_names,
+                       const std::string_view point_file_format, const int k,
+                       const double r, const double delta,
                        const bool        exchange_reverse_neighbors,
                        const std::size_t mini_batch_size) {
-    priv_read_points();
+    priv_read_points(point_file_names, point_file_format);
 
     typename nn_kernel_type::option option{
         .k                          = k,
@@ -154,11 +161,12 @@ class dnnd {
     return [size](const id_type& id) { return id % size; };
   }
 
-  void priv_read_points() {
+  void priv_read_points(const std::vector<std::string>& point_file_names,
+                        const std::string_view          point_file_format) {
     priv_allocate();
     m_point_store->clear();
-    read_points(m_point_file_names, m_point_file_format, m_verbose,
-                *m_point_store, m_comm);
+    read_points(point_file_names, point_file_format, m_verbose, *m_point_store,
+                m_comm);
   }
 
   void priv_allocate() {
@@ -209,15 +217,14 @@ class dnnd {
     m_comm.cf_barrier();
   }
 
-  const dndetail::distance::metric_type<feature_element_type>& m_distance_metric;
-  const std::vector<std::string>                     m_point_file_names;
-  const std::string                                  m_point_file_format;
-  ygm::comm&                                         m_comm;
-  uint64_t                                           m_rnd_seed;
-  bool                                               m_verbose;
-  std::unique_ptr<point_store_type>                  m_point_store;
-  std::unique_ptr<knn_index_type>                    m_knn_index;
-  std::size_t                                        m_index_k{0};
+  const dndetail::distance::metric_type<feature_element_type>&
+                                    m_distance_metric;
+  ygm::comm&                        m_comm;
+  uint64_t                          m_rnd_seed;
+  bool                              m_verbose;
+  std::unique_ptr<point_store_type> m_point_store;
+  std::unique_ptr<knn_index_type>   m_knn_index;
+  std::size_t                       m_index_k{0};
 };
 
 }  // namespace saltatlas
