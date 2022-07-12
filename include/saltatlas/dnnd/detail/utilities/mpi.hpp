@@ -38,6 +38,14 @@ inline void show_task_distribution(const std::vector<std::size_t>& table) {
   std::cout << "Standard Deviation " << dv << std::endl;
 }
 
+/// \brief Distribute tasks over all MPI ranks.
+/// \param num_local_tasks #of tasks in local.
+/// \param batch_size Global batch size. Up to this number of tasks are assigned
+/// over all ranks. If 0 is specified,
+/// /// \param mpi_rank My MPI rank.
+/// \param mpi_size MPI size.
+/// \param verbose Verbose mode.
+/// \return #of tasks assigned to myself.
 inline std::size_t distribute_tasks(const std::size_t num_local_tasks,
                                     const std::size_t batch_size,
                                     const int mpi_rank, const int mpi_size,

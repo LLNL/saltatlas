@@ -181,7 +181,7 @@ While the second example should be faster, the first is easier to use and more e
 -m [double] Pruning degree multiplier (m) in PyNNDescent.
     Each point keeps up to 'k' x 'm' nearest neighbors.****
 -l  If specified, remove long paths before the query.
--b [long int] Batch size.
+-b [long int] Batch size (0 is full batch mode).
 -q [string] Path to a query file.
 -n [int] Number of nearest neighbors to find for each query point.
 -g [string] Path to a query ground truth file.
@@ -189,6 +189,8 @@ While the second example should be faster, the first is easier to use and more e
 -v  If specified, turn on the verbose mode.
 [string, required] List of input point files at the end. 
 ```
+
+### Running Example
 
 ```shell
 cd build
@@ -202,6 +204,65 @@ mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 \
   -p wsv ../examples/datasets/point_5-4.dat
 ```
 
+
+## Running DNND PM Examples
+
+### Required CMake Option
+
+The DNND PM examples require Metall and Boost C++ Libraries.
+Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
+
+### dnnd_pm_const_example
+
+```shell
+./examples/dnnd_pm_const_example (options, see below) point_file_0 point_file_1...
+-z [string, required] Path to store constructed index.
+-k [int, required] Number of neighbors in a constructed k-NN index.
+-f [string, required] Distance metric name.
+    "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
+-p [string, required] Format of input point files.
+    Supported formats are "wsv" (whitespace-separated values),
+    "wsv-id" (WSV format and the first column is point ID),
+    "csv-id" (CSV format and the first column is point ID).
+-r [double] Sample rate parameter (ρ) in NN-Descent.
+-d [double] Precision parameter (δ) in NN-Descent.
+-e  If specified, exchange reverse neighbors globally.
+    This feature will cause heavy communication.
+    May be able to achieve a better conversion speed and query accuracy.
+-u  If specified, make the index undirected before the query.
+-m [double] Pruning degree multiplier (m) in PyNNDescent.
+    Each point keeps up to 'k' x 'm' nearest neighbors.****
+-l  If specified, remove long paths before the query.
+-b [long int] Batch size (0 is full batch mode).
+-v  If specified, turn on the verbose mode.
+[string, required] List of input point files at the end. 
+```
+
+### dnnd_pm_query_example
+
+```shell
+./examples/dnnd_pm_query_example (options, see below)
+-z [string, required] Path to store constructed index.
+-q [string, required] Path to a query file.
+-n [int, required] Number of nearest neighbors to find for each query point.
+-b [long int] Batch size (0 is full batch mode).
+-g [string] Path to a query ground truth file.
+-o [string] Path to store query results.
+```
+
+
+### Running Example
+
+```shell
+cd build
+
+# Construct a k-NN index and store
+mpirun -n 2 ./examples/dnnd_pm_const_example -z ./pindex -k 2 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
+
+# Open the k-NN index created above, query nearest neighbors, and show the accuracy.
+mpirun -n 2 ./examples/dnnd_pm_query_example -z ./pindex \
+  -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat
+```
 
 # License
 saltatlas is distributed under the MIT license.

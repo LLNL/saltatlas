@@ -27,9 +27,11 @@ namespace saltatlas {
 
 namespace dnpmdetail {
 /// \brief The class the holds member variables of dnnd_pm that are stored in
-/// Metall datastore. \tparam Id Point ID type. \tparam FeatureElement Feature
-/// Vector's element type. \tparam Distance Distance type. \tparam Allocator
-/// Allocator type.
+/// Metall datastore.
+/// \tparam Id Point ID type.
+/// \tparam FeatureElement Feature Vector's element type.
+/// \tparam Distance Distance type.
+/// \tparam Allocator Allocator type.
 template <typename Id, typename FeatureElement, typename Distance,
           typename Allocator>
 struct data_core {
@@ -60,6 +62,10 @@ struct data_core {
 };
 }  // namespace dnpmdetail
 
+/// \brief Persistent Distributed NNDescent.
+/// \tparam Id Point ID type.
+/// \tparam FeatureElement Feature vector element type.
+/// \tparam Distance Distance type.
 template <typename Id = uint64_t, typename FeatureElement = double,
           typename Distance = double>
 class dnnd_pm {

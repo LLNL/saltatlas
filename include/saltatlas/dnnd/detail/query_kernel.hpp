@@ -46,7 +46,7 @@ class dknn_batch_query_kernel {
   using distance_metric = distance::metric_type<feature_element_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
-  // Store these data stores on DRAM
+  // These data stores are allocated on DRAM
   using query_point_store_type = point_store<id_type, feature_element_type>;
   using knn_store_type =
       std::unordered_map<id_type, std::vector<neighbor_type>>;
