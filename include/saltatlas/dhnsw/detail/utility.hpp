@@ -81,10 +81,12 @@ int get_num_columns(ygm::container::bag<std::string> &bag_filenames,
   return max_cols;
 }
 
+template <typename FEATURE>
 void fill_seed_vector_from_hdf5(const std::vector<size_t>        &seed_ids,
                                 ygm::container::bag<std::string> &bag_filenames,
                                 const std::vector<std::string>   &col_names,
-                                auto &seed_features, auto &comm) {
+                                std::vector<FEATURE>             &seed_features,
+                                ygm::comm                        &comm) {
   seed_features.resize(seed_ids.size());
   // Make ygm pointer to seed_features vector
   auto seed_features_ptr = comm.make_ygm_ptr(seed_features);

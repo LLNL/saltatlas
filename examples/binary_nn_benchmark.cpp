@@ -171,10 +171,12 @@ std::cout << std::endl;
   return to_return;
 }
 
+template <typename FEATURE>
 void fill_seed_vector_from_csv(const std::vector<size_t>        &seed_ids,
                                ygm::container::bag<std::string> &bag_filenames,
-                               const int num_dimensions, auto &seed_features,
-                               auto &comm) {
+                               const int                         num_dimensions,
+                               std::vector<FEATURE>             &seed_features,
+                               ygm::comm                        &comm) {
   seed_features.resize(seed_ids.size());
   // Make ygm pointer to seed_features vector
   auto seed_features_ptr = comm.make_ygm_ptr(seed_features);
