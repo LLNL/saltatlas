@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <limits>
+#include <random>
 #include <ygm/container/bag.hpp>
 
 #if __has_include(<saltatlas_h5_io/h5_reader.hpp>)
@@ -14,7 +15,7 @@
 #endif
 
 namespace saltatlas {
-namespace utility {
+namespace dhnsw_detail {
 
 void select_random_seed_ids(const int num_seeds, const size_t num_points,
                             std::vector<size_t> &seed_ids) {
@@ -198,5 +199,5 @@ uint64_t count_points_hdf5(ygm::container::bag<std::string> &bag_filenames) {
 }
 #endif
 
-}  // namespace utility
+}  // namespace dhnsw_detail
 }  // namespace saltatlas

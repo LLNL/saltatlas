@@ -5,13 +5,15 @@
 
 #include <math.h>
 #include <unistd.h>
-#include <saltatlas/saltatlas.hpp>
-#include <saltatlas/utility.hpp>
 #include <string>
+
 #include <ygm/comm.hpp>
 #include <ygm/container/bag.hpp>
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
+
+#include <saltatlas/dhnsw/detail/utility.hpp>
+#include <saltatlas/dhnsw/dhnsw.hpp>
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -254,10 +256,9 @@ comm.async(dest, store_seed_features_lambda, seed_index,
   return;
 }
 
-void build_index(
-    ygm::container::bag<std::string>                     &bag_filenames,
-    saltatlas::dist_knn_index<float, std::vector<float>> &dist_index,
-    const size_t num_seeds, const int num_dimensions) {
+void build_index(ygm::container::bag<std::string>            &bag_filenames,
+                 saltatlas::dhnsw<float, std::vector<float>> &dist_index,
+                 const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -282,7 +283,8 @@ void build_index(
   std::vector<size_t> seed_ids(num_seeds);
   if (dist_index.comm().rank0()) {
     std::cout << "Selecting seeds" << std::endl;
-    saltatlas::utility::select_random_seed_ids(num_seeds, num_points, seed_ids);
+    saltatlas::dhnsw_detail::select_random_seed_ids(num_seeds, num_points,
+                                                    seed_ids);
     std::sort(seed_ids.begin(), seed_ids.end());
   }
   // TODO: Change to a ygm::bcast to avoid direct MPI call and use of
@@ -378,8 +380,8 @@ int main(int argc, char **argv) {
     fill_filenames_bag(bag_index_filenames, index_filename);
 
     // Build index
-    auto my_space = saltatlas::utility::SpaceWrapper(my_cos_sim_squared);
-    saltatlas::dist_knn_index<float, std::vector<float>> dist_index(
+    auto my_space = saltatlas::dhnsw_detail::SpaceWrapper(my_cos_sim_squared);
+    saltatlas::dhnsw<float, std::vector<float>> dist_index(
         voronoi_rank, num_seeds, &my_space, &world);
 
     step_timer.reset();
