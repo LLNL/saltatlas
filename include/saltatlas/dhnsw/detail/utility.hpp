@@ -81,56 +81,6 @@ int get_num_columns(ygm::container::bag<std::string> &bag_filenames,
   return max_cols;
 }
 
-void fill_seed_vector_from_hdf5(const std::vector<size_t>      &seed_ids,
-                                const std::vector<std::string> &hdf_file_paths,
-                                const std::vector<size_t>      &index_offsets,
-                                auto seed_features_ptr, auto &comm) {
-  auto store_seed_features_lambda =
-      [](size_t seed_index, std::vector<double> vals, auto seeds_vector_ptr) {
-        (*seeds_vector_ptr)[seed_index] = vals;
-      };
-
-  int curr_offset_ptr = 0;
-  // TODO: Make sure < and >= are right inequalities here
-  for (int i = 0; i < seed_ids.size();) {
-    while (index_offsets[curr_offset_ptr + 1] < seed_ids[i]) {
-      ++curr_offset_ptr;
-    }
-
-    // Am I responsible for this file?
-    if (curr_offset_ptr % comm.size() == comm.rank()) {
-      saltatlas::h5_io::h5_reader reader(hdf_file_paths[curr_offset_ptr]);
-
-      if (!reader.is_open()) {
-        std::cerr << "Failed to open " << hdf_file_paths[curr_offset_ptr]
-                  << std::endl;
-        exit(EXIT_FAILURE);
-      }
-
-      std::vector<std::string> cols = {"col001", "col040", "col048", "col055"};
-      const auto data = reader.read_columns_row_wise<double>(cols);
-
-      while (index_offsets[curr_offset_ptr + 1] >= seed_ids[i] &&
-             i < seed_ids.size()) {
-        auto seed_features = data[seed_ids[i] - index_offsets[curr_offset_ptr]];
-        for (int dest = 0; dest < comm.size(); ++dest) {
-          comm.async(dest, store_seed_features_lambda, i, seed_features,
-                     seed_features_ptr);
-        }
-        ++i;
-      }
-    } else {
-      while (index_offsets[curr_offset_ptr + 1] >= seed_ids[i] &&
-             i < seed_ids.size()) {
-        ++i;
-      }
-    }
-  }
-  comm.barrier();
-
-  return;
-}
-
 void fill_seed_vector_from_hdf5(const std::vector<size_t>        &seed_ids,
                                 ygm::container::bag<std::string> &bag_filenames,
                                 const std::vector<std::string>   &col_names,
