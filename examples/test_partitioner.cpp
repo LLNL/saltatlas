@@ -470,17 +470,19 @@ int main(int argc, char **argv) {
     int mpi_rank = world.rank();
     int mpi_size = world.size();
 
-    int voronoi_rank;
+    int voronoi_rank = 2;
     int hops;
-    int num_seeds;
+    int num_seeds = 8;
     int k;
 
-    std::string index_filename;
-    std::string query_filename;
-    std::string ground_truth_filename;
+    std::string index_filename =
+        "/p/lustre1/salta/benchmarks/set20210707/"
+        "fashion-mnist-784-euclidean_idx.hdf";
+    // std::string query_filename;
+    // std::string ground_truth_filename;
 
-    parse_cmd_line(argc, argv, world, voronoi_rank, hops, num_seeds, k,
-                   index_filename, query_filename, ground_truth_filename);
+    // parse_cmd_line(argc, argv, world, voronoi_rank, hops, num_seeds, k,
+    // index_filename, query_filename, ground_truth_filename);
 
     ygm::container::bag<std::string> bag_index_filenames(world);
 
@@ -515,43 +517,45 @@ dist_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
     world.cout0("Total index construction time: ", step_timer.elapsed());
 
     // Time querying if query file is provided
-    if ((query_filename != "") && (ground_truth_filename == "")) {
-      ygm::container::bag<std::string> bag_query_filenames(world);
-      fill_filenames_bag(bag_query_filenames, query_filename);
+    /*
+if ((query_filename != "") && (ground_truth_filename == "")) {
+ygm::container::bag<std::string> bag_query_filenames(world);
+fill_filenames_bag(bag_query_filenames, query_filename);
 
-      world.barrier();
-      step_timer.reset();
-      benchmark_query_trial(voronoi_rank, hops, k, dist_index,
-                            bag_query_filenames, data_col_names);
+world.barrier();
+step_timer.reset();
+benchmark_query_trial(voronoi_rank, hops, k, dist_index,
+                bag_query_filenames, data_col_names);
 
-      auto     query_time = step_timer.elapsed();
-      uint64_t num_queries =
-          saltatlas::utility::count_points_hdf5(bag_query_filenames);
+auto     query_time = step_timer.elapsed();
+uint64_t num_queries =
+saltatlas::utility::count_points_hdf5(bag_query_filenames);
 
-      world.cout0("Query time: ", query_time);
-      world.cout0("\t", num_queries / query_time, " queries per second");
-    }
+world.cout0("Query time: ", query_time);
+world.cout0("\t", num_queries / query_time, " queries per second");
+}
 
-    // Time querying and recall if query file and ground truth provided
-    if ((query_filename != "") && (ground_truth_filename != "")) {
-      ygm::container::bag<std::string> bag_query_filenames(world);
-      fill_filenames_bag(bag_query_filenames, query_filename);
+// Time querying and recall if query file and ground truth provided
+if ((query_filename != "") && (ground_truth_filename != "")) {
+ygm::container::bag<std::string> bag_query_filenames(world);
+fill_filenames_bag(bag_query_filenames, query_filename);
 
-      ygm::container::bag<std::string> bag_ground_truth_filenames(world);
-      fill_filenames_bag(bag_ground_truth_filenames, ground_truth_filename);
+ygm::container::bag<std::string> bag_ground_truth_filenames(world);
+fill_filenames_bag(bag_ground_truth_filenames, ground_truth_filename);
 
-      world.barrier();
-      step_timer.reset();
-      benchmark_query_trial_ground_truth(
-          voronoi_rank, hops, k, dist_index, bag_query_filenames,
-          bag_ground_truth_filenames, data_col_names);
+world.barrier();
+step_timer.reset();
+benchmark_query_trial_ground_truth(
+voronoi_rank, hops, k, dist_index, bag_query_filenames,
+bag_ground_truth_filenames, data_col_names);
 
-      auto     query_time = step_timer.elapsed();
-      uint64_t num_queries =
-          saltatlas::utility::count_points_hdf5(bag_query_filenames);
+auto     query_time = step_timer.elapsed();
+uint64_t num_queries =
+saltatlas::utility::count_points_hdf5(bag_query_filenames);
 
-      world.cout0("Query time: ", query_time);
-      world.cout0("\t", num_queries / query_time, " queries per second");
-    }
+world.cout0("Query time: ", query_time);
+world.cout0("\t", num_queries / query_time, " queries per second");
+}
+    */
   }
 }

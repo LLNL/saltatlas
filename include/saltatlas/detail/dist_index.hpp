@@ -68,6 +68,7 @@ find_approx_closest_seeds(v, m_max_voronoi_rank, closest_seeds);
 
     std::vector<size_t> point_partitions =
         partitioner().find_point_partitions(v, m_max_voronoi_rank);
+    ASSERT_RELEASE(point_partitions[0] < m_num_cells);
     add_data_point_to_insertion_queue(index, v, point_partitions);
   }
 
@@ -96,6 +97,8 @@ find_approx_closest_seeds(v, m_max_voronoi_rank, closest_seeds);
               m_metric_space_ptr, m_cell_add_vec[i].size(), 16, 200, 1);
       m_voronoi_cell_hnsw.push_back(hnsw);
 
+      m_comm->cout() << "Initializing local HNSW with "
+                     << m_cell_add_vec[i].size() << " points" << std::endl;
       // Add data points to HNSW
       std::random_shuffle(m_cell_add_vec[i].begin(), m_cell_add_vec[i].end());
       for (auto &[index, feature_vec] : m_cell_add_vec[i]) {

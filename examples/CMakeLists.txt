@@ -21,5 +21,6 @@ add_saltatlas_example(saltatlas_example)
 
 if (SALTATLAS_USE_HDF5)
     add_saltatlas_example(benchmark_hdf5)
+    add_saltatlas_example(test_partitioner)
 	#add_saltatlas_example(knn_dpockets_hdf5)
 endif ()
