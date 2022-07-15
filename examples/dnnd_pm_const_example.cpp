@@ -61,14 +61,14 @@ int main(int argc, char **argv) {
       dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
                      comm, std::random_device{}(), verbose);
 
-      comm.cout0() << "<<Read Points>>" << std::endl;
+      comm.cout0() << "\n<<Read Points>>" << std::endl;
       ygm::timer point_read_timer;
       saltatlas::read_points(point_file_names, point_file_format, verbose,
                              dnnd.get_point_store(), comm);
       comm.cout0() << "\nReading points took (s)\t"
                    << point_read_timer.elapsed() << std::endl;
 
-      comm.cout0() << "<<Index Construction>>" << std::endl;
+      comm.cout0() << "\n<<Index Construction>>" << std::endl;
       ygm::timer const_timer;
       dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
                            batch_size);

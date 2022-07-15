@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
 
     if (!original_datastore_path.empty()) {
       if (dnnd_type::copy(original_datastore_path, datastore_path)) {
-        comm.cout0() << "Transferred index." << std::endl;
+        comm.cout0() << "\nTransferred index." << std::endl;
       } else {
         comm.cerr0() << "Failed to transfer index." << std::endl;
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
