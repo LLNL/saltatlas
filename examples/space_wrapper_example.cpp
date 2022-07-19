@@ -3,11 +3,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-#include <hnswlib/hnswlib.h>
 #include <stdlib.h>
 #include <iostream>
-#include <saltatlas/hnswlib_space_wrapper.hpp>
 #include <vector>
+
+#include <hnswlib/hnswlib.h>
+#include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 
 float my_l2_sqr(const std::vector<float> &x, const std::vector<float> &y) {
   if (x.size() != y.size()) {
@@ -31,7 +32,7 @@ float my_projected_distance(std::vector<float> &x, std::vector<float> &y) {
 int main(int argc, char **argv) {
   // Create HNSW with std::vector-based distance function
   {
-    auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
+    auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
     hnswlib::HierarchicalNSW<float> hnsw(&my_l2_space, 100, 16, 16, 1);
 
@@ -67,7 +68,7 @@ int main(int argc, char **argv) {
   // (think strings/text data)
   {
     auto my_projected_space =
-        saltatlas::utility::SpaceWrapper(my_projected_distance);
+        saltatlas::dhnsw_detail::SpaceWrapper(my_projected_distance);
 
     hnswlib::HierarchicalNSW<float> hnsw(&my_projected_space, 100, 16, 16, 1);
 

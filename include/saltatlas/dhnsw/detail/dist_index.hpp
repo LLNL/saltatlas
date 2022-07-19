@@ -13,28 +13,28 @@
 #include <map>
 #include <queue>
 #include <random>
-#include <saltatlas/hnswlib_space_wrapper.hpp>
+#include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 #include <set>
+
 #include <ygm/comm.hpp>
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
-namespace detail {
+namespace dhnsw_detail {
 
 template <typename DistType, typename Point>
 class query_engine;
 
 template <typename DistType, typename Point>
-class dist_knn_index_impl {
+class dhnsw_impl {
   friend class query_engine<DistType, Point>;
 
  public:
   using feature_vec_type         = Point;
   using data_index_cell_map_type = std::map<size_t, std::vector<size_t>>;
 
-  dist_knn_index_impl(int max_voronoi_rank, int num_cells,
-                      hnswlib::SpaceInterface<DistType> *space_ptr,
-                      ygm::comm                         *c)
+  dhnsw_impl(int max_voronoi_rank, int num_cells,
+             hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *c)
       : m_max_voronoi_rank(max_voronoi_rank),
         m_num_cells(num_cells),
         m_metric_space_ptr(space_ptr),
@@ -48,7 +48,7 @@ class dist_knn_index_impl {
     m_cell_add_vec.resize(local_cells);
   }
 
-  ~dist_knn_index_impl() {
+  ~dhnsw_impl() {
     for (int i = 0; i < m_voronoi_cell_hnsw.size(); ++i) {
       delete m_voronoi_cell_hnsw[i];
     }
@@ -66,7 +66,7 @@ class dist_knn_index_impl {
     auto insertion_cell = closest_seeds[0];
     m_comm->async(
         cell_owner(insertion_cell),
-        [](auto mbox, ygm::ygm_ptr<dist_knn_index_impl> pthis, size_t index,
+        [](auto mbox, ygm::ygm_ptr<dhnsw_impl> pthis, size_t index,
            const size_t               insertion_cell,
            const std::vector<size_t> &closest_seeds, const Point &v) {
           auto local_insertion_cell = pthis->local_cell_index(insertion_cell);
@@ -226,14 +226,14 @@ class dist_knn_index_impl {
   std::vector<std::vector<std::pair<size_t, Point>>>
       m_cell_add_vec;  // per-cell vector of indices to add to HNSW structure
 
-  ygm::comm                        *m_comm;
-  ygm::ygm_ptr<dist_knn_index_impl> pthis;
-  int                               m_comm_size;
-  int                               m_comm_rank;
+  ygm::comm               *m_comm;
+  ygm::ygm_ptr<dhnsw_impl> pthis;
+  int                      m_comm_size;
+  int                      m_comm_rank;
 
   int m_max_voronoi_rank;
   int m_num_cells;
 };
 
-}  // namespace detail
+}  // namespace dhnsw_detail
 }  // namespace saltatlas

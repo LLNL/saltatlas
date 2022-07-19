@@ -3,9 +3,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-#include <saltatlas/hnswlib_space_wrapper.hpp>
-#include <saltatlas/saltatlas.hpp>
 #include <ygm/comm.hpp>
+
+#include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
+#include <saltatlas/dhnsw/dhnsw.hpp>
 
 // User-defined distance function working on vectors of data
 float my_l2_sqr(const std::vector<float> &x, const std::vector<float> &y) {
@@ -39,12 +40,12 @@ int main(int argc, char **argv) {
 
     // Create wrapper around user-defined distance function. This allows
     // easy-to-write distance functions to be used with hnswlib
-    auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
+    auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
     // Create indexing structure
-    int                                                  voronoi_rank = 2;
-    int                                                  num_seeds    = 2;
-    saltatlas::dist_knn_index<float, std::vector<float>> knn_index(
+    int                                         voronoi_rank = 2;
+    int                                         num_seeds    = 2;
+    saltatlas::dhnsw<float, std::vector<float>> knn_index(
         voronoi_rank, num_seeds, &my_l2_space, &world);
 
     // Place Voronoi seeds in index structure on every rank and create seed HNSW
