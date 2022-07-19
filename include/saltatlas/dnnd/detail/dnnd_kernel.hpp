@@ -31,7 +31,7 @@
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/distance.hpp>
+#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas::dndetail {
 

@@ -20,7 +20,7 @@
 #include <saltatlas/dnnd/detail/nn_index_optimizer.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
-#include <saltatlas/dnnd/distance.hpp>
+#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas {
 

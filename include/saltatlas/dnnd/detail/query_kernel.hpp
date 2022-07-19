@@ -20,7 +20,7 @@
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/distance.hpp>
+#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas::dndetail {
 
