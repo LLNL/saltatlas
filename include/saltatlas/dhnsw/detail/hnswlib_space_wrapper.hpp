@@ -17,7 +17,7 @@
 #include <hnswlib/hnswlib.h>
 
 namespace saltatlas {
-namespace utility {
+namespace dhnsw_detail {
 
 template <typename DistType>
 using hnswlib_func_type = DistType (*)(const void *, const void *,
@@ -74,5 +74,5 @@ class SpaceWrapper : public hnswlib::SpaceInterface<DistType> {
   hnswlib_func_type<DistType> m_arg_wrapper = arg_wrapper();
 };
 
-}  // namespace utility
+}  // namespace dhnsw_detail
 }  // namespace saltatlas

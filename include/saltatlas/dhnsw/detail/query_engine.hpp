@@ -8,7 +8,7 @@
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
-namespace detail {
+namespace dhnsw_detail {
 
 template <typename DistType, typename Point>
 class query_engine_impl {
@@ -251,7 +251,7 @@ class query_engine_impl {
     ygm::ygm_ptr<query_engine_impl<DistType, Point>> engine;
   };
 
-  query_engine_impl(dist_knn_index_impl<DistType, Point> *g)
+  query_engine_impl(dhnsw_impl<DistType, Point> *g)
       : m_comm(&g->comm()),
         m_dist_index_impl_ptr(g),
         pthis(g->comm().make_ygm_ptr(*this)){};
@@ -373,10 +373,10 @@ class query_engine_impl {
 
   std::map<Point, query_controller> m_query_controllers;
 
-  ygm::comm                                         *m_comm;
-  ygm::ygm_ptr<dist_knn_index_impl<DistType, Point>> m_dist_index_impl_ptr;
-  ygm::ygm_ptr<query_engine_impl<DistType, Point>>   pthis;
+  ygm::comm                                       *m_comm;
+  ygm::ygm_ptr<dhnsw_impl<DistType, Point>>        m_dist_index_impl_ptr;
+  ygm::ygm_ptr<query_engine_impl<DistType, Point>> pthis;
 };
 
-}  // namespace detail
+}  // namespace dhnsw_detail
 }  // namespace saltatlas

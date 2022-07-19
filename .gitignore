@@ -1,4 +1,11 @@
 build/*
 scripts/*
 *~
+~*
 *#*
+.swp
+.cobaltlog
+.error
+.autosave
+.DS_Store
+.idea
