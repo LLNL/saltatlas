@@ -57,6 +57,12 @@ option(SALTATLAS_USE_METALL "Use Metall" OFF)
 #
 # Boost
 #
+# Disable the boost-cmake feature (BoostConfig.cmake or boost-config.cmake)
+# because there is a tricky behavior/issue.
+# We use FetchContent to download Boost and find_package to find the location of Boost.
+# As find_package natively supports Boost, we do not need to use the boost-cmake feature.
+set(Boost_NO_BOOST_CMAKE ON)
+
 find_package(Boost 1.64 QUIET)
 if (NOT Boost_FOUND)
     FetchContent_Declare(Boost
@@ -294,7 +300,9 @@ if (SALTATLAS_USE_METALL)
     endif ()
 
     find_package(Threads REQUIRED)
-    target_include_directories(saltatlas INTERFACE ${Boost_INCLUDE_DIRS})
+    target_include_directories(saltatlas INTERFACE
+            $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+            $<INSTALL_INTERFACE:include/boost>)
     target_link_libraries(saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall)
 endif ()
 
