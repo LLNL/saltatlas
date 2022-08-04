@@ -64,7 +64,8 @@ int main(int argc, char **argv) {
       comm.cout0() << "\n<<Read Points>>" << std::endl;
       ygm::timer point_read_timer;
       saltatlas::read_points(point_file_names, point_file_format, verbose,
-                             dnnd.get_point_store(), comm);
+                             dnnd.get_point_store(),
+                             dnnd.get_point_partitioner(), comm);
       comm.cout0() << "\nReading points took (s)\t"
                    << point_read_timer.elapsed() << std::endl;
 

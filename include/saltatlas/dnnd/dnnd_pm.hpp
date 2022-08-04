@@ -110,6 +110,7 @@ class dnnd_pm {
  public:
   using query_point_store_type =
       typename query_kernel_type::query_point_store_type;
+  using point_partitioner = typename nn_kernel_type::point_partitioner;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
   /// \brief Constructor. Create a new persistent index.
@@ -155,6 +156,13 @@ class dnnd_pm {
   /// \return  A reference to the point store instance.
   point_store_type& get_point_store() const { return m_data_core->point_store; }
 
+  /// \brief Return a point partitioner instance.
+  /// \return A point partitioner instance.
+  point_partitioner get_point_partitioner() const {
+    const int size = m_comm.size();
+    return [size](const id_type& id) { return id % size; };
+  };
+
   /// \brief Construct an k-NN index.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
@@ -175,7 +183,7 @@ class dnnd_pm {
         .verbose                    = m_data_core->verbose};
 
     nn_kernel_type kernel(option, m_data_core->point_store,
-                          priv_get_point_partitioner(),
+                          get_point_partitioner(),
                           dndetail::distance::metric<feature_element_type>(
                               m_data_core->metric_id),
                           m_comm);
@@ -204,7 +212,7 @@ class dnnd_pm {
     nn_index_optimizer_type optimizer{
         opt,
         m_data_core->point_store,
-        priv_get_point_partitioner(),
+        get_point_partitioner(),
         dndetail::distance::metric<feature_element_type>(
             m_data_core->metric_id),
         m_data_core->knn_index,
@@ -227,7 +235,7 @@ class dnnd_pm {
                                               .verbose  = m_data_core->verbose};
 
     query_kernel_type kernel(option, m_data_core->point_store,
-                             priv_get_point_partitioner(),
+                             get_point_partitioner(),
                              dndetail::distance::metric<feature_element_type>(
                                  m_data_core->metric_id),
                              m_data_core->knn_index, m_comm);
@@ -303,11 +311,6 @@ class dnnd_pm {
     m_data_core =
         local_manager.find<data_core_type>(metall::unique_instance).first;
     assert(m_data_core);
-  }
-
-  auto priv_get_point_partitioner() const {
-    const int size = m_comm.size();
-    return [size](const id_type& id) { return id % size; };
   }
 
   ygm::comm&                                           m_comm;

@@ -23,17 +23,18 @@ namespace saltatlas::dndetail {
 /// \brief Read points (feature vectors) using multiple processes.
 /// Point IDs are equal to the corresponding line numbers,
 /// assuming that the input files were concatenated as a single file with the
-/// order in list 'sorted_file_names'. \param sorted_file_names This list must
-/// be sorted correctly. All points ID in i-th file are less than the IDs in
-/// (i+k)-th files, where i >= 0 and k >= 1.
+/// order in list 'sorted_file_names'.
+/// \param sorted_file_names This list must be sorted correctly. All points ID
+/// in i-th file are less than the IDs in (i+k)-th files, where i >= 0 and k
+/// >= 1.
 template <typename id_type, typename feature_element_type,
           typename point_store_allocator_type>
-void read_points_wsv(const std::vector<std::string>          &sorted_file_names,
-                     point_store<id_type, feature_element_type,
-                                 point_store_allocator_type> &local_point_store,
-                     ygm::comm                               &comm) {
-  using point_store_type =
-      point_store<id_type, feature_element_type, point_store_allocator_type>;
+void read_points_wsv(
+    const std::vector<std::string> &sorted_file_names,
+    point_store<id_type, feature_element_type, point_store_allocator_type>
+                                                &local_point_store,
+    const std::function<int(const id_type &id)> &point_partitioner,
+    ygm::comm                                   &comm) {
 
   std::size_t count_points = 0;
   const auto  range =
@@ -103,7 +104,7 @@ void read_points_wsv(const std::vector<std::string>          &sorted_file_names,
         feature.insert(feature.begin(), sent_feature.begin(),
                        sent_feature.end());
       };
-      comm.async(id % comm.size(), receiver, id, feature);
+      comm.async(point_partitioner(id), receiver, id, feature);
       ++id;
     }
   }
@@ -120,10 +121,9 @@ void read_points_with_id(
     const std::vector<std::string> &file_names,
     const converter_function       &converter,
     point_store<id_type, feature_element_type, point_store_allocator_type>
-              &local_point_store,
-    ygm::comm &comm) {
-  using point_store_type =
-      point_store<id_type, feature_element_type, point_store_allocator_type>;
+                                                &local_point_store,
+    const std::function<int(const id_type &id)> &point_partitioner,
+    ygm::comm                                   &comm) {
 
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
   local_point_store.clear();
@@ -159,7 +159,7 @@ void read_points_with_id(
         feature.insert(feature.begin(), sent_feature.begin(),
                        sent_feature.end());
       };
-      comm.async(id % comm.size(), receiver, id, feature);
+      comm.async(point_partitioner(id), receiver, id, feature);
     }
   }
   comm.barrier();
@@ -168,15 +168,16 @@ void read_points_with_id(
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files contains ID at the first column,
 /// and each column is separated by 'delimiter'.
-/// \param file_names A list of file names.
 template <typename id_type, typename feature_element_type,
           typename point_store_allocator_type>
 void read_points_with_id_and_delimiter(
     const std::vector<std::string> &file_names, const char delimiter,
     point_store<id_type, feature_element_type, point_store_allocator_type>
-              &local_point_store,
-    ygm::comm &comm) {
-  static const auto converter =
+                                                &local_point_store,
+    const std::function<int(const id_type &id)> &point_partitioner,
+    ygm::comm                                   &comm) {
+
+  const auto converter =
       [delimiter](const std::string &input, id_type *id,
                   std::vector<feature_element_type> *feature) {
         std::vector<std::string> result;
@@ -193,7 +194,8 @@ void read_points_with_id_and_delimiter(
         return true;
       };
 
-  read_points_with_id(file_names, converter, local_point_store, comm);
+  read_points_with_id(file_names, converter, local_point_store,
+                      point_partitioner, comm);
 }
 
 /// \brief Read points (feature vectors) using multiple processes.
@@ -208,8 +210,9 @@ template <typename id_type, typename feature_element_type,
 void read_points_whitespace_separated_with_id(
     const std::vector<std::string> &file_names,
     point_store<id_type, feature_element_type, point_store_allocator_type>
-              &local_point_store,
-    ygm::comm &comm) {
+                                                &local_point_store,
+    const std::function<int(const id_type &id)> &point_partitioner,
+    ygm::comm                                   &comm) {
   static const auto converter = [](const std::string &input, id_type *id,
                                    std::vector<feature_element_type> *feature) {
     std::vector<std::string> result;
@@ -226,7 +229,8 @@ void read_points_whitespace_separated_with_id(
     return true;
   };
 
-  read_points_with_id(file_names, converter, local_point_store, comm);
+  read_points_with_id(file_names, converter, local_point_store,
+                      point_partitioner, comm);
 }
 
 }  // namespace saltatlas::dndetail
@@ -239,22 +243,24 @@ inline void read_points(
     const std::string_view &format, const bool verbose,
     dndetail::point_store<id_type, feature_element_type,
                           point_store_allocator_type> &local_point_store,
+    const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm                                         &comm) {
   if (format == "wsv") {
     if (verbose)
       comm.cout0() << "Read WSV format (whitespace separated, no ID) files"
                    << std::endl;
-    dndetail::read_points_wsv(point_file_names, local_point_store, comm);
+    dndetail::read_points_wsv(point_file_names, local_point_store,
+                              point_partitioner, comm);
   } else if (format == "csv-id") {
     if (verbose) comm.cout0() << "Read CSV-ID format files" << std::endl;
-    dndetail::read_points_with_id_and_delimiter(point_file_names, ',',
-                                                local_point_store, comm);
+    dndetail::read_points_with_id_and_delimiter(
+        point_file_names, ',', local_point_store, point_partitioner, comm);
   } else if (format == "wsv-id") {
     if (verbose)
       comm.cout0() << "Read WSV-ID (whitespace separated with ID) format files"
                    << std::endl;
-    dndetail::read_points_whitespace_separated_with_id(point_file_names,
-                                                       local_point_store, comm);
+    dndetail::read_points_whitespace_separated_with_id(
+        point_file_names, local_point_store, point_partitioner, comm);
   } else {
     comm.cerr0() << "Invalid reader mode" << std::endl;
   }
