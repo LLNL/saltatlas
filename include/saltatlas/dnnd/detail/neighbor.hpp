@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <cassert>
 
 #if __has_include(<metall/container/unordered_map.hpp>) \
   && __has_include(<metall/container/queue.hpp>)

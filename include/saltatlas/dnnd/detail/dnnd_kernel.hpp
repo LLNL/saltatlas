@@ -25,6 +25,7 @@
 #include <type_traits>
 
 #include <ygm/comm.hpp>
+#include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
