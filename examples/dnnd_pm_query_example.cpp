@@ -31,62 +31,62 @@ void parse_options(int argc, char **argv, std::string &datastore_path,
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
-  {
-    std::string datastore_path;
-    std::string original_datastore_path;
-    int         query_k{0};
-    std::size_t batch_size{0};
-    std::string query_file_name;
-    std::string ground_truth_neighbor_ids_file_name;
-    std::string query_result_file_name;
 
-    parse_options(argc, argv, datastore_path, original_datastore_path, query_k,
-                  batch_size, query_file_name,
-                  ground_truth_neighbor_ids_file_name, query_result_file_name);
+  std::string datastore_path;
+  std::string original_datastore_path;
+  int         query_k{0};
+  std::size_t batch_size{0};
+  std::string query_file_name;
+  std::string ground_truth_neighbor_ids_file_name;
+  std::string query_result_file_name;
 
-    if (!original_datastore_path.empty()) {
-      if (dnnd_type::copy(original_datastore_path, datastore_path)) {
-        comm.cout0() << "\nTransferred index." << std::endl;
-      } else {
-        comm.cerr0() << "Failed to transfer index." << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-      }
+  parse_options(argc, argv, datastore_path, original_datastore_path, query_k,
+                batch_size, query_file_name,
+                ground_truth_neighbor_ids_file_name, query_result_file_name);
+
+  if (!original_datastore_path.empty()) {
+    if (dnnd_type::copy(original_datastore_path, datastore_path)) {
+      comm.cout0() << "\nTransferred index." << std::endl;
+    } else {
+      comm.cerr0() << "Failed to transfer index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
+  }
 
-    {
-      dnnd_type dnnd(dnnd_type::open, datastore_path, comm);
-      comm.cout0() << "<<Query>>" << std::endl;
+  {
+    dnnd_type dnnd(dnnd_type::open, datastore_path, comm);
+    comm.cout0() << "<<Query>>" << std::endl;
 
-      comm.cout0() << "Reading queries" << std::endl;
-      dnnd_type::query_point_store_type query_points;
-      read_query<dnnd_type>(query_file_name, query_points);
-      comm.cf_barrier();
+    comm.cout0() << "Reading queries" << std::endl;
+    dnnd_type::query_point_store_type query_points;
+    read_query<dnnd_type>(query_file_name, query_points);
+    comm.cf_barrier();
 
-      comm.cout0() << "Executing queries" << std::endl;
-      ygm::timer step_timer;
-      const auto query_result =
-          dnnd.query_batch(query_points, query_k, batch_size);
-      comm.cf_barrier();
-      comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
-                   << std::endl;
+    comm.cout0() << "Executing queries" << std::endl;
+    ygm::timer step_timer;
+    const auto query_result =
+        dnnd.query_batch(query_points, query_k, batch_size);
+    comm.cf_barrier();
+    comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
+                 << std::endl;
 
-      if (!ground_truth_neighbor_ids_file_name.empty() ||
-          !query_result_file_name.empty()) {
-        const auto all_query_result =
-            gather_query_result<neighbor_type>(query_result, comm);
-        if (!ground_truth_neighbor_ids_file_name.empty() && comm.rank0()) {
-          const auto ground_truth_neighbors =
-              read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
-          show_accuracy(ground_truth_neighbors, all_query_result);
-        }
+    if (!ground_truth_neighbor_ids_file_name.empty() ||
+        !query_result_file_name.empty()) {
+      const auto all_query_result =
+          gather_query_result<neighbor_type>(query_result, comm);
+      if (!ground_truth_neighbor_ids_file_name.empty() && comm.rank0()) {
+        const auto ground_truth_neighbors =
+            read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
+        show_accuracy(ground_truth_neighbors, all_query_result);
+      }
 
-        if (!query_result_file_name.empty()) {
-          comm.cout0() << "\nDumping query results" << std::endl;
-          dump_query_result(all_query_result, query_result_file_name, comm);
-        }
+      if (!query_result_file_name.empty()) {
+        comm.cout0() << "\nDumping query results" << std::endl;
+        dump_query_result(all_query_result, query_result_file_name, comm);
       }
     }
   }
+
   return 0;
 }
 

@@ -35,62 +35,61 @@ void parse_options(int argc, char **argv, int &index_k, double &r,
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
+
+  int                      index_k{0};
+  double                   r{0.8};
+  double                   delta{0.001};
+  bool                     exchange_reverse_neighbors{false};
+  std::size_t              batch_size{0};
+  std::string              distance_metric_name;
+  std::vector<std::string> point_file_names;
+  std::string              point_file_format;
+  std::string              datastore_path;
+  std::string              datastore_transfer_path;
+  bool                     make_index_undirected{false};
+  double                   pruning_degree_multiplier{1.5};
+  bool                     remove_long_paths{false};
+  bool                     verbose{false};
+
+  parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
+                batch_size, distance_metric_name, point_file_names,
+                point_file_format, datastore_path, datastore_transfer_path,
+                make_index_undirected, pruning_degree_multiplier,
+                remove_long_paths, verbose);
+
   {
-    int                      index_k{0};
-    double                   r{0.8};
-    double                   delta{0.001};
-    bool                     exchange_reverse_neighbors{false};
-    std::size_t              batch_size{0};
-    std::string              distance_metric_name;
-    std::vector<std::string> point_file_names;
-    std::string              point_file_format;
-    std::string              datastore_path;
-    std::string              datastore_transfer_path;
-    bool                     make_index_undirected{false};
-    double                   pruning_degree_multiplier{1.5};
-    bool                     remove_long_paths{false};
-    bool                     verbose{false};
+    dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
+                   comm, std::random_device{}(), verbose);
 
-    parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
-                  batch_size, distance_metric_name, point_file_names,
-                  point_file_format, datastore_path, datastore_transfer_path,
-                  make_index_undirected, pruning_degree_multiplier,
-                  remove_long_paths, verbose);
+    comm.cout0() << "\n<<Read Points>>" << std::endl;
+    ygm::timer point_read_timer;
+    saltatlas::read_points(point_file_names, point_file_format, verbose,
+                           dnnd.get_point_store(), dnnd.get_point_partitioner(),
+                           comm);
+    comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
+                 << std::endl;
 
-    {
-      dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
-                     comm, std::random_device{}(), verbose);
+    comm.cout0() << "\n<<Index Construction>>" << std::endl;
+    ygm::timer const_timer;
+    dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                         batch_size);
+    comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
+                 << std::endl;
 
-      comm.cout0() << "\n<<Read Points>>" << std::endl;
-      ygm::timer point_read_timer;
-      saltatlas::read_points(point_file_names, point_file_format, verbose,
-                             dnnd.get_point_store(),
-                             dnnd.get_point_partitioner(), comm);
-      comm.cout0() << "\nReading points took (s)\t"
-                   << point_read_timer.elapsed() << std::endl;
+    comm.cout0() << "\n<<Index Optimization>>" << std::endl;
+    ygm::timer optimization_timer;
+    dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
+                        remove_long_paths);
+    comm.cout0() << "\nIndex optimization took (s)\t"
+                 << optimization_timer.elapsed() << std::endl;
+  }
+  comm.cout0() << "\nThe index is ready for query." << std::endl;
 
-      comm.cout0() << "\n<<Index Construction>>" << std::endl;
-      ygm::timer const_timer;
-      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
-                           batch_size);
-      comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
-                   << std::endl;
-
-      comm.cout0() << "\n<<Index Optimization>>" << std::endl;
-      ygm::timer optimization_timer;
-      dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
-                          remove_long_paths);
-      comm.cout0() << "\nIndex optimization took (s)\t"
-                   << optimization_timer.elapsed() << std::endl;
-    }
-    comm.cout0() << "\nThe index is ready for query." << std::endl;
-
-    if (!datastore_transfer_path.empty()) {
-      if (dnnd_type::copy(datastore_path, datastore_transfer_path)) {
-        comm.cout0() << "\nTransferred index data store." << std::endl;
-      } else {
-        comm.cerr0() << "\nFailed to transfer index." << std::endl;
-      }
+  if (!datastore_transfer_path.empty()) {
+    if (dnnd_type::copy(datastore_path, datastore_transfer_path)) {
+      comm.cout0() << "\nTransferred index data store." << std::endl;
+    } else {
+      comm.cerr0() << "\nFailed to transfer index." << std::endl;
     }
   }
 
