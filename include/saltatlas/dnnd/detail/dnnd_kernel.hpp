@@ -319,10 +319,19 @@ class dnnd_kernel {
     ref_received.reserve(m_point_store.size());
     m_comm.cf_barrier();
 
+    std::vector<id_type> source_table;
+    source_table.reserve(table.size());
     for (const auto& item : table) {
-      const auto& source    = item.first;
-      const auto& neighbors = item.second;
-      m_comm.template async(
+      const auto& source = item.first;
+      source_table.push_back(source);
+    }
+    // Randomize the source ID's order to avoid updating the same node from
+    // many processes at the same time.
+    std::shuffle(source_table.begin(), source_table.end(), m_rnd_generator);
+
+    for (const auto source : source_table) {
+      const auto& neighbors = table.at(source);
+      m_comm.async(
           m_point_partitioner(source),
           [](auto, const id_type vid,
              const typename adj_lsit_type::mapped_type& neighbors) {
