@@ -214,6 +214,8 @@ Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
 
 ### dnnd_pm_const_example
 
+This program constructs a k-NN index.
+
 ```shell
 ./examples/dnnd_pm_const_example (options, see below) point_file_0 point_file_1...
 -z [string, required] Path to store constructed index.
@@ -232,18 +234,36 @@ Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
 -u  If specified, make the index undirected before the query.
 -m [double] Pruning degree multiplier (m) in PyNNDescent.
     Each point keeps up to 'k' x 'm' nearest neighbors.****
--l  If specified, remove long paths before the query.
 -b [long int] Batch size (0 is full batch mode).
 -x [string] If specified, transfer index to this path at the end.
 -v  If specified, turn on the verbose mode.
 [string, required] List of input point files at the end. 
 ```
 
+
+### dnnd_pm_optimize_example
+
+This program optimizes an already constructed k-NN index.
+```shell
+./examples/dnnd_pm_optimize_example (options, see below)
+-z [string, required] Path to store constructed index.
+-u  If specified, make the index undirected.
+-m [double] Pruning degree multiplier (m) in PyNNDescent.
+    Each point keeps up to 'k' x 'm' nearest neighbors.****
+-l  If specified, remove long paths.    
+-x [string] If specified, transfer an already constructed index from this path to path 'z' at the begining.
+-o [string] If specified, transfer index to this path at the end.
+-v  If specified, turn on the verbose mode.
+```
+
+
 ### dnnd_pm_query_example
+
+This program performs queries against an already constructed index.
 
 ```shell
 ./examples/dnnd_pm_query_example (options, see below)
--z [string, required] Path to store constructed index.
+-z [string, required] Path to index.
 -q [string, required] Path to a query file.
 -n [int, required] Number of nearest neighbors to find for each query point.
 -b [long int] Batch size (0 is full batch mode).

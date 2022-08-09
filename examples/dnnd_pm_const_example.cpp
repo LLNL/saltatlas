@@ -28,10 +28,7 @@ void parse_options(int argc, char **argv, int &index_k, double &r,
                    std::size_t &batch_size, std::string &distance_metric_name,
                    std::vector<std::string> &point_file_names,
                    std::string &point_file_format, std::string &datastore_path,
-                   std::string &datastore_transfer_path,
-                   bool        &make_index_undirected,
-                   double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose);
+                   std::string &datastore_transfer_path, bool &verbose);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
@@ -46,16 +43,12 @@ int main(int argc, char **argv) {
   std::string              point_file_format;
   std::string              datastore_path;
   std::string              datastore_transfer_path;
-  bool                     make_index_undirected{false};
-  double                   pruning_degree_multiplier{1.5};
-  bool                     remove_long_paths{false};
   bool                     verbose{false};
 
   parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
                 batch_size, distance_metric_name, point_file_names,
                 point_file_format, datastore_path, datastore_transfer_path,
-                make_index_undirected, pruning_degree_multiplier,
-                remove_long_paths, verbose);
+                verbose);
 
   {
     dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
@@ -75,35 +68,30 @@ int main(int argc, char **argv) {
                          batch_size);
     comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
-
-    comm.cout0() << "\n<<Index Optimization>>" << std::endl;
-    ygm::timer optimization_timer;
-    dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
-                        remove_long_paths);
-    comm.cout0() << "\nIndex optimization took (s)\t"
-                 << optimization_timer.elapsed() << std::endl;
   }
-  comm.cout0() << "\nThe index is ready for query." << std::endl;
 
   if (!datastore_transfer_path.empty()) {
-    if (dnnd_type::copy(datastore_path, datastore_transfer_path)) {
-      comm.cout0() << "\nTransferred index data store." << std::endl;
-    } else {
+    comm.cout0() << "\nTransferring index data store " << datastore_path
+                 << " to " << datastore_transfer_path << std::endl;
+    if (!dnnd_type::copy(datastore_path, datastore_transfer_path)) {
       comm.cerr0() << "\nFailed to transfer index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
   }
+
+  comm.cout0() << "\nThe index is ready for query." << std::endl;
 
   return 0;
 }
 
-inline void parse_options(
-    int argc, char **argv, int &index_k, double &r, double &delta,
-    bool &exchange_reverse_neighbors, std::size_t &batch_size,
-    std::string              &distance_metric_name,
-    std::vector<std::string> &point_file_names, std::string &point_file_format,
-    std::string &datastore_path, std::string &datastore_transfer_path,
-    bool &make_index_undirected, double &pruning_degree_multiplier,
-    bool &remove_long_paths, bool &verbose) {
+inline void parse_options(int argc, char **argv, int &index_k, double &r,
+                          double &delta, bool &exchange_reverse_neighbors,
+                          std::size_t              &batch_size,
+                          std::string              &distance_metric_name,
+                          std::vector<std::string> &point_file_names,
+                          std::string              &point_file_format,
+                          std::string              &datastore_path,
+                          std::string &datastore_transfer_path, bool &verbose) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
@@ -113,7 +101,7 @@ inline void parse_options(
   verbose                    = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:eb:um:lv")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:eb:v")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -149,18 +137,6 @@ inline void parse_options(
 
       case 'b':
         batch_size = std::stoul(optarg);
-        break;
-
-      case 'u':
-        make_index_undirected = true;
-        break;
-
-      case 'm':
-        pruning_degree_multiplier = std::stod(optarg);
-        break;
-
-      case 'l':
-        remove_long_paths = true;
         break;
 
       case 'v':

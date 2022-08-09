@@ -27,7 +27,7 @@ void parse_options(int argc, char **argv, std::string &datastore_path,
                    std::string &original_datastore_path, int &query_k,
                    std::size_t &batch_size, std::string &query_file_name,
                    std::string &ground_truth_neighbor_ids_file_name,
-                   std::string &query_result_file_path);
+                   std::string &query_result_file_path, bool &verbose);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
@@ -39,10 +39,12 @@ int main(int argc, char **argv) {
   std::string query_file_name;
   std::string ground_truth_neighbor_ids_file_name;
   std::string query_result_file_name;
+  bool        verbose{false};
 
   parse_options(argc, argv, datastore_path, original_datastore_path, query_k,
                 batch_size, query_file_name,
-                ground_truth_neighbor_ids_file_name, query_result_file_name);
+                ground_truth_neighbor_ids_file_name, query_result_file_name,
+                verbose);
 
   if (!original_datastore_path.empty()) {
     if (dnnd_type::copy(original_datastore_path, datastore_path)) {
@@ -54,7 +56,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    dnnd_type dnnd(dnnd_type::open, datastore_path, comm);
+    dnnd_type dnnd(dnnd_type::open, datastore_path, comm, verbose);
     comm.cout0() << "<<Query>>" << std::endl;
 
     comm.cout0() << "Reading queries" << std::endl;
@@ -94,7 +96,7 @@ inline void parse_options(int argc, char **argv, std::string &datastore_path,
                           std::string &original_datastore_path, int &query_k,
                           std::size_t &batch_size, std::string &query_file_name,
                           std::string &ground_truth_neighbor_ids_file_name,
-                          std::string &query_result_file_path) {
+                          std::string &query_result_file_path, bool &verbose) {
   datastore_path.clear();
   original_datastore_path.clear();
   query_file_name.clear();
@@ -102,7 +104,7 @@ inline void parse_options(int argc, char **argv, std::string &datastore_path,
   query_result_file_path.clear();
 
   int n;
-  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:")) != -1) {
+  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:v")) != -1) {
     switch (n) {
       case 'b':
         batch_size = std::stoul(optarg);
@@ -130,6 +132,10 @@ inline void parse_options(int argc, char **argv, std::string &datastore_path,
 
       case 'o':
         query_result_file_path = optarg;
+        break;
+
+      case 'v':
+        verbose = true;
         break;
 
       default:
