@@ -114,18 +114,18 @@ inline void show_accuracy(
     std::cerr
         << "#of numbers of ground truth and test result neighbors are different"
         << std::endl;
-    return;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
 
   std::vector<double> accuracies;
   for (std::size_t i = 0; i < test_result.size(); ++i) {
     if (test_result[i].empty()) {
-      std::cerr << "The " << i << "-th query result is an empty" << std::endl;
+      std::cerr << "The " << i << "-th query result is empty" << std::endl;
       return;
     }
 
     if (ground_truth[i].empty()) {
-      std::cerr << "The " << i << "-th ground truth is an empty" << std::endl;
+      std::cerr << "The " << i << "-th ground truth is empty" << std::endl;
       return;
     }
 

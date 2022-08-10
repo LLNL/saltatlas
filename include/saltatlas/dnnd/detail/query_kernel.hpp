@@ -177,6 +177,10 @@ class dknn_batch_query_kernel {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
+      if (nn_index.num_neighbors(src_id) == 0) {
+        std::cerr << "Point " << src_id << " has no neighbors" << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
       for (auto nitr = nn_index.neighbors_begin(src_id),
                 end  = nn_index.neighbors_end(src_id);
            nitr != end; ++nitr) {
