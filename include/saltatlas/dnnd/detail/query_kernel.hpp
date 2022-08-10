@@ -14,13 +14,13 @@
 
 #include <ygm/comm.hpp>
 
+#include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -42,9 +42,9 @@ class dknn_batch_query_kernel {
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
-  using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = distance::metric_type<feature_element_type>;
-  using neighbor_type = typename nn_index_type::neighbor_type;
+  using point_partitioner = std::function<int(const id_type& id)>;
+  using distance_metric   = distance::metric_type<feature_element_type>;
+  using neighbor_type     = typename nn_index_type::neighbor_type;
 
   // These data stores are allocated on DRAM
   using query_point_store_type = point_store<id_type, feature_element_type>;
@@ -130,7 +130,11 @@ class dknn_batch_query_kernel {
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         auto&      knn      = query_result[query_no];
-        assert(m_knn_heap_table.count(query_no));
+        if (m_knn_heap_table.count(query_no) == 0) {
+          std::cerr << query_no << "-th query result is empty" << std::endl;
+          MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
         auto& heap = m_knn_heap_table.at(query_no);
         while (!heap.empty()) {
           knn.push_back(heap.top());
