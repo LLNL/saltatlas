@@ -131,7 +131,7 @@ class dknn_batch_query_kernel {
         const auto query_no = query_no_offset + i;
         auto&      knn      = query_result[query_no];
         if (m_knn_heap_table.count(query_no) == 0) {
-          std::cerr << query_no << "-th query result is empty" << std::endl;
+          std::cerr << query_no << "-th knn heap is empty" << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 

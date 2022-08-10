@@ -62,9 +62,14 @@ inline std::vector<std::vector<neighbor_type>> gather_query_result(
   comm.cf_barrier();
 
   for (const auto &item : local_result) {
-    const auto                &query_no = item.first;
+    const auto                 query_no = item.first;
     std::vector<neighbor_type> neighbors(item.second.begin(),
                                          item.second.end());
+    if (neighbors.empty()) {
+      std::cerr << query_no << "-th query result is empty (before sending)." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
     comm.async(
         0,
         [](const std::size_t                 query_no,
@@ -74,6 +79,16 @@ inline std::vector<std::vector<neighbor_type>> gather_query_result(
         query_no, neighbors);
   }
   comm.barrier();
+
+  // Sanity check
+  if (comm.rank0()) {
+    for (std::size_t i = 0; i < global_result.size(); ++i) {
+      if (global_result[i].empty()) {
+        std::cerr << i << "-th query result is empty (after gather)." << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+    }
+  }
 
   return global_result;
 }
