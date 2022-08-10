@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -35,7 +36,6 @@ void read_points_wsv(
                                                 &local_point_store,
     const std::function<int(const id_type &id)> &point_partitioner,
     ygm::comm                                   &comm) {
-
   std::size_t count_points = 0;
   const auto  range =
       partial_range(sorted_file_names.size(), comm.rank(), comm.size());
@@ -52,6 +52,11 @@ void read_points_wsv(
     }
   }
   comm.cf_barrier();
+
+  if (comm.all_reduce_sum(count_points) > std::numeric_limits<id_type>::max()) {
+    comm.cerr0() << "Too many points in the file(s)" << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
 
   /// TODO: use YGM's all-to-all function
   std::vector<std::size_t> num_points(comm.size());
@@ -124,7 +129,6 @@ void read_points_with_id(
                                                 &local_point_store,
     const std::function<int(const id_type &id)> &point_partitioner,
     ygm::comm                                   &comm) {
-
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
   local_point_store.clear();
   static auto &ref_point_store = local_point_store;
@@ -176,23 +180,22 @@ void read_points_with_id_and_delimiter(
                                                 &local_point_store,
     const std::function<int(const id_type &id)> &point_partitioner,
     ygm::comm                                   &comm) {
-
-  const auto converter =
-      [delimiter](const std::string &input, id_type *id,
-                  std::vector<feature_element_type> *feature) {
-        std::vector<std::string> result;
-        std::string              buf;
-        bool                     first = true;
-        feature->clear();
-        for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
-          if (first)
-            *id = str_cast<id_type>(buf);
-          else
-            feature->push_back(str_cast<feature_element_type>(buf));
-          first = false;
-        }
-        return true;
-      };
+  const auto converter = [delimiter](
+                             const std::string &input, id_type *id,
+                             std::vector<feature_element_type> *feature) {
+    std::vector<std::string> result;
+    std::string              buf;
+    bool                     first = true;
+    feature->clear();
+    for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
+      if (first)
+        *id = str_cast<id_type>(buf);
+      else
+        feature->push_back(str_cast<feature_element_type>(buf));
+      first = false;
+    }
+    return true;
+  };
 
   read_points_with_id(file_names, converter, local_point_store,
                       point_partitioner, comm);

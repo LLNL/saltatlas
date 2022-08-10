@@ -81,6 +81,7 @@ int main(int argc, char **argv) {
             read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
         show_accuracy(ground_truth_neighbors, all_query_result);
       }
+      comm.cf_barrier();
 
       if (!query_result_file_name.empty()) {
         comm.cout0() << "\nDumping query results" << std::endl;
@@ -88,6 +89,8 @@ int main(int argc, char **argv) {
       }
     }
   }
+
+  comm.cf_barrier();
 
   return 0;
 }

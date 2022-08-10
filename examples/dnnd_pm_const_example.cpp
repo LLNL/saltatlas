@@ -80,6 +80,7 @@ int main(int argc, char **argv) {
   }
 
   comm.cout0() << "\nThe index is ready for query." << std::endl;
+  comm.cf_barrier();
 
   return 0;
 }

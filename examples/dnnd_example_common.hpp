@@ -110,10 +110,25 @@ template <typename id_type, typename neighbor_type>
 inline void show_accuracy(
     const std::vector<std::vector<id_type>>       &ground_truth,
     const std::vector<std::vector<neighbor_type>> &test_result) {
-  assert(ground_truth.size() == test_result.size());
+  if (ground_truth.size() != test_result.size()) {
+    std::cerr
+        << "#of numbers of ground truth and test result neighbors are different"
+        << std::endl;
+    return;
+  }
 
   std::vector<double> accuracies;
   for (std::size_t i = 0; i < test_result.size(); ++i) {
+    if (test_result[i].empty()) {
+      std::cerr << "The " << i << "-th query result is an empty" << std::endl;
+      return;
+    }
+
+    if (ground_truth[i].empty()) {
+      std::cerr << "The " << i << "-th ground truth is an empty" << std::endl;
+      return;
+    }
+
     std::unordered_set<id_type> true_set;
     for (const auto &n : ground_truth[i]) true_set.insert(n);
 
