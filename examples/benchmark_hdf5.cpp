@@ -163,6 +163,10 @@ float my_l2_sqr(const std::vector<float> &x, const std::vector<float> &y) {
   return dist_sqr;
 }
 
+float my_l2(const std::vector<float> &x, const std::vector<float> &y) {
+  return sqrt(my_l2_sqr(x, y));
+}
+
 ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
     ygm::container::bag<std::string> &bag_filenames,
     const std::vector<std::string>   &data_col_names) {
@@ -487,7 +491,8 @@ int main(int argc, char **argv) {
     fill_filenames_bag(bag_index_filenames, index_filename);
 
     // Build index
-    auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
+    // auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2_sqr);
+    auto my_l2_space = saltatlas::utility::SpaceWrapper(my_l2);
     /*
 saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
 world, my_l2_space);
@@ -513,6 +518,15 @@ dist_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
                 data_col_names);
     dist_index.comm().barrier();
     world.cout0("Total index construction time: ", step_timer.elapsed());
+
+    auto thetas = partitioner.get_thetas();
+
+    /*
+world.cout0("Thetas: ");
+for (const auto &theta : thetas) {
+world.cout0(theta);
+}
+    */
 
     // Time querying if query file is provided
     if ((query_filename != "") && (ground_truth_filename == "")) {

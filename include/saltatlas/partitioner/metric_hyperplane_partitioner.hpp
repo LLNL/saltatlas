@@ -10,6 +10,8 @@
 
 #include <ygm/comm.hpp>
 #include <ygm/container/bag.hpp>
+#include <ygm/container/map.hpp>
+#include <ygm/utility.hpp>
 
 namespace saltatlas {
 
@@ -26,6 +28,10 @@ class metric_hyperplane_partitioner {
                                 hnswlib::SpaceInterface<DistType> &space)
       : m_comm(c), m_space(space) {}
 
+  ~metric_hyperplane_partitioner() {
+    m_comm.cout0("Median time: ", m_median_time);
+  }
+
   void initialize(ygm::container::bag<std::pair<uint64_t, Point>> &data,
                   const uint32_t num_partitions) {
     m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<DistType>>(
@@ -40,6 +46,8 @@ class metric_hyperplane_partitioner {
     // Stores assignments of points to tree nodes, indexed globally (to match
     // m_tree nodes)
     std::unordered_map<uint64_t, uint64_t> point_assignments;
+
+    ygm::timer t{};
 
     data.for_all(
         [&current_level_points, &point_assignments](const auto &id_point) {
@@ -80,6 +88,8 @@ class metric_hyperplane_partitioner {
       current_level_points.clear();
       std::swap(current_level_points, next_level_points);
     }
+
+    m_comm.cout0("Partitioner initialization time: ", t.elapsed());
   }
 
   std::vector<uint64_t> find_point_partitions(const Point   &features,
@@ -88,20 +98,6 @@ class metric_hyperplane_partitioner {
     to_return.reserve(num_partitions);
 
     to_return.push_back(search_tree(features));
-
-    std::priority_queue<std::pair<DistType, hnswlib::labeltype>> nearest_pq =
-        m_hnsw_ptr->searchKnn(&features, num_partitions);
-
-    /*
-// Need to read into tmp_vec because nearest_pq is in reverse order...
-std::vector<uint64_t> tmp_vec(num_partitions);
-uint32_t              i = num_partitions;
-while (nearest_pq.size() > 0) {
-auto seed_ID = nearest_pq.top().second;
-tmp_vec[--i] = seed_ID;
-nearest_pq.pop();
-}
-    */
 
     auto hnsw_nearest =
         m_hnsw_ptr->searchKnnCloserFirst(&features, num_partitions);
@@ -116,6 +112,57 @@ nearest_pq.pop();
     }
 
     return to_return;
+  }
+
+  std::vector<DistType> get_thetas() {
+    std::vector<DistType> to_return;
+
+    for (const auto &node : m_tree) {
+      DistType seed_dist =
+          m_space.get_dist_func()(&node.selectors.first, &node.selectors.second,
+                                  m_space.get_dist_func_param());
+      to_return.push_back(node.theta / pow(seed_dist, 2));
+      // to_return.push_back(node.theta);
+    }
+
+    return to_return;
+  }
+
+  struct node_statistics {
+    std::vector<DistType>   thetas;
+    std::pair<Point, Point> selectors;
+
+    DistType selector_distance;
+
+    uint64_t              index;
+    uint64_t              parent;
+    std::vector<uint64_t> children;
+  };
+
+  std::vector<node_statistics> find_tree_statistics(
+      ygm::container::bag<std::pair<uint64_t, Point>> &data) {
+    ygm::container::map<uint64_t, node_statistics> stats_map;
+
+    data.for_all([&stats_map, this](const auto &index_pt_pair) {
+      const auto &[index, point] = index_pt_pair;
+
+      auto leaf_index = search_tree(point);
+
+      auto search_path = reconstruct_search_path(leaf_index);
+
+      for (size_t i = 1; i < search_path.size(); ++i) {
+        const auto tree_index = search_path[i];
+
+        auto &node = m_tree[tree_index];
+
+        DistType dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
+                                                 m_space.get_dist_func_param());
+        DistType dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
+                                                 m_space.get_dist_func_param());
+
+        DistType theta = pow(dist2, 2) - pow(dist1, 2);
+      }
+    });
   }
 
  private:
@@ -196,6 +243,20 @@ nearest_pq.pop();
     }
 
     return index_to_ln(tree_index).second;
+  }
+
+  std::vector<uint64_t> reconstruct_search_path(const uint64_t &leaf_node) {
+    std::vector<uint64_t> to_return;
+
+    uint64_t curr_node = leaf_node;
+    to_return.push_back(curr_node);
+    while (curr_node > 0) {
+      curr_node = (curr_node - 1) / 2;
+
+      to_return.push_back(curr_node);
+    }
+
+    return to_return;
   }
 
   // Selectors are not currently chosen uniformly
@@ -304,7 +365,10 @@ nearest_pq.pop();
   void find_split_thetas(const std::vector<std::vector<DistType>> &thetas,
                          const uint32_t                            level) {
     for (int i = 0; i < thetas.size(); ++i) {
-      auto theta_median = median(thetas[i], i % m_comm.size());
+      m_comm.barrier();
+      ygm::timer t{};
+      auto       theta_median = median(thetas[i], i % m_comm.size());
+      m_median_time += t.elapsed();
 
       auto index = ln_to_index(level, i);
 
@@ -354,6 +418,8 @@ nearest_pq.pop();
   uint32_t m_max_nonleaf;
 
   std::unique_ptr<hnswlib::HierarchicalNSW<DistType>> m_hnsw_ptr;
+
+  double m_median_time{0.0};
 };
 
 }  // namespace saltatlas
