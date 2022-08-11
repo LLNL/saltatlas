@@ -102,8 +102,9 @@ class dknn_batch_query_kernel {
       m_comm.cout0() << "Batch Size\t" << m_option.batch_size << std::endl;
     }
 
-    std::size_t query_no_offset = range.first;
-    std::size_t last_query_no   = range.second - 1;
+    std::size_t query_no_offset     = range.first;
+    std::size_t last_query_no       = range.second - 1;
+    std::size_t count_local_queries = 0;
     for (std::size_t batch_no = 0;; ++batch_no) {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Batch No. " << batch_no << "]" << std::endl;
@@ -123,6 +124,7 @@ class dknn_batch_query_kernel {
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         priv_launch_asynch_single_query(query_no, m_rnd_generator);
+        ++count_local_queries;
       }
       m_comm.barrier();
 
@@ -152,6 +154,11 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "#of remaining queries\t" << global_remaining_queries
                        << std::endl;
       }
+    }
+    if (m_comm.all_reduce_sum(count_local_queries) != num_global_queries) {
+      m_comm.cout0() << "Logic error!! Not all queries have been processed"
+                     << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
   }
 
