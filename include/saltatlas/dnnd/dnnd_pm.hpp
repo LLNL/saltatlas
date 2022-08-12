@@ -157,6 +157,10 @@ class dnnd_pm {
   /// \return  A reference to the point store instance.
   point_store_type& get_point_store() const { return m_data_core->point_store; }
 
+  /// \brief Return a reference to a knn index instance.
+  /// \return  A reference to a knn index instance.
+  const knn_index_type& get_knn_index() const { return m_data_core->knn_index; }
+
   /// \brief Return a point partitioner instance.
   /// \return A point partitioner instance.
   point_partitioner get_point_partitioner() const {
