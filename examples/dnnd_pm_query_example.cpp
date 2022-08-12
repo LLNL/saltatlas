@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    dnnd_type dnnd(dnnd_type::open, datastore_path, comm, verbose);
+    dnnd_type dnnd(dnnd_type::open_read_only, datastore_path, comm, verbose);
     comm.cout0() << "<<Query>>" << std::endl;
 
     comm.cout0() << "Reading queries" << std::endl;
