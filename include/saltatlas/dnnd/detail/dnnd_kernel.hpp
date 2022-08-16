@@ -383,7 +383,7 @@ class dnnd_kernel {
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
             if (m_option.mini_batch_size > 0 &&
-                targets.size() > m_option.mini_batch_size) {
+                targets.size() >= m_option.mini_batch_size) {
               return false;
             }
           }
@@ -398,9 +398,10 @@ class dnnd_kernel {
     std::size_t pos1    = 0;
     std::size_t pos2    = 0;
     while (true) {
-      const int finished = generator(pos_src, pos1, pos2);
+      bool finished = generator(pos_src, pos1, pos2);
       priv_launch_neighbor_checking(targets);
-      if (m_comm.all_reduce_sum(finished) == m_comm.size()) break;
+      finished &= targets.empty();
+      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
     }
   }
 
