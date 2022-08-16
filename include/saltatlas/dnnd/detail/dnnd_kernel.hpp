@@ -370,9 +370,9 @@ class dnnd_kernel {
   void priv_update_neighbors_new_new(const std::vector<id_type>& srcs,
                                      const adj_lsit_type&        new_table) {
     std::queue<std::pair<id_type, id_type>> targets;
-    auto generator = [this, &srcs, &new_table, &targets](std::size_t& pos_src,
-                                                         std::size_t& pos1,
-                                                         std::size_t& pos2) {
+    auto task_generator = [this, &srcs, &new_table, &targets](
+                              std::size_t& pos_src, std::size_t& pos1,
+                              std::size_t& pos2) {
       for (; pos_src < srcs.size(); ++pos_src) {
         const auto& news = new_table.at(srcs[pos_src]);
         for (; pos1 < news.size(); ++pos1) {
@@ -384,6 +384,7 @@ class dnnd_kernel {
             // Send some messages before generating everything first
             if (m_option.mini_batch_size > 0 &&
                 targets.size() >= m_option.mini_batch_size) {
+              ++pos2;
               return false;
             }
           }
@@ -398,9 +399,9 @@ class dnnd_kernel {
     std::size_t pos1    = 0;
     std::size_t pos2    = 0;
     while (true) {
-      bool finished = generator(pos_src, pos1, pos2);
+      const bool generated_all_tasks = task_generator(pos_src, pos1, pos2);
       priv_launch_neighbor_checking(targets);
-      finished &= targets.empty();
+      const bool finished = generated_all_tasks && targets.empty();
       if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
     }
   }
@@ -409,9 +410,9 @@ class dnnd_kernel {
                                      const adj_lsit_type&        old_table,
                                      const adj_lsit_type&        new_table) {
     std::queue<std::pair<id_type, id_type>> targets;
-    auto generator = [this, &new_srcs, &old_table, &new_table, &targets](
-                         std::size_t& pos_src, std::size_t& pos_old,
-                         std::size_t& pos_new) {
+    auto task_generator = [this, &new_srcs, &old_table, &new_table, &targets](
+                              std::size_t& pos_src, std::size_t& pos_old,
+                              std::size_t& pos_new) {
       for (; pos_src < new_srcs.size(); ++pos_src) {
         const auto& src  = new_srcs[pos_src];
         const auto& news = new_table.at(src);
@@ -425,7 +426,8 @@ class dnnd_kernel {
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
             if (m_option.mini_batch_size > 0 &&
-                targets.size() > m_option.mini_batch_size) {
+                targets.size() >= m_option.mini_batch_size) {
+              ++pos_old;
               return false;
             }
           }
@@ -440,9 +442,11 @@ class dnnd_kernel {
     std::size_t pos_old = 0;
     std::size_t pos_new = 0;
     while (true) {
-      const int finished = generator(pos_src, pos_old, pos_new);
+      const bool generated_all_tasks =
+          task_generator(pos_src, pos_old, pos_new);
       priv_launch_neighbor_checking(targets);
-      if (m_comm.all_reduce_sum(finished) == m_comm.size()) break;
+      const bool finished = generated_all_tasks && targets.empty();
+      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
     }
   }
 
