@@ -27,12 +27,12 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -525,8 +525,8 @@ class dnnd_kernel {
     ++m_mini_batch_no;
 
     const auto local_mini_batch_size =
-        mpi::distribute_tasks(targets.size(), m_option.mini_batch_size,
-                              m_comm.rank(), m_comm.size(), m_option.verbose);
+        mpi::assign_tasks(targets.size(), m_option.mini_batch_size,
+                          m_comm.rank(), m_comm.size(), m_option.verbose);
     assert(local_mini_batch_size <= targets.size());
 
 #if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS

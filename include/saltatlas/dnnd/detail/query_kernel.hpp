@@ -110,7 +110,7 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "\n[Batch No. " << batch_no << "]" << std::endl;
       }
 
-      const auto local_batch_size = mpi::distribute_tasks(
+      const auto local_batch_size = mpi::assign_tasks(
           last_query_no - query_no_offset + 1, m_option.batch_size,
           m_comm.rank(), m_comm.size(), m_option.verbose);
 
