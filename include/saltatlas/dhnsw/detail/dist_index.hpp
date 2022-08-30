@@ -86,7 +86,10 @@ class dhnsw_impl {
       m_voronoi_cell_hnsw.push_back(hnsw);
 
       // Add data points to HNSW
-      std::random_shuffle(m_cell_add_vec[i].begin(), m_cell_add_vec[i].end());
+      // std::random_shuffle(m_cell_add_vec[i].begin(),
+      // m_cell_add_vec[i].end());
+      std::sort(m_cell_add_vec[i].begin(), m_cell_add_vec[i].end(),
+                [](const auto &a, const auto &b) { return a.first < b.first; });
       for (auto &[index, feature_vec] : m_cell_add_vec[i]) {
         m_local_data[index] = std::move(feature_vec);
         m_voronoi_cell_hnsw[i]->addPoint(&m_local_data[index], index);
