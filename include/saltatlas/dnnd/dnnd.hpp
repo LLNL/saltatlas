@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
@@ -13,12 +14,12 @@
 
 #include <ygm/comm.hpp>
 
+#include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/dnnd_kernel.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/nn_index_optimizer.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas {
 
