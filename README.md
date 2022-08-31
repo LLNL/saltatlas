@@ -249,8 +249,9 @@ This program optimizes an already constructed k-NN index.
 -z [string, required] Path to store constructed index.
 -u  If specified, make the index undirected.
 -m [double] Pruning degree multiplier (m) in PyNNDescent.
-    Each point keeps up to 'k' x 'm' nearest neighbors.****
--l  If specified, remove long paths.    
+    Each point keeps up to 'k' x 'm' nearest neighbors.
+    If -1 is specified, do not perform pruning.
+-l  If specified, remove long paths.
 -x [string] If specified, transfer an already constructed index from this path to path 'z' at the begining.
 -o [string] If specified, transfer index to this path at the end.
 -v  If specified, turn on the verbose mode.
@@ -280,6 +281,9 @@ cd build
 
 # Construct a k-NN index and store
 mpirun -n 2 ./examples/dnnd_pm_const_example -z ./pindex -k 2 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
+
+# Optimize the k-NN index created above
+mpirun -n 2 ./examples/dnnd_pm_optimize_example -z ./pindex -u -m 1.5
 
 # Open the k-NN index created above, query nearest neighbors, and show the accuracy.
 mpirun -n 2 ./examples/dnnd_pm_query_example -z ./pindex \
