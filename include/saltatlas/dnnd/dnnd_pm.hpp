@@ -202,6 +202,7 @@ class dnnd_pm {
   /// \param pruning_degree_multiplier
   /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
   /// where k is the number of neighbors each point in the index has.
+  /// if this value is less than 0, there is no pruning.
   /// \param remove_long_paths If true, remove long paths.
   void optimize_index(const bool   make_index_undirected     = false,
                       const double pruning_degree_multiplier = 1.5,
@@ -259,6 +260,9 @@ class dnnd_pm {
   }
 
   /// \brief Copies a datastore.
+  /// Copying a datastore that is opened with a writable mode could cause an
+  /// error. Must copy a datastore that is not opened or opened with the
+  /// read-only mode.
   /// \param source_path Source data store path.
   /// \param destination_path Destination data store path.
   /// \return Returns true on success; otherwise, false.
