@@ -14,13 +14,13 @@
 
 #include <ygm/comm.hpp>
 
+#include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -42,9 +42,9 @@ class dknn_batch_query_kernel {
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
-  using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = distance::metric_type<feature_element_type>;
-  using neighbor_type = typename nn_index_type::neighbor_type;
+  using point_partitioner = std::function<int(const id_type& id)>;
+  using distance_metric   = distance::metric_type<feature_element_type>;
+  using neighbor_type     = typename nn_index_type::neighbor_type;
 
   // These data stores are allocated on DRAM
   using query_point_store_type = point_store<id_type, feature_element_type>;
@@ -102,14 +102,15 @@ class dknn_batch_query_kernel {
       m_comm.cout0() << "Batch Size\t" << m_option.batch_size << std::endl;
     }
 
-    std::size_t query_no_offset = range.first;
-    std::size_t last_query_no   = range.second - 1;
+    std::size_t query_no_offset     = range.first;
+    std::size_t last_query_no       = range.second - 1;
+    std::size_t count_local_queries = 0;
     for (std::size_t batch_no = 0;; ++batch_no) {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Batch No. " << batch_no << "]" << std::endl;
       }
 
-      const auto local_batch_size = mpi::distribute_tasks(
+      const auto local_batch_size = mpi::assign_tasks(
           last_query_no - query_no_offset + 1, m_option.batch_size,
           m_comm.rank(), m_comm.size(), m_option.verbose);
 
@@ -123,6 +124,7 @@ class dknn_batch_query_kernel {
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         priv_launch_asynch_single_query(query_no, m_rnd_generator);
+        ++count_local_queries;
       }
       m_comm.barrier();
 
@@ -130,8 +132,12 @@ class dknn_batch_query_kernel {
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         auto&      knn      = query_result[query_no];
-        assert(m_knn_heap_table.count(query_no));
+
         auto& heap = m_knn_heap_table.at(query_no);
+        if (heap.empty()) {
+          std::cerr << query_no << "-th knn heap is empty." << std::endl;
+          MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
         while (!heap.empty()) {
           knn.push_back(heap.top());
           heap.pop();
@@ -148,6 +154,11 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "#of remaining queries\t" << global_remaining_queries
                        << std::endl;
       }
+    }
+    if (m_comm.all_reduce_sum(count_local_queries) != num_global_queries) {
+      m_comm.cout0() << "Logic error!! Not all queries have been processed"
+                     << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
   }
 
@@ -177,6 +188,10 @@ class dknn_batch_query_kernel {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
+      if (nn_index.num_neighbors(src_id) == 0) {
+        std::cerr << "Point " << src_id << " has no neighbors" << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
       for (auto nitr = nn_index.neighbors_begin(src_id),
                 end  = nn_index.neighbors_end(src_id);
            nitr != end; ++nitr) {

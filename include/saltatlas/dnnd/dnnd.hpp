@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <fstream>
 
 #include <ygm/comm.hpp>
 
@@ -50,6 +51,7 @@ class dnnd {
  public:
   using query_point_store_type =
       typename query_kernel_type::query_point_store_type;
+  using point_partitioner = typename nn_kernel_type::point_partitioner;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
   /// \brief Constructor.
@@ -74,6 +76,13 @@ class dnnd {
   /// \return  A reference to the point store instance.
   point_store_type& get_point_store() const { return m_point_store; }
 
+  /// \brief Return a point partitioner instance.
+  /// \return A point partitioner instance.
+  point_partitioner get_point_partitioner() const {
+    const int size = m_comm.size();
+    return [size](const id_type& id) { return id % size; };
+  };
+
   /// \brief Construct an k-NN index.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
@@ -93,7 +102,7 @@ class dnnd {
         .rnd_seed                   = m_rnd_seed,
         .verbose                    = m_verbose};
 
-    nn_kernel_type kernel(option, m_point_store, priv_get_point_partitioner(),
+    nn_kernel_type kernel(option, m_point_store, get_point_partitioner(),
                           m_distance_metric, m_comm);
     kernel.construct(m_knn_index);
     m_index_k = k;
@@ -122,7 +131,7 @@ class dnnd {
         .verbose                   = m_verbose};
     nn_index_optimizer_type optimizer{opt,
                                       m_point_store,
-                                      priv_get_point_partitioner(),
+                                      get_point_partitioner(),
                                       m_distance_metric,
                                       m_knn_index,
                                       m_comm};
@@ -144,7 +153,7 @@ class dnnd {
                                               .verbose    = m_verbose};
 
     query_kernel_type kernel(option, m_point_store,
-                             priv_get_point_partitioner(), m_distance_metric,
+                             get_point_partitioner(), m_distance_metric,
                              m_knn_index, m_comm);
 
     query_result_store_type query_result;
@@ -160,10 +169,6 @@ class dnnd {
   }
 
  private:
-  auto priv_get_point_partitioner() const {
-    const int size = m_comm.size();
-    return [size](const id_type& id) { return id % size; };
-  }
 
   void priv_read_points(const std::vector<std::string>& point_file_names,
                         const std::string_view          point_file_format) {
