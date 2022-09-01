@@ -117,7 +117,7 @@ class dhnsw_impl {
     m_seed_hnsw = new hnswlib::HierarchicalNSW<DistType>(
         m_metric_space_ptr, m_seeds.size(), 16, 200, 3149);
 
-#pragma omp parallel for
+    // #pragma omp parallel for
     for (size_t i = 0; i < m_seeds.size(); ++i) {
       m_seed_hnsw->addPoint(&m_seeds[i], i);
     }
