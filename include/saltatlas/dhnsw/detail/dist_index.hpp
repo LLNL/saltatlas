@@ -86,10 +86,7 @@ class dhnsw_impl {
       m_voronoi_cell_hnsw.push_back(hnsw);
 
       // Add data points to HNSW
-      // std::random_shuffle(m_cell_add_vec[i].begin(),
-      // m_cell_add_vec[i].end());
-      std::sort(m_cell_add_vec[i].begin(), m_cell_add_vec[i].end(),
-                [](const auto &a, const auto &b) { return a.first < b.first; });
+      set_cell_add_vec_ordering(m_cell_add_vec[i]);
       for (auto &[index, feature_vec] : m_cell_add_vec[i]) {
         m_local_data[index] = std::move(feature_vec);
         m_voronoi_cell_hnsw[i]->addPoint(&m_local_data[index], index);
@@ -117,7 +114,6 @@ class dhnsw_impl {
     m_seed_hnsw = new hnswlib::HierarchicalNSW<DistType>(
         m_metric_space_ptr, m_seeds.size(), 16, 200, 3149);
 
-    // #pragma omp parallel for
     for (size_t i = 0; i < m_seeds.size(); ++i) {
       m_seed_hnsw->addPoint(&m_seeds[i], i);
     }
@@ -213,6 +209,15 @@ class dhnsw_impl {
       if (current_cell == cell) return;
     }
     m_map_point_to_cells[index].push_back(cell);
+  }
+
+  void set_cell_add_vec_ordering(std::vector<std::pair<size_t, Point>> &vec) {
+#ifdef SALTATLAS_DETERMINISM  // Use fixed ordering if deterministic
+    std::sort(vec.begin(), vec.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+#else  // Otherwise shuffle ordering
+    std::random_shuffle(vec.begin(), vec.end());
+#endif
   }
 
   data_index_cell_map_type m_map_point_to_cells;
