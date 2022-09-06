@@ -29,7 +29,7 @@ class nn_index_optimizer {
   struct option {
     std::size_t index_k{0};
     bool        undirected{false};
-    double      pruning_degree_multiplier{-1};
+    double      pruning_degree_multiplier{-1}; // if < 0, no pruning.
     bool        remove_long_paths{false};
     bool        verbose{false};
   };
@@ -70,6 +70,7 @@ class nn_index_optimizer {
       m_comm.cout0() << "Making the index undirected" << std::endl;
     }
     auto reversed_index = priv_generate_reverse_index();
+    std::size_t max_degree = 0;
     for (auto sitr = reversed_index.points_begin(),
               send = reversed_index.points_end();
          sitr != send; ++sitr) {
@@ -82,8 +83,13 @@ class nn_index_optimizer {
       }
       reversed_index.clear_neighbors(source);  // reduce memory usage
       m_nn_index.sort_and_remove_duplicate_neighbors(source);
+      max_degree = std::max(m_nn_index.num_neighbors(source), max_degree);
     }
     m_comm.cf_barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "Max #of neighbors\t"
+                     << m_comm.all_reduce_max(max_degree) << std::endl;
+    }
   }
 
   /// \warning Generated index is not sorted by distance.

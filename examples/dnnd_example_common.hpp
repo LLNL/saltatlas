@@ -62,9 +62,15 @@ inline std::vector<std::vector<neighbor_type>> gather_query_result(
   comm.cf_barrier();
 
   for (const auto &item : local_result) {
-    const auto                &query_no = item.first;
+    const auto                 query_no = item.first;
     std::vector<neighbor_type> neighbors(item.second.begin(),
                                          item.second.end());
+    if (neighbors.empty()) {
+      std::cerr << query_no << "-th query result is empty (before sending)."
+                << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
     comm.async(
         0,
         [](const std::size_t                 query_no,
@@ -74,6 +80,17 @@ inline std::vector<std::vector<neighbor_type>> gather_query_result(
         query_no, neighbors);
   }
   comm.barrier();
+
+  // Sanity check
+  if (comm.rank0()) {
+    for (std::size_t i = 0; i < global_result.size(); ++i) {
+      if (global_result[i].empty()) {
+        std::cerr << i << "-th query result is empty (after gather)."
+                  << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+    }
+  }
 
   return global_result;
 }
@@ -110,10 +127,25 @@ template <typename id_type, typename neighbor_type>
 inline void show_accuracy(
     const std::vector<std::vector<id_type>>       &ground_truth,
     const std::vector<std::vector<neighbor_type>> &test_result) {
-  assert(ground_truth.size() == test_result.size());
+  if (ground_truth.size() != test_result.size()) {
+    std::cerr
+        << "#of numbers of ground truth and test result neighbors are different"
+        << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
 
   std::vector<double> accuracies;
   for (std::size_t i = 0; i < test_result.size(); ++i) {
+    if (test_result[i].empty()) {
+      std::cerr << "The " << i << "-th query result is empty" << std::endl;
+      return;
+    }
+
+    if (ground_truth[i].empty()) {
+      std::cerr << "The " << i << "-th ground truth is empty" << std::endl;
+      return;
+    }
+
     std::unordered_set<id_type> true_set;
     for (const auto &n : ground_truth[i]) true_set.insert(n);
 

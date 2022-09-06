@@ -15,12 +15,12 @@
 
 #include <metall/utility/metall_mpi_adaptor.hpp>
 
+#include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/dnnd_kernel.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/nn_index_optimizer.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
 
 namespace saltatlas {
 
@@ -44,17 +44,15 @@ struct data_core {
       dndetail::nn_index<id_type, distance_type, allocator_type>;
 
   data_core(const dndetail::distance::metric_id _metric_id,
-            const uint64_t _rnd_seed, const bool _verbose,
-            const allocator_type allocator = allocator_type())
+            const uint64_t                      _rnd_seed,
+            const allocator_type                allocator = allocator_type())
       : metric_id(_metric_id),
         rnd_seed(_rnd_seed),
-        verbose(_verbose),
         point_store(allocator),
         knn_index(allocator) {}
 
   dndetail::distance::metric_id metric_id;
   uint64_t                      rnd_seed;
-  bool                          verbose;
   point_store_type              point_store;
   knn_index_type                knn_index;
   std::size_t                   index_k{0};
@@ -110,6 +108,7 @@ class dnnd_pm {
  public:
   using query_point_store_type =
       typename query_kernel_type::query_point_store_type;
+  using point_partitioner       = typename nn_kernel_type::point_partitioner;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
   /// \brief Constructor. Create a new persistent index.
@@ -123,16 +122,18 @@ class dnnd_pm {
           const std::string_view distance_metric_name, ygm::comm& comm,
           const uint64_t rnd_seed = std::random_device{}(),
           const bool     verbose  = false)
-      : m_comm(comm) {
-    priv_create(datastore_path, distance_metric_name, rnd_seed, verbose);
+      : m_comm(comm), m_verbose(verbose) {
+    priv_create(datastore_path, distance_metric_name, rnd_seed);
     comm.cf_barrier();
   }
 
   /// \brief Constructor. Opens an already stored index.
   /// \param datastore_path Path to existing index.
   /// \param comm YGM comm instance.
-  dnnd_pm(open_t, const std::string_view datastore_path, ygm::comm& comm)
-      : m_comm(comm) {
+  /// \param verbose If true, enable the verbose mode.
+  dnnd_pm(open_t, const std::string_view datastore_path, ygm::comm& comm,
+          const bool verbose = false)
+      : m_comm(comm), m_verbose(verbose) {
     priv_open(datastore_path);
     comm.cf_barrier();
   }
@@ -140,9 +141,10 @@ class dnnd_pm {
   /// \brief Constructor. Opens an already stored index with the read-only mode.
   /// \param datastore_path Path to existing index.
   /// \param comm YGM comm instance.
+  /// \param verbose If true, enable the verbose mode.
   dnnd_pm(open_read_only_t, const std::string_view datastore_path,
-          ygm::comm& comm)
-      : m_comm(comm) {
+          ygm::comm& comm, const bool verbose = false)
+      : m_comm(comm), m_verbose(verbose) {
     priv_open_read_only(datastore_path);
     comm.cf_barrier();
   }
@@ -154,6 +156,17 @@ class dnnd_pm {
   /// \brief Return a reference to the point store instance.
   /// \return  A reference to the point store instance.
   point_store_type& get_point_store() const { return m_data_core->point_store; }
+
+  /// \brief Return a reference to a knn index instance.
+  /// \return  A reference to a knn index instance.
+  const knn_index_type& get_knn_index() const { return m_data_core->knn_index; }
+
+  /// \brief Return a point partitioner instance.
+  /// \return A point partitioner instance.
+  point_partitioner get_point_partitioner() const {
+    const int size = m_comm.size();
+    return [size](const id_type& id) { return id % size; };
+  };
 
   /// \brief Construct an k-NN index.
   /// \param k The number of nearest neighbors each point in the index has.
@@ -172,10 +185,10 @@ class dnnd_pm {
         .exchange_reverse_neighbors = exchange_reverse_neighbors,
         .mini_batch_size            = mini_batch_size,
         .rnd_seed                   = m_data_core->rnd_seed,
-        .verbose                    = m_data_core->verbose};
+        .verbose                    = m_verbose};
 
     nn_kernel_type kernel(option, m_data_core->point_store,
-                          priv_get_point_partitioner(),
+                          get_point_partitioner(),
                           dndetail::distance::metric<feature_element_type>(
                               m_data_core->metric_id),
                           m_comm);
@@ -189,6 +202,7 @@ class dnnd_pm {
   /// \param pruning_degree_multiplier
   /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
   /// where k is the number of neighbors each point in the index has.
+  /// if this value is less than 0, there is no pruning.
   /// \param remove_long_paths If true, remove long paths.
   void optimize_index(const bool   make_index_undirected     = false,
                       const double pruning_degree_multiplier = 1.5,
@@ -200,11 +214,11 @@ class dnnd_pm {
         .undirected                = make_index_undirected,
         .pruning_degree_multiplier = pruning_degree_multiplier,
         .remove_long_paths         = remove_long_paths,
-        .verbose                   = m_data_core->verbose};
+        .verbose                   = m_verbose};
     nn_index_optimizer_type optimizer{
         opt,
         m_data_core->point_store,
-        priv_get_point_partitioner(),
+        get_point_partitioner(),
         dndetail::distance::metric<feature_element_type>(
             m_data_core->metric_id),
         m_data_core->knn_index,
@@ -224,10 +238,10 @@ class dnnd_pm {
     typename query_kernel_type::option option{.k          = k,
                                               .batch_size = batch_size,
                                               .rnd_seed = m_data_core->rnd_seed,
-                                              .verbose  = m_data_core->verbose};
+                                              .verbose  = m_verbose};
 
     query_kernel_type kernel(option, m_data_core->point_store,
-                             priv_get_point_partitioner(),
+                             get_point_partitioner(),
                              dndetail::distance::metric<feature_element_type>(
                                  m_data_core->metric_id),
                              m_data_core->knn_index, m_comm);
@@ -246,11 +260,14 @@ class dnnd_pm {
   }
 
   /// \brief Copies a datastore.
+  /// Copying a datastore that is opened with a writable mode could cause an
+  /// error. Must copy a datastore that is not opened or opened with the
+  /// read-only mode.
   /// \param source_path Source data store path.
   /// \param destination_path Destination data store path.
   /// \return Returns true on success; otherwise, false.
   static bool copy(const std::string_view& source_path,
-                       const std::string_view& destination_path) {
+                   const std::string_view& destination_path) {
     return metall::utility::metall_mpi_adaptor::copy(source_path.data(),
                                                      destination_path.data());
   }
@@ -270,12 +287,12 @@ class dnnd_pm {
 
   void priv_create(const std::string_view path,
                    const std::string_view distance_metric_name,
-                   const uint64_t rnd_seed, const bool verbose) {
+                   const uint64_t         rnd_seed) {
     priv_create_metall(path);
     auto& lmgr  = m_metall->get_local_manager();
     m_data_core = lmgr.construct<data_core_type>(metall::unique_instance)(
         dndetail::distance::convert_to_metric_id(distance_metric_name),
-        rnd_seed, verbose, lmgr.get_allocator());
+        rnd_seed, lmgr.get_allocator());
     assert(m_data_core);
   }
 
@@ -305,14 +322,10 @@ class dnnd_pm {
     assert(m_data_core);
   }
 
-  auto priv_get_point_partitioner() const {
-    const int size = m_comm.size();
-    return [size](const id_type& id) { return id % size; };
-  }
-
   ygm::comm&                                           m_comm;
   std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
   data_core_type*                                      m_data_core{nullptr};
+  bool                                                 m_verbose{false};
 };
 
 }  // namespace saltatlas

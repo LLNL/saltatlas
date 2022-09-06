@@ -38,28 +38,34 @@ inline void show_task_distribution(const std::vector<std::size_t>& table) {
   std::cout << "Standard Deviation " << dv << std::endl;
 }
 
-/// \brief Distribute tasks over all MPI ranks.
+/// \brief Compute the number of tasks each MPI rank works on.
 /// \param num_local_tasks #of tasks in local.
 /// \param batch_size Global batch size. Up to this number of tasks are assigned
-/// over all ranks. If 0 is specified,
-/// /// \param mpi_rank My MPI rank.
+/// over all ranks. If 0 is specified, all tasks are assigned.
+/// \param mpi_rank My MPI rank.
 /// \param mpi_size MPI size.
 /// \param verbose Verbose mode.
 /// \return #of tasks assigned to myself.
-inline std::size_t distribute_tasks(const std::size_t num_local_tasks,
-                                    const std::size_t batch_size,
-                                    const int mpi_rank, const int mpi_size,
-                                    const bool verbose) {
+inline std::size_t assign_tasks(const std::size_t num_local_tasks,
+                                const std::size_t batch_size,
+                                const int mpi_rank, const int mpi_size,
+                                const bool verbose) {
+  if (batch_size == 0) {
+    return num_local_tasks;
+  }
+
   // Gather the number of tasks to process to rank 0.
-  std::size_t local_batch_size = 0;
+  std::size_t local_num_assigned_tasks = 0;
   if (mpi_rank > 0) {
     SALTATLAS_DNND_CHECK_MPI(
         MPI_Send(&num_local_tasks, 1, MPI_UNSIGNED_LONG, 0, 0, MPI_COMM_WORLD));
 
     MPI_Status status;
-    SALTATLAS_DNND_CHECK_MPI(MPI_Recv(&local_batch_size, 1, MPI_UNSIGNED_LONG,
-                                      0, 0, MPI_COMM_WORLD, &status));
+    SALTATLAS_DNND_CHECK_MPI(MPI_Recv(&local_num_assigned_tasks, 1,
+                                      MPI_UNSIGNED_LONG, 0, 0, MPI_COMM_WORLD,
+                                      &status));
   } else {
+    // Gather the number of tasks each MPI has
     std::vector<std::size_t> num_remaining_tasks_table(mpi_size, 0);
     num_remaining_tasks_table[0] = num_local_tasks;
     for (int r = 1; r < mpi_size; ++r) {
@@ -72,37 +78,48 @@ inline std::size_t distribute_tasks(const std::size_t num_local_tasks,
     const auto num_global_tasks =
         std::accumulate(num_remaining_tasks_table.begin(),
                         num_remaining_tasks_table.end(), std::size_t(0));
-    std::size_t num_unassigned_tasks =
-        (batch_size > 0) ? std::min(batch_size, num_global_tasks)
-                         : num_global_tasks;
+    assert(batch_size > 0);
+    std::size_t num_global_unassigned_tasks =
+        std::min(batch_size, num_global_tasks);
 
-    std::vector<std::size_t> batch_size_table(mpi_size, 0);
-    while (num_unassigned_tasks > 0) {
+    // Assigned tasks
+    std::vector<std::size_t> task_assignment_table(mpi_size, 0);
+    while (num_global_unassigned_tasks > 0) {
       const std::size_t max_num_tasks_per_rank =
-          (num_unassigned_tasks + mpi_size - 1) / mpi_size;
+          (num_global_unassigned_tasks < mpi_size)
+              ? 1
+              : (num_global_unassigned_tasks + mpi_size - 1) / mpi_size;
       for (std::size_t r = 0; r < num_remaining_tasks_table.size(); ++r) {
         const auto n =
             std::min({max_num_tasks_per_rank, num_remaining_tasks_table[r],
-                      num_unassigned_tasks});
+                      num_global_unassigned_tasks});
         num_remaining_tasks_table[r] -= n;
-        batch_size_table[r] += n;
-        num_unassigned_tasks -= n;
+        task_assignment_table[r] += n;
+        num_global_unassigned_tasks -= n;
       }
     }
 
     // Tell the computed numbers to the other ranks
     for (int r = 1; r < mpi_size; ++r) {
-      SALTATLAS_DNND_CHECK_MPI(MPI_Send(
-          &batch_size_table[r], 1, MPI_UNSIGNED_LONG, r, 0, MPI_COMM_WORLD));
+      SALTATLAS_DNND_CHECK_MPI(MPI_Send(&task_assignment_table[r], 1,
+                                        MPI_UNSIGNED_LONG, r, 0,
+                                        MPI_COMM_WORLD));
     }
-    local_batch_size = batch_size_table[0];
+    local_num_assigned_tasks = task_assignment_table[0];
 
     if (verbose) {
-      show_task_distribution(batch_size_table);
+      const auto n =
+          std::accumulate(task_assignment_table.begin(),
+                          task_assignment_table.end(), (std::size_t)0);
+      std::cout << "#of total task\t" << num_global_tasks << std::endl;
+      std::cout << "#of total assigned task\t" << n << std::endl;
+      std::cout << "#of unassigned tasks\t" << num_global_tasks - n
+                << std::endl;
+      show_task_distribution(task_assignment_table);
     }
   }
 
-  return local_batch_size;
+  return local_num_assigned_tasks;
 }
 
 }  // namespace saltatlas::dndetail::mpi
