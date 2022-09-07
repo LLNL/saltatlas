@@ -20,6 +20,8 @@ class dhnsw {
         m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm),
         m_query_engine_impl(&m_index_impl){};
 
+  ~dhnsw() { m_comm->barrier(); }
+
   void queue_data_point_insertion(const size_t pt_idx, const Point &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
   }
