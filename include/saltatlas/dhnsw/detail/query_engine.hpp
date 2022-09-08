@@ -8,7 +8,7 @@
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
-namespace detail {
+namespace dhnsw_detail {
 
 template <typename DistType, typename Point, typename Partitioner>
 class query_engine_impl {
@@ -260,7 +260,7 @@ m_query_point, m_initial_num_queries, closest_seeds);
     ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>> engine;
   };
 
-  query_engine_impl(dist_knn_index_impl<DistType, Point, Partitioner> *g)
+  query_engine_impl(dhnsw_impl<DistType, Point, Partitioner> *g)
       : m_comm(&g->comm()),
         m_dist_index_impl_ptr(g),
         pthis(g->comm().make_ygm_ptr(*this)){};
@@ -391,11 +391,10 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
 
   std::map<Point, query_controller> m_query_controllers;
 
-  ygm::comm *m_comm;
-  ygm::ygm_ptr<dist_knn_index_impl<DistType, Point, Partitioner>>
-      m_dist_index_impl_ptr;
+  ygm::comm                                             *m_comm;
+  ygm::ygm_ptr<dhnsw_impl<DistType, Point, Partitioner>> m_dist_index_impl_ptr;
   ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>> pthis;
 };
 
-}  // namespace detail
+}  // namespace dhnsw_detail
 }  // namespace saltatlas

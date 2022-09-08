@@ -5,18 +5,18 @@
 
 #pragma once
 
-#include <saltatlas/detail/dist_index.hpp>
-#include <saltatlas/detail/functional.hpp>
-#include <saltatlas/detail/query_engine.hpp>
+#include <saltatlas/dhnsw/detail/dist_index.hpp>
+#include <saltatlas/dhnsw/detail/functional.hpp>
+#include <saltatlas/dhnsw/detail/query_engine.hpp>
 
 namespace saltatlas {
 
 template <typename DistType, typename Point, typename Partitioner>
-class dist_knn_index {
+class dhnsw {
  public:
-  dist_knn_index(int max_voronoi_rank, int num_cells,
-                 hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
-                 Partitioner &p)
+  dhnsw(int max_voronoi_rank, int num_cells,
+        hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
+        Partitioner &p)
       : m_comm(comm),
         m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm, p),
         m_query_engine_impl(&m_index_impl){};
@@ -25,6 +25,8 @@ class dist_knn_index {
                       const uint32_t num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
+
+  ~dhnsw() { m_comm->barrier(); }
 
   void queue_data_point_insertion(const size_t pt_idx, const Point &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
@@ -70,9 +72,10 @@ m_index_impl.store_seeds(seed_features);
   inline ygm::comm &comm() { return *m_comm; }
 
  private:
-  ygm::comm                                                *m_comm;
-  detail::dist_knn_index_impl<DistType, Point, Partitioner> m_index_impl;
-  detail::query_engine_impl<DistType, Point, Partitioner>   m_query_engine_impl;
+  ygm::comm                                             *m_comm;
+  dhnsw_detail::dhnsw_impl<DistType, Point, Partitioner> m_index_impl;
+  dhnsw_detail::query_engine_impl<DistType, Point, Partitioner>
+      m_query_engine_impl;
 };
 
 }  // namespace saltatlas

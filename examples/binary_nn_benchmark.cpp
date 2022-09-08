@@ -5,14 +5,16 @@
 
 #include <math.h>
 #include <unistd.h>
-#include <saltatlas/partitioner/voronoi_partitioner.hpp>
-#include <saltatlas/saltatlas.hpp>
-#include <saltatlas/utility.hpp>
 #include <string>
+
 #include <ygm/comm.hpp>
 #include <ygm/container/bag.hpp>
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
+
+#include <saltatlas/dhnsw/detail/utility.hpp>
+#include <saltatlas/dhnsw/dhnsw.hpp>
+#include <saltatlas/partitioner/voronoi_partitioner.hpp>
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -163,83 +165,11 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-template <typename Point>
-void fill_seed_vector_from_csv(
-    const std::vector<size_t>                       &seed_ids,
-    ygm::container::bag<std::pair<uint64_t, Point>> &bag_data,
-    auto &seed_features, auto &comm) {
-  seed_features.resize(seed_ids.size());
-  // Make ygm pointer to seed_features vector
-  auto seed_features_ptr = comm.make_ygm_ptr(seed_features);
-
-  auto store_seed_features_lambda =
-      [](size_t seed_index, std::vector<float> vals, auto seeds_vector_ptr) {
-        (*seeds_vector_ptr)[seed_index] = vals;
-      };
-
-  auto fill_features_lambda = [&store_seed_features_lambda, &seed_ids, &comm,
-                               &seed_features_ptr](const auto ID_features) {
-    const auto &[point_ID, point_features] = ID_features;
-    auto lower_iter =
-        std::lower_bound(seed_ids.begin(), seed_ids.end(), point_ID);
-    if ((lower_iter != seed_ids.end()) && (*lower_iter == point_ID)) {
-      size_t      seed_index = std::distance(seed_ids.begin(), lower_iter);
-      std::string val_str;
-      for (int dest = 0; dest < comm.size(); ++dest) {
-        comm.async(dest, store_seed_features_lambda, seed_index, point_features,
-                   seed_features_ptr);
-      }
-    }
-  };
-  bag_data.for_all(fill_features_lambda);
-
-  comm.barrier();
-
-  return;
-}
-
-template <typename DistType, typename Point>
-void partition_data(
-    ygm::container::bag<std::pair<uint64_t, Point>> &bag_data,
-    const size_t num_seeds, hnswlib::SpaceInterface<DistType> &space,
-    ygm::comm                                       &world,
-    saltatlas::voronoi_partitioner<DistType, Point> &partitioner) {
-  std::vector<std::vector<float>> seed_features;
-  seed_features.resize(num_seeds);
-
-  ygm::timer step_timer;
-
-  bag_data.comm().cout0("Determining seed points");
-
-  // Determine seeds on rank 0 and distribute
-  std::vector<size_t> seed_ids(num_seeds);
-  auto                num_points = bag_data.size();
-  if (bag_data.comm().rank0()) {
-    std::cout << "Selecting seeds" << std::endl;
-    saltatlas::utility::select_random_seed_ids(num_seeds, num_points, seed_ids);
-    std::sort(seed_ids.begin(), seed_ids.end());
-  }
-  // TODO: Change to a ygm::bcast to avoid direct MPI call and use of
-  // MPI_COMM_WORLD
-  MPI_Bcast(seed_ids.data(), num_seeds, MPI_UNSIGNED_LONG_LONG, 0,
-            MPI_COMM_WORLD);
-
-  fill_seed_vector_from_csv(seed_ids, bag_data, seed_features, bag_data.comm());
-  bag_data.comm().cout0("Creating HNSW from seeds");
-  partitioner.set_seeds(seed_features);
-  partitioner.fill_seed_hnsw();
-
-  bag_data.comm().barrier();
-  bag_data.comm().cout0("Seed setup time: ", step_timer.elapsed());
-
-  // return partitioner;
-}
-
 template <typename Point, typename Partitioner>
-void build_index(ygm::container::bag<std::pair<uint64_t, Point>> &bag_data,
-                 saltatlas::dist_knn_index<float, std::vector<float>,
-                                           Partitioner>          &dist_index,
-                 const size_t num_seeds, const int num_dimensions) {
+void build_index(
+    ygm::container::bag<std::pair<uint64_t, Point>>          &bag_data,
+    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
+    const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -329,16 +259,14 @@ int main(int argc, char **argv) {
 
     uint64_t num_points = bag_data.size();
 
-    auto my_space = saltatlas::utility::SpaceWrapper(my_cos_sim_squared);
+    auto my_space = saltatlas::dhnsw_detail::SpaceWrapper(my_cos_sim_squared);
 
     saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
         world, my_space);
-    // partition_data(bag_data, num_seeds, my_space, world, partitioner);
 
     // Build index
-    saltatlas::dist_knn_index<
-        float, std::vector<float>,
-        saltatlas::voronoi_partitioner<float, std::vector<float>>>
+    saltatlas::dhnsw<float, std::vector<float>,
+                     saltatlas::voronoi_partitioner<float, std::vector<float>>>
         dist_index(voronoi_rank, num_seeds, &my_space, &world, partitioner);
 
     dist_index.partition_data(bag_data, num_seeds);

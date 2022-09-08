@@ -52,6 +52,45 @@ endif ()
 
 include(FetchContent)
 
+option(SALTATLAS_USE_METALL "Use Metall" OFF)
+
+#
+# Boost
+#
+# Disable the boost-cmake feature (BoostConfig.cmake or boost-config.cmake)
+# because there is a tricky behavior/issue. We use FetchContent to download
+# Boost and find_package to find the location of Boost. As find_package natively
+# supports Boost, we do not need to use the boost-cmake feature.
+set(Boost_NO_BOOST_CMAKE ON)
+
+find_package(Boost 1.64 QUIET)
+if (NOT Boost_FOUND)
+    FetchContent_Declare(
+        Boost
+        URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2
+    )
+    FetchContent_GetProperties(Boost)
+    if (Boost_POPULATED)
+        message(STATUS ${PROJECT_NAME}
+                       " found already populated Boost dependency: "
+                       ${boost_SOURCE_DIR}
+        )
+    else ()
+        if (SALTATLAS_USE_METALL) # Only Metall requires Boost
+            FetchContent_Populate(Boost)
+            message(STATUS ${PROJECT_NAME} " cloned Boost dependency: "
+                           ${boost_SOURCE_DIR}
+            )
+        endif ()
+    endif ()
+    set(BOOST_ROOT ${boost_SOURCE_DIR})
+    find_package(Boost 1.64)
+else ()
+    message(STATUS ${PROJECT_NAME} " found Boost dependency: "
+                   ${Boost_INCLUDE_DIR}
+    )
+endif ()
+
 #
 # hnswlib
 #
@@ -187,6 +226,11 @@ target_include_directories(
 target_link_libraries(
     saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm hnswlib::hnswlib
 )
+option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
+if (SALTATLAS_DETERMINISM)
+    message(STATUS ${PROJECT_NAME} " setting determinism")
+    target_compile_definitions(saltatlas INTERFACE SALTATLAS_DETERMINISM)
+endif ()
 
 #
 # saltatlas_h5_io (needs findable HDF5 >= v1.10.7)
@@ -236,6 +280,47 @@ if (SALTATLAS_USE_HDF5)
     target_link_libraries(saltatlas INTERFACE saltatlas_h5_io::saltatlas_h5_io)
 else ()
     message(STATUS ${PROJECT_NAME} " building without saltatlas_h5_io and HDF5")
+endif ()
+
+#
+# Metall
+#
+if (SALTATLAS_USE_METALL)
+    find_package(Metall QUIET CONFIG)
+    if (NOT Metall_FOUND)
+        FetchContent_Declare(
+            Metall
+            GIT_REPOSITORY https://github.com/LLNL/metall.git
+            GIT_TAG master
+        )
+        FetchContent_GetProperties(Metall)
+        if (Metall_POPULATED)
+            message(STATUS ${PROJECT_NAME}
+                           " found already populated Metall dependency: "
+                           ${metall_SOURCE_DIR}
+            )
+        else ()
+            # Do not compile anything in Metall
+            set(JUST_INSTALL_METALL_HEADER ON)
+            FetchContent_MakeAvailable(Metall)
+            message(STATUS ${PROJECT_NAME} " cloned Metall dependency "
+                           ${metall_SOURCE_DIR}
+            )
+        endif ()
+    else ()
+        message(STATUS ${PROJECT_NAME} " found Metall dependency: "
+                       ${Metall_INCLUDE_DIRS}
+        )
+    endif ()
+
+    find_package(Threads REQUIRED)
+    target_include_directories(
+        saltatlas INTERFACE $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+                            $<INSTALL_INTERFACE:include/boost>
+    )
+    target_link_libraries(
+        saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall
+    )
 endif ()
 
 option(TEST_WITH_SLURM "Run tests with Slurm" OFF)
