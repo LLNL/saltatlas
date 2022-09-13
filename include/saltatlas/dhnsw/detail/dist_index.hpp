@@ -5,20 +5,23 @@
 
 #pragma once
 
+#include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
+#include <saltatlas/types.hpp>
+
+#include <ygm/comm.hpp>
+#include <ygm/container/bag.hpp>
+#include <ygm/detail/ygm_ptr.hpp>
+
 #include <hnswlib/hnswalg.h>
 #include <hnswlib/hnswlib.h>
+
 #include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <queue>
 #include <random>
-#include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 #include <set>
-
-#include <ygm/comm.hpp>
-#include <ygm/container/bag.hpp>
-#include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
 namespace dhnsw_detail {
@@ -32,7 +35,7 @@ class dhnsw_impl {
 
  public:
   using feature_vec_type         = Point;
-  using data_index_cell_map_type = std::map<size_t, std::vector<size_t>>;
+  using data_index_cell_map_type = std::map<index_t, std::vector<index_t>>;
 
   dhnsw_impl(int max_voronoi_rank, int num_cells,
              hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *c,
@@ -57,27 +60,27 @@ class dhnsw_impl {
     }
   }
 
-  void partition_data(ygm::container::bag<std::pair<uint64_t, Point>> &data,
+  void partition_data(ygm::container::bag<std::pair<index_t, Point>> &data,
                       const uint32_t num_partitions) {
     m_partitioner.initialize(data, num_partitions);
   }
 
-  void add_data_point_to_insertion_queue(const size_t index, const Point &v) {
-    std::vector<size_t> point_partitions =
+  void add_data_point_to_insertion_queue(const index_t index, const Point &v) {
+    std::vector<index_t> point_partitions =
         partitioner().find_point_partitions(v, m_max_voronoi_rank);
     ASSERT_RELEASE(point_partitions[0] < m_num_cells);
     add_data_point_to_insertion_queue(index, v, point_partitions);
   }
 
   void add_data_point_to_insertion_queue(
-      const size_t index, const Point &v,
-      const std::vector<size_t> &closest_seeds) {
+      const index_t index, const Point &v,
+      const std::vector<index_t> &closest_seeds) {
     auto insertion_cell = closest_seeds[0];
     m_comm->async(
         cell_owner(insertion_cell),
-        [](auto mbox, ygm::ygm_ptr<dhnsw_impl> pthis, size_t index,
-           const size_t               insertion_cell,
-           const std::vector<size_t> &closest_seeds, const Point &v) {
+        [](auto mbox, ygm::ygm_ptr<dhnsw_impl> pthis, index_t index,
+           const index_t               insertion_cell,
+           const std::vector<index_t> &closest_seeds, const Point &v) {
           auto local_insertion_cell = pthis->local_cell_index(insertion_cell);
           pthis->try_add_closest_cells(index, closest_seeds);
           pthis->m_cell_add_vec[local_insertion_cell].push_back(
@@ -108,15 +111,15 @@ class dhnsw_impl {
     m_cell_add_vec.clear();
   }
 
-  inline int cell_owner(size_t index) {
-    return std::hash<size_t>{}(index) % m_comm_size;
+  inline int cell_owner(index_t index) {
+    return std::hash<index_t>{}(index) % m_comm_size;
   }
 
-  inline int local_cell_index(size_t global_cell_index) const {
+  inline int local_cell_index(index_t global_cell_index) const {
     return global_cell_index / m_comm_size;
   }
 
-  inline int global_cell_index(size_t local_cell_index) const {
+  inline int global_cell_index(index_t local_cell_index) const {
     return local_cell_index * m_comm_size + m_comm_rank;
   }
 
@@ -145,7 +148,7 @@ class dhnsw_impl {
     return *m_voronoi_cell_hnsw[local_cell_index(cell)];
   }
 
-  const std::vector<size_t> &get_cell_pointers(size_t index) {
+  const std::vector<index_t> &get_cell_pointers(index_t index) {
     return m_map_point_to_cells[index];
   }
 
@@ -155,23 +158,23 @@ class dhnsw_impl {
     return *m_voronoi_cell_hnsw[local_cell_index(cell)];
   }
 
-  void try_add_closest_cells(const size_t               index,
-                             const std::vector<size_t> &cells) {
-    for (const size_t &cell : cells) {
+  void try_add_closest_cells(const index_t               index,
+                             const std::vector<index_t> &cells) {
+    for (const index_t &cell : cells) {
       try_add_closest_cell(index, cell);
     }
   }
 
   // Scans through full list of cells to try inserting.
   // Can do something better if necessary, but this list should be small.
-  void try_add_closest_cell(const size_t index, const size_t cell) {
-    for (const size_t &current_cell : get_cell_pointers(index)) {
+  void try_add_closest_cell(const index_t index, const index_t cell) {
+    for (const index_t &current_cell : get_cell_pointers(index)) {
       if (current_cell == cell) return;
     }
     m_map_point_to_cells[index].push_back(cell);
   }
 
-  void set_cell_add_vec_ordering(std::vector<std::pair<size_t, Point>> &vec) {
+  void set_cell_add_vec_ordering(std::vector<std::pair<index_t, Point>> &vec) {
 #ifdef SALTATLAS_DETERMINISM  // Use fixed ordering if deterministic
     std::sort(vec.begin(), vec.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
@@ -182,12 +185,12 @@ class dhnsw_impl {
 
   data_index_cell_map_type m_map_point_to_cells;
 
-  std::map<size_t, Point> m_local_data;
+  std::map<index_t, Point> m_local_data;
 
   std::vector<hnswlib::HierarchicalNSW<DistType> *> m_voronoi_cell_hnsw;
   hnswlib::SpaceInterface<DistType>                *m_metric_space_ptr;
 
-  std::vector<std::vector<std::pair<size_t, Point>>>
+  std::vector<std::vector<std::pair<index_t, Point>>>
       m_cell_add_vec;  // per-cell vector of indices to add to HNSW structure
 
   ygm::comm               *m_comm;

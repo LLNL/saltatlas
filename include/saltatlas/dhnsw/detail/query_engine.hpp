@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <saltatlas/types.hpp>
+
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
@@ -37,12 +39,12 @@ class query_engine_impl {
 
     void start_query() {
       /*
-std::vector<size_t> closest_seeds;
+std::vector<index_t> closest_seeds;
 engine->m_dist_index_impl_ptr->find_approx_closest_seeds(
 m_query_point, m_initial_num_queries, closest_seeds);
                       */
 
-      std::vector<size_t> point_partitions =
+      std::vector<index_t> point_partitions =
           engine->m_dist_index_impl_ptr->partitioner().find_point_partitions(
               m_query_point, m_initial_num_queries);
 
@@ -72,7 +74,7 @@ m_query_point, m_initial_num_queries, closest_seeds);
 
    private:
     void update_nearest_neighbors(
-        const std::multimap<DistType, size_t> &returned_neighbors) {
+        const std::multimap<DistType, index_t> &returned_neighbors) {
       if (m_nearest_neighbors.size() > 0) {
         merge_nearest_neighbors(returned_neighbors);
       } else {
@@ -81,7 +83,7 @@ m_query_point, m_initial_num_queries, closest_seeds);
     }
 
     void merge_nearest_neighbors(
-        const std::multimap<DistType, size_t> &returned_neighbors) {
+        const std::multimap<DistType, index_t> &returned_neighbors) {
       auto returned_neighbor_iter = returned_neighbors.begin();
 
       // Add neighbors while new points are closer than my furthest current
@@ -98,13 +100,13 @@ m_query_point, m_initial_num_queries, closest_seeds);
       }
     }
 
-    void queue_next_cells(const std::set<size_t> &ngbr_cells) {
+    void queue_next_cells(const std::set<index_t> &ngbr_cells) {
       for (auto &cell : ngbr_cells) {
         queue_next_cell(cell);
       }
     }
 
-    void queue_next_cell(const size_t cell) {
+    void queue_next_cell(const index_t cell) {
       if (m_queried_cells.find(cell) == m_queried_cells.end()) {
         m_next_cells.insert(cell);
       }
@@ -114,7 +116,7 @@ m_query_point, m_initial_num_queries, closest_seeds);
       // Swapping for new set and spawning queries in separate loop from when
       // they are inserted into m_queried_cells to avoid issues with an incoming
       // async updating these structures
-      std::set<size_t> cells_set;
+      std::set<index_t> cells_set;
       cells_set.swap(m_next_cells);
       m_queries_spawned += cells_set.size();
       for (auto &cell : cells_set) {
@@ -148,10 +150,10 @@ m_query_point, m_initial_num_queries, closest_seeds);
       return;
     }
 
-    void spawn_cell_query(const size_t cell, const int k,
+    void spawn_cell_query(const index_t cell, const int k,
                           const int voronoi_rank) {
       auto cell_query_lambda = [](auto mailbox, int from, auto engine,
-                                  const Point &q, const size_t s_cell,
+                                  const Point &q, const index_t s_cell,
                                   const DistType max_dist, const int s_k,
                                   const int s_voronoi_rank) {
         int local_cell = engine->local_cell_index(s_cell);
@@ -161,8 +163,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
                 engine->m_dist_index_impl_ptr->get_cell_hnsw(s_cell).searchKnn(
                     &q, s_k);
 
-        std::set<size_t>                ngbr_cells;
-        std::multimap<DistType, size_t> nearest_neighbors;
+        std::set<index_t>                ngbr_cells;
+        std::multimap<DistType, index_t> nearest_neighbors;
 
         // Loop over neighbors until priority queue is empty
         // Cannot stop when dist >= max_dist because priority queue is in
@@ -186,8 +188,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
             [](auto mailbox,
                ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
                             engine,
-               const Point &q, std::multimap<DistType, size_t> nearest_ngbrs,
-               std::set<size_t> new_cells) {
+               const Point &q, std::multimap<DistType, index_t> nearest_ngbrs,
+               std::set<index_t> new_cells) {
               // Look up controller for returning query
               auto &query_controller =
                   engine->m_query_controllers.find(q)->second;
@@ -242,17 +244,17 @@ m_query_point, m_initial_num_queries, closest_seeds);
     bool m_complete = false;  // Could compare m_queries_spawned vs
                               // m_queries_returned instead, but might check
                               // between round finishing and next round starting
-    Point                           m_query_point;
-    int                             m_k;
-    int                             m_max_hops;
-    int                             m_initial_num_queries;
-    int                             m_voronoi_rank;
-    int                             m_queries_spawned;
-    int                             m_queries_returned;
-    int                             m_current_hops;
-    std::set<size_t>                m_queried_cells;
-    std::set<size_t>                m_next_cells;
-    std::multimap<DistType, size_t> m_nearest_neighbors;
+    Point                            m_query_point;
+    int                              m_k;
+    int                              m_max_hops;
+    int                              m_initial_num_queries;
+    int                              m_voronoi_rank;
+    int                              m_queries_spawned;
+    int                              m_queries_returned;
+    int                              m_current_hops;
+    std::set<index_t>                m_queried_cells;
+    std::set<index_t>                m_next_cells;
+    std::multimap<DistType, index_t> m_nearest_neighbors;
 
     std::vector<std::byte> m_callbacks;
     int                    m_num_callbacks;
@@ -290,11 +292,11 @@ m_query_point, m_initial_num_queries, closest_seeds);
 
   int controller_owner(const Point &q) const {
     /*
-std::vector<size_t> closest_seeds;
+std::vector<index_t> closest_seeds;
 m_dist_index_impl_ptr->find_approx_closest_seeds(q, 1, closest_seeds);
 return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
     */
-    std::vector<size_t> partitions =
+    std::vector<index_t> partitions =
         m_dist_index_impl_ptr->partitioner().find_point_partitions(q, 1);
     return m_dist_index_impl_ptr->cell_owner(partitions[0]);
   }
@@ -349,11 +351,11 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
     assert(sizeof(Lambda) == 1);
 
     void (*fun_ptr)(
-        const Point &, const std::multimap<DistType, size_t> &,
+        const Point &, const std::multimap<DistType, index_t> &,
         ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>,
         cereal::YGMInputArchive &) =
-        [](const Point                           &query_pt,
-           const std::multimap<DistType, size_t> &nearest_neighbors,
+        [](const Point                            &query_pt,
+           const std::multimap<DistType, index_t> &nearest_neighbors,
            ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
                                     query_engine_ptr,
            cereal::YGMInputArchive &bia) {
@@ -375,14 +377,14 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
 
   void deserialize_lambda(
       cereal::YGMInputArchive &iarchive, const Point &query_pt,
-      const std::multimap<DistType, size_t> &nearest_neighbors,
+      const std::multimap<DistType, index_t> &nearest_neighbors,
       ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
           query_engine_ptr) {
     int64_t iptr;
     iarchive(iptr);
     iptr += (int64_t)&reference;
     void (*fun_ptr)(
-        const Point &, const std::multimap<DistType, size_t> &,
+        const Point &, const std::multimap<DistType, index_t> &,
         ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>,
         cereal::YGMInputArchive &);
     memcpy(&fun_ptr, &iptr, sizeof(uint64_t));

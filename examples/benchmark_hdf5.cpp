@@ -17,8 +17,12 @@
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
+#include <saltatlas/types.hpp>
+
 #include <saltatlas_h5_io/h5_reader.hpp>
 #include <saltatlas_h5_io/h5_writer.hpp>
+
+using index_t = saltatlas::index_t;
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -169,10 +173,10 @@ float my_l2(const std::vector<float> &x, const std::vector<float> &y) {
   return sqrt(my_l2_sqr(x, y));
 }
 
-ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
+ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
     ygm::container::bag<std::string> &bag_filenames,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::bag<std::pair<uint64_t, std::vector<float>>> to_return(
+  ygm::container::bag<std::pair<index_t, std::vector<float>>> to_return(
       bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &data_col_names](const auto &fname) {
@@ -182,7 +186,7 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
       exit(EXIT_FAILURE);
     }
 
-    const auto data_indices = reader.read_column<uint64_t>("index");
+    const auto data_indices = reader.read_column<index_t>("index");
     const auto data = reader.read_columns_row_wise<float>(data_col_names);
     for (int j = 0; j < data.size(); ++j) {
       to_return.async_insert(std::make_pair(data_indices[j], data[j]));
@@ -255,8 +259,8 @@ void benchmark_query_trial(
   static int num_queries;
   num_queries = 0;
 
-  auto empty_lambda = [](const std::vector<float>           &query_pt,
-                         const std::multimap<float, size_t> &nearest_neighbors,
+  auto empty_lambda = [](const std::vector<float>            &query_pt,
+                         const std::multimap<float, index_t> &nearest_neighbors,
                          auto dhnsw) { ++num_queries; };
 
   auto perform_query_lambda = [&empty_lambda, &dist_index, &hops, &voronoi_rank,
@@ -284,7 +288,7 @@ void benchmark_query_trial_ground_truth(
     ygm::container::bag<std::string>                         &bag_query_files,
     ygm::container::bag<std::string> &bag_ground_truth_files,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::map<uint64_t, std::vector<uint64_t>> ground_truth(
+  ygm::container::map<index_t, std::vector<index_t>> ground_truth(
       dist_index.comm());
 
   if (dist_index.comm().rank() == 0) {
@@ -315,12 +319,12 @@ void benchmark_query_trial_ground_truth(
     auto nearest_neighbor_col_names =
         generic_column_names(num_ground_truth_nearest_neighbors);
 
-    const auto indices = reader.read_column<uint64_t>("index");
+    const auto indices = reader.read_column<index_t>("index");
     const auto ground_truth_part =
-        reader.read_columns_row_wise<uint64_t>(nearest_neighbor_col_names);
+        reader.read_columns_row_wise<index_t>(nearest_neighbor_col_names);
 
     for (int i = 0; i < ground_truth_part.size(); ++i) {
-      std::vector<uint64_t> truncated_ground_truth;
+      std::vector<index_t> truncated_ground_truth;
       for (int j = 0; j < k; ++j) {
         truncated_ground_truth.push_back(ground_truth_part[i][j]);
       }
@@ -339,8 +343,8 @@ void benchmark_query_trial_ground_truth(
   // Find approximate nearest neighbors, then check against ground truth values
   // stored in distributed map
   auto query_nearest_neighbors_lambda =
-      [](const std::vector<float>           &query_pt,
-         const std::multimap<float, size_t> &nearest_neighbors, auto dhnsw,
+      [](const std::vector<float>            &query_pt,
+         const std::multimap<float, index_t> &nearest_neighbors, auto dhnsw,
          uint64_t data_index, auto ground_truth_ptr) {
         // Lambda to check ANN against ground truth
         auto check_nearest_neighbors_lambda = [](auto &index_gt, auto ann) {
@@ -372,7 +376,7 @@ void benchmark_query_trial_ground_truth(
         };
 
         // Put approximate nearest neighbors into vector
-        std::vector<uint64_t> ann_vec;
+        std::vector<index_t> ann_vec;
 
         for (const auto &dist_ngbr : nearest_neighbors) {
           ann_vec.push_back(dist_ngbr.second);

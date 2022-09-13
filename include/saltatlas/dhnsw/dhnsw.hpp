@@ -8,6 +8,7 @@
 #include <saltatlas/dhnsw/detail/dist_index.hpp>
 #include <saltatlas/dhnsw/detail/functional.hpp>
 #include <saltatlas/dhnsw/detail/query_engine.hpp>
+#include <saltatlas/types.hpp>
 
 namespace saltatlas {
 
@@ -21,14 +22,14 @@ class dhnsw {
         m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm, p),
         m_query_engine_impl(&m_index_impl){};
 
-  void partition_data(ygm::container::bag<std::pair<uint64_t, Point>> &data,
+  void partition_data(ygm::container::bag<std::pair<index_t, Point>> &data,
                       const uint32_t num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
   ~dhnsw() { m_comm->barrier(); }
 
-  void queue_data_point_insertion(const size_t pt_idx, const Point &pt) {
+  void queue_data_point_insertion(const index_t pt_idx, const Point &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
   }
 

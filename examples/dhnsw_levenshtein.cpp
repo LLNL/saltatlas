@@ -12,10 +12,13 @@
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
+#include <saltatlas/types.hpp>
 
 #include <ygm/comm.hpp>
 #include <ygm/container/set.hpp>
 #include <ygm/utility.hpp>
+
+using index_t = saltatlas::index_t;
 
 template <typename String>
 size_t levenshtein_distance(const String& s1, const String& s2) {
@@ -73,9 +76,9 @@ int main(int argc, char** argv) {
   std::vector<std::string> strings{"cat",   "dog",  "apple", "desk",
                                    "floor", "lamp", "car",   "flag"};
 
-  ygm::container::bag<std::pair<size_t, std::string>> string_bag(world);
+  ygm::container::bag<std::pair<index_t, std::string>> string_bag(world);
   if (world.rank0()) {
-    size_t i{0};
+    index_t i{0};
     for (const auto& s : strings) {
       string_bag.async_insert(std::make_pair(i++, s));
     }
@@ -120,9 +123,9 @@ int main(int argc, char** argv) {
   world.barrier();
 
   auto fuzzy_result_lambda =
-      [](const std::string&                  query_string,
-         const std::multimap<float, size_t>& nearest_neighbors,
-         auto                                dist_knn_index) {
+      [](const std::string&                   query_string,
+         const std::multimap<float, index_t>& nearest_neighbors,
+         auto                                 dist_knn_index) {
         for (const auto& result_pair : nearest_neighbors) {
           dist_knn_index->comm().cout()
               << result_pair.second << " fuzzy dist: " << result_pair.first

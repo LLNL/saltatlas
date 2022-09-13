@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <saltatlas/types.hpp>
+
 #include <hnswlib/hnswalg.h>
 #include <hnswlib/hnswlib.h>
 
@@ -19,12 +21,12 @@ class voronoi_partitioner {
   voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<DistType> &space)
       : m_comm(c), m_space(space) {}
 
-  void initialize(ygm::container::bag<std::pair<uint64_t, Point>> &data,
+  void initialize(ygm::container::bag<std::pair<index_t, Point>> &data,
                   const uint32_t num_partitions) {
-    uint64_t num_points = data.size();
+    size_t num_points = data.size();
 
-    std::vector<uint64_t> seed_ids(num_partitions);
-    std::vector<Point>    seed_features;
+    std::vector<index_t> seed_ids(num_partitions);
+    std::vector<Point>   seed_features;
     if (m_comm.rank0()) {
       select_random_seed_ids(num_partitions, num_points, seed_ids);
     }
@@ -57,17 +59,17 @@ class voronoi_partitioner {
     fill_seed_hnsw();
   }
 
-  std::vector<uint64_t> find_point_partitions(const Point   &features,
-                                              const uint32_t num_partitions) {
-    std::vector<uint64_t> to_return(num_partitions);
+  std::vector<index_t> find_point_partitions(const Point   &features,
+                                             const uint32_t num_partitions) {
+    std::vector<index_t> to_return(num_partitions);
 
     std::priority_queue<std::pair<float, hnswlib::labeltype>> nearest_seeds_pq =
         m_seed_hnsw_ptr->searchKnn(&features, num_partitions);
 
     uint32_t i = num_partitions;
     while (nearest_seeds_pq.size() > 0) {
-      auto seed_ID   = nearest_seeds_pq.top().second;
-      to_return[--i] = seed_ID;
+      index_t seed_ID = nearest_seeds_pq.top().second;
+      to_return[--i]  = seed_ID;
       nearest_seeds_pq.pop();
     }
 
@@ -92,11 +94,11 @@ class voronoi_partitioner {
     }
   }
 
-  void select_random_seed_ids(const uint32_t         num_seeds,
-                              const uint64_t         num_points,
-                              std::vector<uint64_t> &seed_ids) {
-    std::mt19937                          rng(123);
-    std::uniform_int_distribution<size_t> uni(0, num_points - 1);
+  void select_random_seed_ids(const uint32_t        num_seeds,
+                              const uint64_t        num_points,
+                              std::vector<index_t> &seed_ids) {
+    std::mt19937                           rng(123);
+    std::uniform_int_distribution<index_t> uni(0, num_points - 1);
 
     for (uint32_t i = 0; i < num_seeds; ++i) {
       seed_ids[i] = uni(rng);

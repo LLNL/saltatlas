@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <saltatlas/types.hpp>
+
 #include <hnswlib/hnswalg.h>
 #include <hnswlib/hnswlib.h>
 
@@ -32,7 +34,7 @@ class metric_hyperplane_partitioner {
     m_comm.cout0("Median time: ", m_median_time);
   }
 
-  void initialize(ygm::container::bag<std::pair<uint64_t, Point>> &data,
+  void initialize(ygm::container::bag<std::pair<index_t, Point>> &data,
                   const uint32_t num_partitions) {
     m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<DistType>>(
         &m_space, num_partitions, 16, 200, 3149);
@@ -45,7 +47,7 @@ class metric_hyperplane_partitioner {
 
     // Stores assignments of points to tree nodes, indexed globally (to match
     // m_tree nodes)
-    std::unordered_map<uint64_t, uint64_t> point_assignments;
+    std::unordered_map<index_t, index_t> point_assignments;
 
     ygm::timer t{};
 
@@ -92,9 +94,9 @@ class metric_hyperplane_partitioner {
     m_comm.cout0("Partitioner initialization time: ", t.elapsed());
   }
 
-  std::vector<uint64_t> find_point_partitions(const Point   &features,
-                                              const uint32_t num_partitions) {
-    std::vector<uint64_t> to_return;
+  std::vector<index_t> find_point_partitions(const Point   &features,
+                                             const uint32_t num_partitions) {
+    std::vector<index_t> to_return;
     to_return.reserve(num_partitions);
 
     to_return.push_back(search_tree(features));
@@ -104,7 +106,7 @@ class metric_hyperplane_partitioner {
 
     size_t i = 0;
     while (to_return.size() < num_partitions) {
-      auto seed_ID = hnsw_nearest[i].second;
+      index_t seed_ID = hnsw_nearest[i].second;
       if (seed_ID != to_return[0]) {
         to_return.push_back(seed_ID);
       }
@@ -134,14 +136,14 @@ class metric_hyperplane_partitioner {
 
     DistType selector_distance;
 
-    uint64_t              index;
-    uint64_t              parent;
-    std::vector<uint64_t> children;
+    index_t              index;
+    index_t              parent;
+    std::vector<index_t> children;
   };
 
   std::vector<node_statistics> find_tree_statistics(
-      ygm::container::bag<std::pair<uint64_t, Point>> &data) {
-    ygm::container::map<uint64_t, node_statistics> stats_map;
+      ygm::container::bag<std::pair<index_t, Point>> &data) {
+    ygm::container::map<index_t, node_statistics> stats_map;
 
     data.for_all([&stats_map, this](const auto &index_pt_pair) {
       const auto &[index, point] = index_pt_pair;
@@ -334,9 +336,9 @@ class metric_hyperplane_partitioner {
 
   // TODO: make point_assignments const
   std::vector<std::vector<DistType>> calculate_thetas(
-      uint32_t                                         num_nodes,
-      std::unordered_map<uint64_t, uint64_t>          &point_assignments,
-      ygm::container::bag<std::pair<uint64_t, Point>> &data) {
+      uint32_t                                        num_nodes,
+      std::unordered_map<index_t, index_t>           &point_assignments,
+      ygm::container::bag<std::pair<index_t, Point>> &data) {
     std::vector<std::vector<DistType>> thetas(num_nodes);
 
     data.for_all(
@@ -376,9 +378,9 @@ class metric_hyperplane_partitioner {
     }
   }
 
-  void assign_points(std::unordered_map<uint64_t, uint64_t> &point_assignments,
-                     std::vector<std::vector<Point>>        &next_level_points,
-                     ygm::container::bag<std::pair<uint64_t, Point>> &data) {
+  void assign_points(std::unordered_map<index_t, index_t> &point_assignments,
+                     std::vector<std::vector<Point>>      &next_level_points,
+                     ygm::container::bag<std::pair<index_t, Point>> &data) {
     data.for_all([&point_assignments, &next_level_points,
                   this](const auto &index_point_pair) {
       const auto &[index, point] = index_point_pair;

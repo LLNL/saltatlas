@@ -15,6 +15,9 @@
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
+#include <saltatlas/types.hpp>
+
+using index_t = saltatlas::index_t;
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -121,9 +124,9 @@ float my_cos_sim_squared(const std::vector<float> &x,
   return dot_product * dot_product / (x_magnitude * y_magnitude);
 }
 
-ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
+ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
     ygm::container::bag<std::string> &bag_filenames, int num_dimensions) {
-  ygm::container::bag<std::pair<uint64_t, std::vector<float>>> to_return(
+  ygm::container::bag<std::pair<index_t, std::vector<float>>> to_return(
       bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &num_dimensions](const auto &fname) {
@@ -167,7 +170,7 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
 
 template <typename Point, typename Partitioner>
 void build_index(
-    ygm::container::bag<std::pair<uint64_t, Point>>          &bag_data,
+    ygm::container::bag<std::pair<index_t, Point>>           &bag_data,
     saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
     const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
