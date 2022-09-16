@@ -17,12 +17,11 @@
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
-#include <saltatlas/types.hpp>
 
 #include <saltatlas_h5_io/h5_reader.hpp>
 #include <saltatlas_h5_io/h5_writer.hpp>
 
-using index_t = saltatlas::index_t;
+using index_t = std::size_t;
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -199,11 +198,11 @@ ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
 }
 
 template <typename Partitioner>
-void build_index(
-    ygm::container::bag<std::string>                         &bag_filenames,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    Partitioner &partitioner, const size_t num_seeds,
-    const std::vector<std::string> &data_col_names) {
+void build_index(ygm::container::bag<std::string> &bag_filenames,
+                 saltatlas::dhnsw<float, std::size_t, std::vector<float>,
+                                  Partitioner>    &dist_index,
+                 Partitioner &partitioner, const size_t num_seeds,
+                 const std::vector<std::string> &data_col_names) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -247,9 +246,10 @@ void build_index(
 template <typename Partitioner>
 void benchmark_query_trial(
     int voronoi_rank, int hops, int k,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    ygm::container::bag<std::string>                         &bag_query_files,
-    const std::vector<std::string>                           &data_col_names) {
+    saltatlas::dhnsw<float, std::size_t, std::vector<float>, Partitioner>
+                                     &dist_index,
+    ygm::container::bag<std::string> &bag_query_files,
+    const std::vector<std::string>   &data_col_names) {
   if (dist_index.comm().rank() == 0) {
     std::cout << "\n****Beginning query trial****"
               << "\nVoronoi rank: " << voronoi_rank << "\nHops: " << hops
@@ -284,8 +284,9 @@ void benchmark_query_trial(
 template <typename Partitioner>
 void benchmark_query_trial_ground_truth(
     int voronoi_rank, int hops, int k,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    ygm::container::bag<std::string>                         &bag_query_files,
+    saltatlas::dhnsw<float, std::size_t, std::vector<float>, Partitioner>
+                                     &dist_index,
+    ygm::container::bag<std::string> &bag_query_files,
     ygm::container::bag<std::string> &bag_ground_truth_files,
     const std::vector<std::string>   &data_col_names) {
   ygm::container::map<index_t, std::vector<index_t>> ground_truth(
@@ -464,11 +465,12 @@ int main(int argc, char **argv) {
     // Build index
     auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
-    saltatlas::metric_hyperplane_partitioner<float, std::vector<float>>
+    saltatlas::metric_hyperplane_partitioner<float, std::size_t,
+                                             std::vector<float>>
         partitioner(world, my_l2_space);
-    saltatlas::dhnsw<
-        float, std::vector<float>,
-        saltatlas::metric_hyperplane_partitioner<float, std::vector<float>>>
+    saltatlas::dhnsw<float, std::size_t, std::vector<float>,
+                     saltatlas::metric_hyperplane_partitioner<
+                         float, std::size_t, std::vector<float>>>
         dist_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
 
     // extra column for indices

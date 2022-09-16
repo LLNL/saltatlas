@@ -5,16 +5,17 @@
 
 #pragma once
 
-#include <saltatlas/types.hpp>
-
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
 namespace dhnsw_detail {
 
-template <typename DistType, typename Point, typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          typename Partitioner>
 class query_engine_impl {
  public:
+  using index_t = IndexType;
+
   class query_controller {
    public:
     query_controller() = delete;
@@ -23,7 +24,8 @@ class query_engine_impl {
         const Point &q, const int k, const int max_hops, const int voronoi_rank,
         const int                     initial_num_queries,
         const std::vector<std::byte> &packed_callback,
-        ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>> e)
+        ygm::ygm_ptr<query_engine_impl<DistType, IndexType, Point, Partitioner>>
+            e)
         : m_query_point(q),
           m_k(k),
           m_max_hops(max_hops),
@@ -186,7 +188,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
         // Query found potential closest neighbors
         auto query_response_lambda =
             [](auto mailbox,
-               ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
+               ygm::ygm_ptr<
+                   query_engine_impl<DistType, IndexType, Point, Partitioner>>
                             engine,
                const Point &q, std::multimap<DistType, index_t> nearest_ngbrs,
                std::set<index_t> new_cells) {
@@ -208,7 +211,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
         // Query did not return any potential closest neighbors
         auto empty_query_response_lambda =
             [](auto mailbox,
-               ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
+               ygm::ygm_ptr<
+                   query_engine_impl<DistType, IndexType, Point, Partitioner>>
                             engine,
                const Point &q) {
               // Look up controller for returning query
@@ -259,10 +263,11 @@ m_query_point, m_initial_num_queries, closest_seeds);
     std::vector<std::byte> m_callbacks;
     int                    m_num_callbacks;
 
-    ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>> engine;
+    ygm::ygm_ptr<query_engine_impl<DistType, IndexType, Point, Partitioner>>
+        engine;
   };
 
-  query_engine_impl(dhnsw_impl<DistType, Point, Partitioner> *g)
+  query_engine_impl(dhnsw_impl<DistType, IndexType, Point, Partitioner> *g)
       : m_comm(&g->comm()),
         m_dist_index_impl_ptr(g),
         pthis(g->comm().make_ygm_ptr(*this)){};
@@ -352,11 +357,13 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
 
     void (*fun_ptr)(
         const Point &, const std::multimap<DistType, index_t> &,
-        ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>,
+        ygm::ygm_ptr<
+            query_engine_impl<DistType, IndexType, Point, Partitioner>>,
         cereal::YGMInputArchive &) =
         [](const Point                            &query_pt,
            const std::multimap<DistType, index_t> &nearest_neighbors,
-           ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
+           ygm::ygm_ptr<
+               query_engine_impl<DistType, IndexType, Point, Partitioner>>
                                     query_engine_ptr,
            cereal::YGMInputArchive &bia) {
           std::tuple<PackArgs...> ta;
@@ -378,14 +385,15 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
   void deserialize_lambda(
       cereal::YGMInputArchive &iarchive, const Point &query_pt,
       const std::multimap<DistType, index_t> &nearest_neighbors,
-      ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>
+      ygm::ygm_ptr<query_engine_impl<DistType, IndexType, Point, Partitioner>>
           query_engine_ptr) {
     int64_t iptr;
     iarchive(iptr);
     iptr += (int64_t)&reference;
     void (*fun_ptr)(
         const Point &, const std::multimap<DistType, index_t> &,
-        ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>>,
+        ygm::ygm_ptr<
+            query_engine_impl<DistType, IndexType, Point, Partitioner>>,
         cereal::YGMInputArchive &);
     memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
     fun_ptr(query_pt, nearest_neighbors, query_engine_ptr, iarchive);
@@ -393,9 +401,11 @@ return m_dist_index_impl_ptr->cell_owner(closest_seeds[0]);
 
   std::map<Point, query_controller> m_query_controllers;
 
-  ygm::comm                                             *m_comm;
-  ygm::ygm_ptr<dhnsw_impl<DistType, Point, Partitioner>> m_dist_index_impl_ptr;
-  ygm::ygm_ptr<query_engine_impl<DistType, Point, Partitioner>> pthis;
+  ygm::comm *m_comm;
+  ygm::ygm_ptr<dhnsw_impl<DistType, IndexType, Point, Partitioner>>
+      m_dist_index_impl_ptr;
+  ygm::ygm_ptr<query_engine_impl<DistType, IndexType, Point, Partitioner>>
+      pthis;
 };
 
 }  // namespace dhnsw_detail

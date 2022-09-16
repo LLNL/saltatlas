@@ -12,13 +12,12 @@
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
-#include <saltatlas/types.hpp>
 
 #include <ygm/comm.hpp>
 #include <ygm/container/set.hpp>
 #include <ygm/utility.hpp>
 
-using index_t = saltatlas::index_t;
+using index_t = std::size_t;
 
 template <typename String>
 size_t levenshtein_distance(const String& s1, const String& s2) {
@@ -84,11 +83,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  saltatlas::metric_hyperplane_partitioner<float, std::string> partitioner(
-      world, fuzzy_leven_space);
+  saltatlas::metric_hyperplane_partitioner<float, index_t, std::string>
+      partitioner(world, fuzzy_leven_space);
 
-  saltatlas::dhnsw<float, std::string,
-                   saltatlas::metric_hyperplane_partitioner<float, std::string>>
+  saltatlas::dhnsw<
+      float, index_t, std::string,
+      saltatlas::metric_hyperplane_partitioner<float, index_t, std::string>>
       dist_index(voronoi_rank, num_cells, &fuzzy_leven_space, &world,
                  partitioner);
 

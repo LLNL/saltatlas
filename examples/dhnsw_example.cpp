@@ -8,9 +8,6 @@
 #include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
-#include <saltatlas/types.hpp>
-
-using index_t = saltatlas::index_t;
 
 // User-defined distance function working on vectors of data
 float my_l2_sqr(const std::vector<float> &x, const std::vector<float> &y) {
@@ -47,14 +44,15 @@ int main(int argc, char **argv) {
     auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
     // Create partitioner
-    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
-        world, my_l2_space);
+    saltatlas::voronoi_partitioner<float, std::size_t, std::vector<float>>
+        partitioner(world, my_l2_space);
 
     // Create indexing structure
     int voronoi_rank = 2;
     int num_seeds    = 2;
-    saltatlas::dhnsw<float, std::vector<float>,
-                     saltatlas::voronoi_partitioner<float, std::vector<float>>>
+    saltatlas::dhnsw<
+        float, std::size_t, std::vector<float>,
+        saltatlas::voronoi_partitioner<float, std::size_t, std::vector<float>>>
         knn_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
 
     std::vector<float>              s0{-5.0, 0.0}, s1{5.0, 0.0};
@@ -86,8 +84,9 @@ int main(int argc, char **argv) {
 
     // Lambda to execute upon completion of query
     auto report_lambda =
-        [](const std::vector<float>            &query_pt,
-           const std::multimap<float, index_t> &nearest_neighbors, auto dhnsw) {
+        [](const std::vector<float>                &query_pt,
+           const std::multimap<float, std::size_t> &nearest_neighbors,
+           auto                                     dhnsw) {
           std::cout << "Nearest neighbors for (" << query_pt[0] << ", "
                     << query_pt[1] << "): ";
           for (const auto &[dist, nearest_neighbor_index] : nearest_neighbors) {

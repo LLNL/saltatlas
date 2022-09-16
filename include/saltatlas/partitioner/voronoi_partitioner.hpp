@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include <saltatlas/types.hpp>
-
 #include <hnswlib/hnswalg.h>
 #include <hnswlib/hnswlib.h>
 
@@ -15,9 +13,11 @@
 
 namespace saltatlas {
 
-template <typename DistType, typename Point>
+template <typename DistType, typename IndexType, typename Point>
 class voronoi_partitioner {
  public:
+  using index_t = IndexType;
+
   voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<DistType> &space)
       : m_comm(c), m_space(space) {}
 

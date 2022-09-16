@@ -6,7 +6,6 @@
 #pragma once
 
 #include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
-#include <saltatlas/types.hpp>
 
 #include <ygm/comm.hpp>
 #include <ygm/container/bag.hpp>
@@ -26,14 +25,16 @@
 namespace saltatlas {
 namespace dhnsw_detail {
 
-template <typename DistType, typename Point>
+template <typename DistType, typename IndexType, typename Point>
 class query_engine;
 
-template <typename DistType, typename Point, typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          typename Partitioner>
 class dhnsw_impl {
-  friend class query_engine<DistType, Point>;
+  friend class query_engine<DistType, IndexType, Point>;
 
  public:
+  using index_t                  = IndexType;
   using feature_vec_type         = Point;
   using data_index_cell_map_type = std::map<index_t, std::vector<index_t>>;
 

@@ -14,15 +14,14 @@
 #include <saltatlas_h5_io/h5_reader.hpp>
 #endif
 
-#include <saltatlas/types.hpp>
-
 namespace saltatlas {
 namespace dhnsw_detail {
 
+template <typename IndexType>
 void select_random_seed_ids(const int num_seeds, const size_t num_points,
-                            std::vector<index_t> &seed_ids) {
-  std::mt19937                           rng(123);
-  std::uniform_int_distribution<index_t> uni(0, num_points - 1);
+                            std::vector<IndexType> &seed_ids) {
+  std::mt19937                             rng(123);
+  std::uniform_int_distribution<IndexType> uni(0, num_points - 1);
 
   for (int i = 0; i < num_seeds; ++i) {
     seed_ids[i] = uni(rng);
@@ -83,8 +82,8 @@ int get_num_columns(ygm::container::bag<std::string> &bag_filenames,
   return max_cols;
 }
 
-template <typename FEATURE>
-void fill_seed_vector_from_hdf5(const std::vector<index_t>       &seed_ids,
+template <typename IndexType, typename FEATURE>
+void fill_seed_vector_from_hdf5(const std::vector<IndexType>     &seed_ids,
                                 ygm::container::bag<std::string> &bag_filenames,
                                 const std::vector<std::string>   &col_names,
                                 std::vector<FEATURE>             &seed_features,
@@ -94,7 +93,7 @@ void fill_seed_vector_from_hdf5(const std::vector<index_t>       &seed_ids,
   auto seed_features_ptr = comm.make_ygm_ptr(seed_features);
 
   auto store_seed_features_lambda =
-      [](index_t seed_index, std::vector<float> vals, auto seeds_vector_ptr) {
+      [](IndexType seed_index, std::vector<float> vals, auto seeds_vector_ptr) {
         (*seeds_vector_ptr)[seed_index] = vals;
       };
 
@@ -115,8 +114,8 @@ void fill_seed_vector_from_hdf5(const std::vector<index_t>       &seed_ids,
       auto lower_iter =
           std::lower_bound(seed_ids.begin(), seed_ids.end(), data_indices[i]);
       if ((lower_iter != seed_ids.end()) && (*lower_iter == data_indices[i])) {
-        index_t seed_index    = std::distance(seed_ids.begin(), lower_iter);
-        auto    seed_features = data[i];
+        IndexType seed_index    = std::distance(seed_ids.begin(), lower_iter);
+        auto      seed_features = data[i];
         for (int dest = 0; dest < comm.size(); ++dest) {
           comm.async(dest, store_seed_features_lambda, seed_index,
                      seed_features, seed_features_ptr);

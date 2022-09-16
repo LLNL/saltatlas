@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include <saltatlas/types.hpp>
-
 #include <hnswlib/hnswalg.h>
 #include <hnswlib/hnswlib.h>
 
@@ -17,7 +15,7 @@
 
 namespace saltatlas {
 
-template <typename DistType, typename Point>
+template <typename DistType, typename IndexType, typename Point>
 class metric_hyperplane_partitioner {
  private:
   struct tree_node {
@@ -26,6 +24,8 @@ class metric_hyperplane_partitioner {
   };
 
  public:
+  using index_t = IndexType;
+
   metric_hyperplane_partitioner(ygm::comm                         &c,
                                 hnswlib::SpaceInterface<DistType> &space)
       : m_comm(c), m_space(space) {}

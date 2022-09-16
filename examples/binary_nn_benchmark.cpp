@@ -15,9 +15,8 @@
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
-#include <saltatlas/types.hpp>
 
-using index_t = saltatlas::index_t;
+using index_t = std::size_t;
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -168,11 +167,11 @@ ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-template <typename Point, typename Partitioner>
-void build_index(
-    ygm::container::bag<std::pair<index_t, Point>>           &bag_data,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    const size_t num_seeds, const int num_dimensions) {
+template <typename IndexType, typename Point, typename Partitioner>
+void build_index(ygm::container::bag<std::pair<IndexType, Point>> &bag_data,
+                 saltatlas::dhnsw<float, IndexType, std::vector<float>,
+                                  Partitioner>                    &dist_index,
+                 const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -264,12 +263,13 @@ int main(int argc, char **argv) {
 
     auto my_space = saltatlas::dhnsw_detail::SpaceWrapper(my_cos_sim_squared);
 
-    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
-        world, my_space);
+    saltatlas::voronoi_partitioner<float, index_t, std::vector<float>>
+        partitioner(world, my_space);
 
     // Build index
-    saltatlas::dhnsw<float, std::vector<float>,
-                     saltatlas::voronoi_partitioner<float, std::vector<float>>>
+    saltatlas::dhnsw<
+        float, index_t, std::vector<float>,
+        saltatlas::voronoi_partitioner<float, index_t, std::vector<float>>>
         dist_index(voronoi_rank, num_seeds, &my_space, &world, partitioner);
 
     dist_index.partition_data(bag_data, num_seeds);

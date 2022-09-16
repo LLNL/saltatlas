@@ -8,13 +8,15 @@
 #include <saltatlas/dhnsw/detail/dist_index.hpp>
 #include <saltatlas/dhnsw/detail/functional.hpp>
 #include <saltatlas/dhnsw/detail/query_engine.hpp>
-#include <saltatlas/types.hpp>
 
 namespace saltatlas {
 
-template <typename DistType, typename Point, typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          typename Partitioner>
 class dhnsw {
  public:
+  using index_t = IndexType;
+
   dhnsw(int max_voronoi_rank, int num_cells,
         hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
         Partitioner &p)
@@ -73,9 +75,10 @@ m_index_impl.store_seeds(seed_features);
   inline ygm::comm &comm() { return *m_comm; }
 
  private:
-  ygm::comm                                             *m_comm;
-  dhnsw_detail::dhnsw_impl<DistType, Point, Partitioner> m_index_impl;
-  dhnsw_detail::query_engine_impl<DistType, Point, Partitioner>
+  ygm::comm *m_comm;
+  dhnsw_detail::dhnsw_impl<DistType, IndexType, Point, Partitioner>
+      m_index_impl;
+  dhnsw_detail::query_engine_impl<DistType, IndexType, Point, Partitioner>
       m_query_engine_impl;
 };
 
