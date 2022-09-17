@@ -9,7 +9,6 @@
 #include <hnswlib/hnswlib.h>
 
 #include <ygm/comm.hpp>
-#include <ygm/container/bag.hpp>
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
 
@@ -18,10 +17,9 @@ namespace saltatlas {
 template <typename DistType, typename IndexType, typename Point>
 class metric_hyperplane_partitioner {
  public:
-  using dist_t     = DistType;
-  using index_t    = IndexType;
-  using point_t    = Point;
-  using data_bag_t = ygm::container::bag<std::pair<index_t, point_t>>;
+  using dist_t  = DistType;
+  using index_t = IndexType;
+  using point_t = Point;
 
  private:
   struct tree_node {
@@ -38,7 +36,9 @@ class metric_hyperplane_partitioner {
     m_comm.cout0("Median time: ", m_median_time);
   }
 
-  void initialize(data_bag_t &data, const uint32_t num_partitions) {
+  template <template <typename, typename> class Container>
+  void initialize(Container<index_t, point_t> &data,
+                  const uint32_t               num_partitions) {
     m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
         &m_space, num_partitions, 16, 200, 3149);
 
@@ -144,7 +144,9 @@ class metric_hyperplane_partitioner {
     std::vector<index_t> children;
   };
 
-  std::vector<node_statistics> find_tree_statistics(data_bag_t &data) {
+  template <template <typename, typename> class Container>
+  std::vector<node_statistics> find_tree_statistics(
+      Container<index_t, point_t> &data) {
     ygm::container::map<index_t, node_statistics> stats_map;
 
     data.for_all([&stats_map, this](const auto &index_pt_pair) {
@@ -337,10 +339,11 @@ class metric_hyperplane_partitioner {
   }
 
   // TODO: make point_assignments const
+  template <template <typename, typename> class Container>
   std::vector<std::vector<dist_t>> calculate_thetas(
       uint32_t                              num_nodes,
       std::unordered_map<index_t, index_t> &point_assignments,
-      data_bag_t                           &data) {
+      Container<index_t, point_t>          &data) {
     std::vector<std::vector<dist_t>> thetas(num_nodes);
 
     data.for_all(
@@ -380,9 +383,10 @@ class metric_hyperplane_partitioner {
     }
   }
 
+  template <template <typename, typename> class Container>
   void assign_points(std::unordered_map<index_t, index_t> &point_assignments,
                      std::vector<std::vector<point_t>>    &next_level_points,
-                     data_bag_t                           &data) {
+                     Container<index_t, point_t>          &data) {
     data.for_all([&point_assignments, &next_level_points,
                   this](const auto &index_point_pair) {
       const auto &[index, point] = index_point_pair;

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -77,7 +78,7 @@ int main(int argc, char** argv) {
   using index_t = std::size_t;
   using point_t = std::string;
 
-  ygm::container::bag<std::pair<index_t, point_t>> string_bag(world);
+  ygm::container::pair_bag<index_t, point_t> string_bag(world);
   if (world.rank0()) {
     index_t i{0};
     for (const auto& s : strings) {

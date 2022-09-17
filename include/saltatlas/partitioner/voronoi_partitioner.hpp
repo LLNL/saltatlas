@@ -9,22 +9,22 @@
 #include <hnswlib/hnswlib.h>
 
 #include <ygm/comm.hpp>
-#include <ygm/container/bag.hpp>
 
 namespace saltatlas {
 
 template <typename DistType, typename IndexType, typename Point>
 class voronoi_partitioner {
  public:
-  using dist_t     = DistType;
-  using index_t    = IndexType;
-  using point_t    = Point;
-  using data_bag_t = ygm::container::bag<std::pair<index_t, point_t>>;
+  using dist_t  = DistType;
+  using index_t = IndexType;
+  using point_t = Point;
 
-  voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<dist_type> &space)
+  voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<dist_t> &space)
       : m_comm(c), m_space(space) {}
 
-  void initialize(data_bag_t &data, const uint32_t num_partitions) {
+  template <template <typename, typename> class Container>
+  void initialize(Container<index_t, point_t> &data,
+                  const uint32_t               num_partitions) {
     size_t num_points = data.size();
 
     std::vector<index_t> seed_ids(num_partitions);
@@ -79,7 +79,7 @@ class voronoi_partitioner {
   }
 
   void fill_seed_hnsw() {
-    m_seed_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_type>>(
+    m_seed_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
         &m_space, m_seeds.size(), 16, 200, 3149);
 
 #pragma omp parallel for
@@ -129,10 +129,10 @@ class voronoi_partitioner {
  private:
   ygm::comm &m_comm;
 
-  hnswlib::SpaceInterface<dist_type> &m_space;
+  hnswlib::SpaceInterface<dist_t> &m_space;
 
-  std::unique_ptr<hnswlib::HierarchicalNSW<dist_type>> m_seed_hnsw_ptr;
-  std::vector<point_t>                                 m_seeds;
+  std::unique_ptr<hnswlib::HierarchicalNSW<dist_t>> m_seed_hnsw_ptr;
+  std::vector<point_t>                              m_seeds;
 };
 
 }  // namespace saltatlas

@@ -41,7 +41,6 @@ class dhnsw_impl {
   using partitioner_t            = Partitioner<dist_t, index_t, point_t>;
   using index_vec_t              = std::vector<index_t>;
   using data_index_cell_map_type = std::map<index_t, index_vec_t>;
-  using data_bag_t = ygm::container::bag<std::pair<index_t, point_t>>;
 
   dhnsw_impl(int max_voronoi_rank, int num_cells,
              hnswlib::SpaceInterface<dist_t> *space_ptr, ygm::comm *c,
@@ -66,7 +65,9 @@ class dhnsw_impl {
     }
   }
 
-  void partition_data(data_bag_t &data, const uint32_t num_partitions) {
+  template <template <typename, typename> class Container>
+  void partition_data(Container<index_t, point_t> &data,
+                      const uint32_t               num_partitions) {
     m_partitioner.initialize(data, num_partitions);
   }
 

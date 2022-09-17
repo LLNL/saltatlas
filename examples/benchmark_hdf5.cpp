@@ -13,6 +13,7 @@
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -170,12 +171,11 @@ float my_l2(const std::vector<float> &x, const std::vector<float> &y) {
   return sqrt(my_l2_sqr(x, y));
 }
 
-template <typename IndexType>
-ygm::container::bag<std::pair<IndexType, std::vector<float>>> read_data(
+template <typename IndexType, typename Point>
+ygm::container::pair_bag<IndexType, Point> read_data(
     ygm::container::bag<std::string> &bag_filenames,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::bag<std::pair<IndexType, std::vector<float>>> to_return(
-      bag_filenames.comm());
+  ygm::container::pair_bag<IndexType, Point> to_return(bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &data_col_names](const auto &fname) {
     saltatlas::h5_io::h5_reader reader(fname);
@@ -211,7 +211,7 @@ void build_index(
   ygm::timer step_timer{};
 
   dist_index.comm().cout0("Reading data to temporary bag");
-  auto bag_data = read_data<IndexType>(bag_filenames, data_col_names);
+  auto bag_data = read_data<IndexType, Point>(bag_filenames, data_col_names);
   dist_index.comm().barrier();
   dist_index.comm().cout0("Data reading time: ", step_timer.elapsed());
 
@@ -270,7 +270,8 @@ void benchmark_query_trial(
                      empty_lambda);
   };
 
-  auto bag_query_points = read_data<IndexType>(bag_query_files, data_col_names);
+  auto bag_query_points =
+      read_data<IndexType, Point>(bag_query_files, data_col_names);
 
   bag_query_points.for_all(perform_query_lambda);
 
@@ -399,7 +400,8 @@ void benchmark_query_trial_ground_truth(
   };
 
   dist_index.comm().cout0("Reading query points into bag");
-  auto bag_query_points = read_data<index_t>(bag_query_files, data_col_names);
+  auto bag_query_points =
+      read_data<index_t, point_t>(bag_query_files, data_col_names);
 
   bag_query_points.for_all(perform_query_lambda);
 
