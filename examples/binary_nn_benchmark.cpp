@@ -16,8 +16,6 @@
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
 
-using index_t = std::size_t;
-
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
     std::cerr
@@ -123,9 +121,10 @@ float my_cos_sim_squared(const std::vector<float> &x,
   return dot_product * dot_product / (x_magnitude * y_magnitude);
 }
 
-ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
+template <typename IndexType>
+ygm::container::bag<std::pair<IndexType, std::vector<float>>> read_data(
     ygm::container::bag<std::string> &bag_filenames, int num_dimensions) {
-  ygm::container::bag<std::pair<index_t, std::vector<float>>> to_return(
+  ygm::container::bag<std::pair<IndexType, std::vector<float>>> to_return(
       bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &num_dimensions](const auto &fname) {
@@ -167,11 +166,12 @@ ygm::container::bag<std::pair<index_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-template <typename IndexType, typename Point, typename Partitioner>
-void build_index(ygm::container::bag<std::pair<IndexType, Point>> &bag_data,
-                 saltatlas::dhnsw<float, IndexType, std::vector<float>,
-                                  Partitioner>                    &dist_index,
-                 const size_t num_seeds, const int num_dimensions) {
+template <typename DistType, typename IndexType, typename Point,
+          template <typename, typename, typename> class Partitioner>
+void build_index(
+    ygm::container::bag<std::pair<IndexType, Point>>          &bag_data,
+    saltatlas::dhnsw<DistType, IndexType, Point, Partitioner> &dist_index,
+    const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -257,7 +257,9 @@ int main(int argc, char **argv) {
 
     fill_filenames_bag(bag_index_filenames, index_filename);
 
-    auto bag_data = read_data(bag_index_filenames, num_dimensions);
+    using index_t = std::size_t;
+
+    auto bag_data = read_data<index_t>(bag_index_filenames, num_dimensions);
 
     uint64_t num_points = bag_data.size();
 
@@ -267,10 +269,8 @@ int main(int argc, char **argv) {
         partitioner(world, my_space);
 
     // Build index
-    saltatlas::dhnsw<
-        float, index_t, std::vector<float>,
-        saltatlas::voronoi_partitioner<float, index_t, std::vector<float>>>
-        dist_index(voronoi_rank, num_seeds, &my_space, &world, partitioner);
+    saltatlas::dhnsw dist_index(voronoi_rank, num_seeds, &my_space, &world,
+                                partitioner);
 
     dist_index.partition_data(bag_data, num_seeds);
 

@@ -11,10 +11,11 @@ namespace saltatlas {
 namespace dhnsw_detail {
 
 template <typename DistType, typename IndexType, typename Point,
-          typename Partitioner>
+          template <typename, typename, typename> class Partitioner>
 class query_engine_impl {
  public:
-  using index_t = IndexType;
+  using index_t       = IndexType;
+  using partitioner_t = Partitioner<DistType, IndexType, Point>;
 
   class query_controller {
    public:

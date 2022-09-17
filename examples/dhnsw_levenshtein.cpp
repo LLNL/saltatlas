@@ -17,8 +17,6 @@
 #include <ygm/container/set.hpp>
 #include <ygm/utility.hpp>
 
-using index_t = std::size_t;
-
 template <typename String>
 size_t levenshtein_distance(const String& s1, const String& s2) {
   const size_t m = s1.size();
@@ -75,7 +73,11 @@ int main(int argc, char** argv) {
   std::vector<std::string> strings{"cat",   "dog",  "apple", "desk",
                                    "floor", "lamp", "car",   "flag"};
 
-  ygm::container::bag<std::pair<index_t, std::string>> string_bag(world);
+  using dist_t  = float;
+  using index_t = std::size_t;
+  using point_t = std::string;
+
+  ygm::container::bag<std::pair<index_t, point_t>> string_bag(world);
   if (world.rank0()) {
     index_t i{0};
     for (const auto& s : strings) {
@@ -83,14 +85,11 @@ int main(int argc, char** argv) {
     }
   }
 
-  saltatlas::metric_hyperplane_partitioner<float, index_t, std::string>
+  saltatlas::metric_hyperplane_partitioner<dist_t, index_t, point_t>
       partitioner(world, fuzzy_leven_space);
 
-  saltatlas::dhnsw<
-      float, index_t, std::string,
-      saltatlas::metric_hyperplane_partitioner<float, index_t, std::string>>
-      dist_index(voronoi_rank, num_cells, &fuzzy_leven_space, &world,
-                 partitioner);
+  saltatlas::dhnsw dist_index(voronoi_rank, num_cells, &fuzzy_leven_space,
+                              &world, partitioner);
 
   world.barrier();
   ygm::timer t{};
@@ -123,9 +122,9 @@ int main(int argc, char** argv) {
   world.barrier();
 
   auto fuzzy_result_lambda =
-      [](const std::string&                   query_string,
-         const std::multimap<float, index_t>& nearest_neighbors,
-         auto                                 dist_knn_index) {
+      [](const point_t&                        query_string,
+         const std::multimap<dist_t, index_t>& nearest_neighbors,
+         auto                                  dist_knn_index) {
         for (const auto& result_pair : nearest_neighbors) {
           dist_knn_index->comm().cout()
               << result_pair.second << " fuzzy dist: " << result_pair.first

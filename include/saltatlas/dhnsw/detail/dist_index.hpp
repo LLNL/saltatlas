@@ -29,18 +29,19 @@ template <typename DistType, typename IndexType, typename Point>
 class query_engine;
 
 template <typename DistType, typename IndexType, typename Point,
-          typename Partitioner>
+          template <typename, typename, typename> class Partitioner>
 class dhnsw_impl {
   friend class query_engine<DistType, IndexType, Point>;
 
  public:
   using index_t                  = IndexType;
   using feature_vec_type         = Point;
+  using partitioner_t            = Partitioner<DistType, IndexType, Point>;
   using data_index_cell_map_type = std::map<index_t, std::vector<index_t>>;
 
   dhnsw_impl(int max_voronoi_rank, int num_cells,
              hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *c,
-             Partitioner &p)
+             partitioner_t &p)
       : m_max_voronoi_rank(max_voronoi_rank),
         m_num_cells(num_cells),
         m_metric_space_ptr(space_ptr),
@@ -131,7 +132,7 @@ class dhnsw_impl {
 
   inline ygm::comm &comm() { return *m_comm; }
 
-  Partitioner &partitioner() { return m_partitioner; }
+  partitioner_t &partitioner() { return m_partitioner; }
 
   inline int max_voronoi_rank() { return m_max_voronoi_rank; }
 
@@ -199,7 +200,7 @@ class dhnsw_impl {
   int                      m_comm_size;
   int                      m_comm_rank;
 
-  Partitioner &m_partitioner;
+  partitioner_t &m_partitioner;
 
   int m_max_voronoi_rank;
   int m_num_cells;

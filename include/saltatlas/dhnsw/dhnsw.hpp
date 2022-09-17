@@ -12,14 +12,17 @@
 namespace saltatlas {
 
 template <typename DistType, typename IndexType, typename Point,
-          typename Partitioner>
+          template <typename, typename, typename> class Partitioner>
 class dhnsw {
  public:
-  using index_t = IndexType;
+  using dist_t        = DistType;
+  using index_t       = IndexType;
+  using point_t       = Point;
+  using partitioner_t = Partitioner<DistType, IndexType, Point>;
 
   dhnsw(int max_voronoi_rank, int num_cells,
         hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
-        Partitioner &p)
+        partitioner_t &p)
       : m_comm(comm),
         m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm, p),
         m_query_engine_impl(&m_index_impl){};
