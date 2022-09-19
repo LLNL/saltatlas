@@ -43,29 +43,30 @@ int main(int argc, char **argv) {
     // easy-to-write distance functions to be used with hnswlib
     auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
+    using dist_t  = float;
+    using index_t = std::size_t;
+    using point_t = std::vector<float>;
+
     // Create partitioner
-    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
+    saltatlas::voronoi_partitioner<dist_t, index_t, point_t> partitioner(
         world, my_l2_space);
 
     // Create indexing structure
-    int voronoi_rank = 2;
-    int num_seeds    = 2;
-    saltatlas::dhnsw<float, std::vector<float>,
-                     saltatlas::voronoi_partitioner<float, std::vector<float>>>
-        knn_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
+    int              voronoi_rank = 2;
+    int              num_seeds    = 2;
+    saltatlas::dhnsw knn_index(voronoi_rank, num_seeds, &my_l2_space, &world,
+                               partitioner);
 
-    std::vector<float>              s0{-5.0, 0.0}, s1{5.0, 0.0};
-    std::vector<std::vector<float>> seeds{s0, s1};
+    point_t              s0{-5.0, 0.0}, s1{5.0, 0.0};
+    std::vector<point_t> seeds{s0, s1};
     partitioner.set_seeds(seeds);
     partitioner.fill_seed_hnsw();
 
     // Insert points from rank 0
     if (mpi_rank == 0) {
       // Define points to add to HNSW
-      std::vector<float> p1{-4.0, 0.0}, p2{-5.0, 1.0}, p3{-6.0, 0.0},
-          p4{-5.0, -1.0};
-      std::vector<float> p5{6.0, 0.0}, p6{5.0, 1.0}, p7{4.0, 0.0},
-          p8{5.0, -1.0};
+      point_t p1{-4.0, 0.0}, p2{-5.0, 1.0}, p3{-6.0, 0.0}, p4{-5.0, -1.0};
+      point_t p5{6.0, 0.0}, p6{5.0, 1.0}, p7{4.0, 0.0}, p8{5.0, -1.0};
 
       knn_index.queue_data_point_insertion(1, p1);
       knn_index.queue_data_point_insertion(2, p2);
@@ -83,8 +84,9 @@ int main(int argc, char **argv) {
 
     // Lambda to execute upon completion of query
     auto report_lambda =
-        [](const std::vector<float>           &query_pt,
-           const std::multimap<float, size_t> &nearest_neighbors, auto dhnsw) {
+        [](const point_t                        &query_pt,
+           const std::multimap<dist_t, index_t> &nearest_neighbors,
+           auto                                  dhnsw) {
           std::cout << "Nearest neighbors for (" << query_pt[0] << ", "
                     << query_pt[1] << "): ";
           for (const auto &[dist, nearest_neighbor_index] : nearest_neighbors) {
@@ -100,7 +102,7 @@ int main(int argc, char **argv) {
     int initial_num_queries = 1;
 
     // Points to query for
-    std::vector<float> q1{-4.2, 1.1}, q2{5.4, 0.5}, q3{0.0, 0.0};
+    point_t q1{-4.2, 1.1}, q2{5.4, 0.5}, q3{0.0, 0.0};
 
     // Spawn queries from different ranks
     if (mpi_rank == 0) {

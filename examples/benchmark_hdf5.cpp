@@ -13,10 +13,12 @@
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
+
 #include <saltatlas_h5_io/h5_reader.hpp>
 #include <saltatlas_h5_io/h5_writer.hpp>
 
@@ -169,11 +171,11 @@ float my_l2(const std::vector<float> &x, const std::vector<float> &y) {
   return sqrt(my_l2_sqr(x, y));
 }
 
-ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
+template <typename IndexType, typename Point>
+ygm::container::pair_bag<IndexType, Point> read_data(
     ygm::container::bag<std::string> &bag_filenames,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::bag<std::pair<uint64_t, std::vector<float>>> to_return(
-      bag_filenames.comm());
+  ygm::container::pair_bag<IndexType, Point> to_return(bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &data_col_names](const auto &fname) {
     saltatlas::h5_io::h5_reader reader(fname);
@@ -182,7 +184,7 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
       exit(EXIT_FAILURE);
     }
 
-    const auto data_indices = reader.read_column<uint64_t>("index");
+    const auto data_indices = reader.read_column<IndexType>("index");
     const auto data = reader.read_columns_row_wise<float>(data_col_names);
     for (int j = 0; j < data.size(); ++j) {
       to_return.async_insert(std::make_pair(data_indices[j], data[j]));
@@ -194,12 +196,13 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-template <typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          template <typename, typename, typename> class Partitioner>
 void build_index(
-    ygm::container::bag<std::string>                         &bag_filenames,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    Partitioner &partitioner, const size_t num_seeds,
-    const std::vector<std::string> &data_col_names) {
+    ygm::container::bag<std::string>                          &bag_filenames,
+    saltatlas::dhnsw<DistType, IndexType, Point, Partitioner> &dist_index,
+    Partitioner<DistType, IndexType, Point>                   &partitioner,
+    const size_t num_seeds, const std::vector<std::string> &data_col_names) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
               << "\nNumber of Voronoi cells: " << num_seeds << std::endl;
@@ -208,7 +211,7 @@ void build_index(
   ygm::timer step_timer{};
 
   dist_index.comm().cout0("Reading data to temporary bag");
-  auto bag_data = read_data(bag_filenames, data_col_names);
+  auto bag_data = read_data<IndexType, Point>(bag_filenames, data_col_names);
   dist_index.comm().barrier();
   dist_index.comm().cout0("Data reading time: ", step_timer.elapsed());
 
@@ -240,12 +243,13 @@ void build_index(
   dist_index.comm().cout0("Finished creating index structure");
 }
 
-template <typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          template <typename, typename, typename> class Partitioner>
 void benchmark_query_trial(
     int voronoi_rank, int hops, int k,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    ygm::container::bag<std::string>                         &bag_query_files,
-    const std::vector<std::string>                           &data_col_names) {
+    saltatlas::dhnsw<DistType, IndexType, Point, Partitioner> &dist_index,
+    ygm::container::bag<std::string>                          &bag_query_files,
+    const std::vector<std::string>                            &data_col_names) {
   if (dist_index.comm().rank() == 0) {
     std::cout << "\n****Beginning query trial****"
               << "\nVoronoi rank: " << voronoi_rank << "\nHops: " << hops
@@ -255,9 +259,10 @@ void benchmark_query_trial(
   static int num_queries;
   num_queries = 0;
 
-  auto empty_lambda = [](const std::vector<float>           &query_pt,
-                         const std::multimap<float, size_t> &nearest_neighbors,
-                         auto dhnsw) { ++num_queries; };
+  auto empty_lambda =
+      [](const Point                              &query_pt,
+         const std::multimap<DistType, IndexType> &nearest_neighbors,
+         auto                                      dhnsw) { ++num_queries; };
 
   auto perform_query_lambda = [&empty_lambda, &dist_index, &hops, &voronoi_rank,
                                &k](const auto &index_point) {
@@ -265,7 +270,8 @@ void benchmark_query_trial(
                      empty_lambda);
   };
 
-  auto bag_query_points = read_data(bag_query_files, data_col_names);
+  auto bag_query_points =
+      read_data<IndexType, Point>(bag_query_files, data_col_names);
 
   bag_query_points.for_all(perform_query_lambda);
 
@@ -277,14 +283,17 @@ void benchmark_query_trial(
   return;
 }
 
-template <typename Partitioner>
+template <typename DHNSW>
 void benchmark_query_trial_ground_truth(
-    int voronoi_rank, int hops, int k,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
-    ygm::container::bag<std::string>                         &bag_query_files,
+    int voronoi_rank, int hops, int k, DHNSW &dist_index,
+    ygm::container::bag<std::string> &bag_query_files,
     ygm::container::bag<std::string> &bag_ground_truth_files,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::map<uint64_t, std::vector<uint64_t>> ground_truth(
+  using dist_t  = typename DHNSW::dist_t;
+  using index_t = typename DHNSW::index_t;
+  using point_t = typename DHNSW::point_t;
+
+  ygm::container::map<index_t, std::vector<index_t>> ground_truth(
       dist_index.comm());
 
   if (dist_index.comm().rank() == 0) {
@@ -315,12 +324,12 @@ void benchmark_query_trial_ground_truth(
     auto nearest_neighbor_col_names =
         generic_column_names(num_ground_truth_nearest_neighbors);
 
-    const auto indices = reader.read_column<uint64_t>("index");
+    const auto indices = reader.read_column<index_t>("index");
     const auto ground_truth_part =
-        reader.read_columns_row_wise<uint64_t>(nearest_neighbor_col_names);
+        reader.read_columns_row_wise<index_t>(nearest_neighbor_col_names);
 
     for (int i = 0; i < ground_truth_part.size(); ++i) {
-      std::vector<uint64_t> truncated_ground_truth;
+      std::vector<index_t> truncated_ground_truth;
       for (int j = 0; j < k; ++j) {
         truncated_ground_truth.push_back(ground_truth_part[i][j]);
       }
@@ -339,8 +348,8 @@ void benchmark_query_trial_ground_truth(
   // Find approximate nearest neighbors, then check against ground truth values
   // stored in distributed map
   auto query_nearest_neighbors_lambda =
-      [](const std::vector<float>           &query_pt,
-         const std::multimap<float, size_t> &nearest_neighbors, auto dhnsw,
+      [](const point_t                        &query_pt,
+         const std::multimap<dist_t, index_t> &nearest_neighbors, auto dhnsw,
          uint64_t data_index, auto ground_truth_ptr) {
         // Lambda to check ANN against ground truth
         auto check_nearest_neighbors_lambda = [](auto &index_gt, auto ann) {
@@ -372,7 +381,7 @@ void benchmark_query_trial_ground_truth(
         };
 
         // Put approximate nearest neighbors into vector
-        std::vector<uint64_t> ann_vec;
+        std::vector<index_t> ann_vec;
 
         for (const auto &dist_ngbr : nearest_neighbors) {
           ann_vec.push_back(dist_ngbr.second);
@@ -391,7 +400,8 @@ void benchmark_query_trial_ground_truth(
   };
 
   dist_index.comm().cout0("Reading query points into bag");
-  auto bag_query_points = read_data(bag_query_files, data_col_names);
+  auto bag_query_points =
+      read_data<index_t, point_t>(bag_query_files, data_col_names);
 
   bag_query_points.for_all(perform_query_lambda);
 
@@ -460,12 +470,11 @@ int main(int argc, char **argv) {
     // Build index
     auto my_l2_space = saltatlas::dhnsw_detail::SpaceWrapper(my_l2_sqr);
 
-    saltatlas::metric_hyperplane_partitioner<float, std::vector<float>>
-        partitioner(world, my_l2_space);
-    saltatlas::dhnsw<
-        float, std::vector<float>,
-        saltatlas::metric_hyperplane_partitioner<float, std::vector<float>>>
-        dist_index(voronoi_rank, num_seeds, &my_l2_space, &world, partitioner);
+    saltatlas::metric_hyperplane_partitioner<float, std::size_t,
+                                             std::vector<float>>
+                     partitioner(world, my_l2_space);
+    saltatlas::dhnsw dist_index(voronoi_rank, num_seeds, &my_l2_space, &world,
+                                partitioner);
 
     // extra column for indices
     int num_cols =

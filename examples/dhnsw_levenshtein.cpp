@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -73,21 +74,23 @@ int main(int argc, char** argv) {
   std::vector<std::string> strings{"cat",   "dog",  "apple", "desk",
                                    "floor", "lamp", "car",   "flag"};
 
-  ygm::container::bag<std::pair<size_t, std::string>> string_bag(world);
+  using dist_t  = float;
+  using index_t = std::size_t;
+  using point_t = std::string;
+
+  ygm::container::pair_bag<index_t, point_t> string_bag(world);
   if (world.rank0()) {
-    size_t i{0};
+    index_t i{0};
     for (const auto& s : strings) {
       string_bag.async_insert(std::make_pair(i++, s));
     }
   }
 
-  saltatlas::metric_hyperplane_partitioner<float, std::string> partitioner(
-      world, fuzzy_leven_space);
+  saltatlas::metric_hyperplane_partitioner<dist_t, index_t, point_t>
+      partitioner(world, fuzzy_leven_space);
 
-  saltatlas::dhnsw<float, std::string,
-                   saltatlas::metric_hyperplane_partitioner<float, std::string>>
-      dist_index(voronoi_rank, num_cells, &fuzzy_leven_space, &world,
-                 partitioner);
+  saltatlas::dhnsw dist_index(voronoi_rank, num_cells, &fuzzy_leven_space,
+                              &world, partitioner);
 
   world.barrier();
   ygm::timer t{};
@@ -120,9 +123,9 @@ int main(int argc, char** argv) {
   world.barrier();
 
   auto fuzzy_result_lambda =
-      [](const std::string&                  query_string,
-         const std::multimap<float, size_t>& nearest_neighbors,
-         auto                                dist_knn_index) {
+      [](const point_t&                        query_string,
+         const std::multimap<dist_t, index_t>& nearest_neighbors,
+         auto                                  dist_knn_index) {
         for (const auto& result_pair : nearest_neighbors) {
           dist_knn_index->comm().cout()
               << result_pair.second << " fuzzy dist: " << result_pair.first

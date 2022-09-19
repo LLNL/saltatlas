@@ -11,24 +11,31 @@
 
 namespace saltatlas {
 
-template <typename DistType, typename Point, typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          template <typename, typename, typename> class Partitioner>
 class dhnsw {
  public:
+  using dist_t        = DistType;
+  using index_t       = IndexType;
+  using point_t       = Point;
+  using partitioner_t = Partitioner<dist_t, index_t, point_t>;
+
   dhnsw(int max_voronoi_rank, int num_cells,
-        hnswlib::SpaceInterface<DistType> *space_ptr, ygm::comm *comm,
-        Partitioner &p)
+        hnswlib::SpaceInterface<dist_t> *space_ptr, ygm::comm *comm,
+        partitioner_t &p)
       : m_comm(comm),
         m_index_impl(max_voronoi_rank, num_cells, space_ptr, comm, p),
         m_query_engine_impl(&m_index_impl){};
 
-  void partition_data(ygm::container::bag<std::pair<uint64_t, Point>> &data,
-                      const uint32_t num_partitions) {
+  template <template <typename, typename> class Container>
+  void partition_data(Container<index_t, point_t> &data,
+                      const uint32_t               num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
   ~dhnsw() { m_comm->barrier(); }
 
-  void queue_data_point_insertion(const size_t pt_idx, const Point &pt) {
+  void queue_data_point_insertion(const index_t pt_idx, const point_t &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
   }
 
@@ -49,13 +56,13 @@ class dhnsw {
   }
 
   /*
-void set_seeds(const std::vector<Point> &seed_features) {
+void set_seeds(const std::vector<point_t> &seed_features) {
 m_index_impl.store_seeds(seed_features);
 }
   */
 
   template <typename Callback, typename... Callback_Args>
-  void query(const Point &query_pt, const int k, const int hops,
+  void query(const point_t &query_pt, const int k, const int hops,
              const int initial_queries, const int voronoi_rank, Callback c,
              const Callback_Args &...args) {
     m_query_engine_impl.query(query_pt, k, hops, initial_queries, voronoi_rank,
@@ -72,9 +79,9 @@ m_index_impl.store_seeds(seed_features);
   inline ygm::comm &comm() { return *m_comm; }
 
  private:
-  ygm::comm                                             *m_comm;
-  dhnsw_detail::dhnsw_impl<DistType, Point, Partitioner> m_index_impl;
-  dhnsw_detail::query_engine_impl<DistType, Point, Partitioner>
+  ygm::comm                                                      *m_comm;
+  dhnsw_detail::dhnsw_impl<dist_t, index_t, point_t, Partitioner> m_index_impl;
+  dhnsw_detail::query_engine_impl<dist_t, index_t, point_t, Partitioner>
       m_query_engine_impl;
 };
 

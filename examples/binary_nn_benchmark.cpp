@@ -12,6 +12,7 @@
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/voronoi_partitioner.hpp>
@@ -121,10 +122,10 @@ float my_cos_sim_squared(const std::vector<float> &x,
   return dot_product * dot_product / (x_magnitude * y_magnitude);
 }
 
-ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
+template <typename IndexType, typename Point>
+ygm::container::pair_bag<IndexType, Point> read_data(
     ygm::container::bag<std::string> &bag_filenames, int num_dimensions) {
-  ygm::container::bag<std::pair<uint64_t, std::vector<float>>> to_return(
-      bag_filenames.comm());
+  ygm::container::pair_bag<IndexType, Point> to_return(bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &num_dimensions](const auto &fname) {
     std::ifstream ifs(fname.c_str());
@@ -165,10 +166,11 @@ ygm::container::bag<std::pair<uint64_t, std::vector<float>>> read_data(
   return to_return;
 }
 
-template <typename Point, typename Partitioner>
+template <typename DistType, typename IndexType, typename Point,
+          template <typename, typename, typename> class Partitioner>
 void build_index(
-    ygm::container::bag<std::pair<uint64_t, Point>>          &bag_data,
-    saltatlas::dhnsw<float, std::vector<float>, Partitioner> &dist_index,
+    ygm::container::pair_bag<IndexType, Point>                &bag_data,
+    saltatlas::dhnsw<DistType, IndexType, Point, Partitioner> &dist_index,
     const size_t num_seeds, const int num_dimensions) {
   if (dist_index.comm().rank0()) {
     std::cout << "\n****Building distributed index****"
@@ -255,19 +257,23 @@ int main(int argc, char **argv) {
 
     fill_filenames_bag(bag_index_filenames, index_filename);
 
-    auto bag_data = read_data(bag_index_filenames, num_dimensions);
+    using dist_t  = float;
+    using index_t = std::size_t;
+    using point_t = std::vector<float>;
+
+    auto bag_data =
+        read_data<index_t, point_t>(bag_index_filenames, num_dimensions);
 
     uint64_t num_points = bag_data.size();
 
     auto my_space = saltatlas::dhnsw_detail::SpaceWrapper(my_cos_sim_squared);
 
-    saltatlas::voronoi_partitioner<float, std::vector<float>> partitioner(
+    saltatlas::voronoi_partitioner<dist_t, index_t, point_t> partitioner(
         world, my_space);
 
     // Build index
-    saltatlas::dhnsw<float, std::vector<float>,
-                     saltatlas::voronoi_partitioner<float, std::vector<float>>>
-        dist_index(voronoi_rank, num_seeds, &my_space, &world, partitioner);
+    saltatlas::dhnsw dist_index(voronoi_rank, num_seeds, &my_space, &world,
+                                partitioner);
 
     dist_index.partition_data(bag_data, num_seeds);
 
