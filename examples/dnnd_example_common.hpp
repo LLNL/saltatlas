@@ -16,6 +16,70 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/dnnd.hpp>
+#include <saltatlas/dnnd/dnnd_pm.hpp>
+
+using id_type              = uint32_t;
+using feature_element_type = float;
+using distance_type        = float;
+
+using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;
+using neighbor_type = typename dnnd_type::neighbor_type;
+
+using dnnd_pm_type =
+    saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
+using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
+
+static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
+
+template <typename cout_type>
+inline void option_common(cout_type &cout) {
+  cout << "\n\t-f [string, required] Distance metric name:"
+       << "\n\t\t'l2' (L2), 'cosine' (cosine similarity), or 'jaccard'"
+          "(Jaccard index)."
+       << "\n\t-b [long int] Batch size for the index construction and the "
+          "query (0 is full batch mode)."
+       << "\n\t-v If specified, turn on the verbose mode."
+       << "\n\t-h Show this menu." << std::endl;
+}
+
+template <typename cout_type>
+inline void option_index_const(cout_type &cout) {
+  cout << "\n\t-p [string, required] Format of input point files:"
+       << "\n\t\t'wsv' (whitespace-separated values),"
+       << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
+       << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
+       << "\n\t-k [int] Number of neighbors to have for each point in the index."
+       << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
+       << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
+       << "\n\t-e If specified, generate reverse neighbors globally during the index construction."
+       << std::endl;
+}
+
+template <typename cout_type>
+inline void option_optimization(cout_type &cout) {
+  cout << "\n\t-u  If specified, make the index undirected before the query."
+       << "\n\t-m [double] Pruning degree multiplier (m) in PyNNDescent."
+       << "\n\t\tCut every points' neighbors more than 'k' x 'm' before the "
+          "query."
+       << "\n\t-l If specified, remove long paths before the query."
+       << std::endl;
+}
+
+template <typename cout_type>
+inline void option_query(cout_type &cout) {
+  cout << "\n\t-q [string] Path to a query file."
+       << "\n\t-n [int] Number of nearest neighbors to find for each query "
+          "point."
+       << "\n\t-g [string] Path to a query ground truth file." << std::endl;
+}
+
+template <typename cout_type>
+inline void option_pm_reattach(cout_type &cout) {
+  cout << "\nIndex reattaching options:"
+       << "\n\t-z [string, required] Path to an already constructed index."
+       << "\n\t-x [string] If specified, transfer an already constructed index from this path to path 'z' at the beginning."
+       << std::endl;
+}
 
 /// \brief Reads a file that contain queries.
 /// Each line is the feature vector of a query point.

@@ -11,24 +11,18 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
-using id_type              = uint32_t;
-using feature_element_type = float;
-using distance_type        = float;
-using dnnd_type =
-    saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
-
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
-
-void parse_options(int argc, char **argv, std::string &original_datastore_path,
+bool parse_options(int argc, char **argv, std::string &original_datastore_path,
                    std::string &datastore_path,
                    std::string &datastore_transfer_path,
                    bool        &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose);
+                   bool &verbose, bool &help);
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
@@ -40,13 +34,23 @@ int main(int argc, char **argv) {
   double      pruning_degree_multiplier{1.5};
   bool        remove_long_paths{false};
   bool        verbose{false};
+  bool        help{true};
 
-  parse_options(argc, argv, original_datastore_path, datastore_path,
-                datastore_transfer_path, make_index_undirected,
-                pruning_degree_multiplier, remove_long_paths, verbose);
+  if (!parse_options(argc, argv, original_datastore_path, datastore_path,
+                     datastore_transfer_path, make_index_undirected,
+                     pruning_degree_multiplier, remove_long_paths, verbose,
+                     help)) {
+    comm.cerr0() << "Invalid option" << std::endl;
+    usage(argv[0], comm.cerr0());
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+  if (help) {
+    usage(argv[0], comm.cout0());
+    return 0;
+  }
 
   if (!original_datastore_path.empty()) {
-    if (dnnd_type::copy(original_datastore_path, datastore_path)) {
+    if (dnnd_pm_type::copy(original_datastore_path, datastore_path)) {
       comm.cout0() << "\nTransferred index from " << original_datastore_path
                    << " to " << datastore_path << std::endl;
     } else {
@@ -56,7 +60,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    dnnd_type dnnd(dnnd_type::open, datastore_path, comm, verbose);
+    dnnd_pm_type dnnd(dnnd_pm_type::open, datastore_path, comm, verbose);
     comm.cout0() << "\n<<Index Optimization>>" << std::endl;
     ygm::timer optimization_timer;
     dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
@@ -68,7 +72,7 @@ int main(int argc, char **argv) {
   if (!datastore_transfer_path.empty()) {
     comm.cout0() << "\nTransferring index data store " << datastore_path
                  << " to " << datastore_transfer_path << std::endl;
-    if (!dnnd_type::copy(datastore_path, datastore_transfer_path)) {
+    if (!dnnd_pm_type::copy(datastore_path, datastore_transfer_path)) {
       comm.cerr0() << "\nFailed to transfer index." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
@@ -80,18 +84,22 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-void parse_options(int argc, char **argv, std::string &original_datastore_path,
+bool parse_options(int argc, char **argv, std::string &original_datastore_path,
                    std::string &datastore_path,
                    std::string &datastore_transfer_path,
                    bool        &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose) {
+                   bool &verbose, bool &help) {
   original_datastore_path.clear();
   datastore_path.clear();
   datastore_transfer_path.clear();
+  make_index_undirected = false;
+  remove_long_paths     = false;
+  verbose               = false;
+  help                  = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "x:z:o:um:lv")) != -1) {
+  while ((n = ::getopt(argc, argv, "x:z:o:um:lvh")) != -1) {
     switch (n) {
       case 'x':
         original_datastore_path = optarg;
@@ -121,9 +129,39 @@ void parse_options(int argc, char **argv, std::string &original_datastore_path,
         verbose = true;
         break;
 
+      case 'h':
+        help = true;
+        return true;
+
       default:
         std::cerr << "Invalid option" << std::endl;
         std::abort();
     }
   }
+
+  if (datastore_path.empty()) {
+    return false;
+  }
+
+  return true;
+}
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout) {
+  cout << "Usage: mpirun -n [#of processes] " << exe_name
+       << " [options (see below)]" << std::endl;
+
+  cout << "Options:"
+       << "\n\t-z [string, required] Path to an index to modify."
+       << "\n\t-u If specified, make the index undirected."
+       << "\n\t-m [double] Pruning degree multiplier (m) in PyNNDescent."
+       << "\n\t\tCut every points' neighbors more than 'k' x 'm' before the "
+          "query."
+       << "\n\t-l If specified, remove long paths."
+       << "\n\t-x [string] If specified, transfer an already constructed index "
+          "from this path to path 'z' at the beginning."
+       << "\n\t-o [string] If specified, transfer the index to this path at "
+          "the end."
+       << "\n\t-v If specified, turn on the verbose mode."
+       << "\n\t-h Show this menu." << std::endl;
 }
