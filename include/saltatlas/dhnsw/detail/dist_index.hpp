@@ -158,6 +158,8 @@ class dhnsw_impl {
     return m_map_point_to_cells[index];
   }
 
+  const point_t &get_point(index_t index) { return m_local_data[index]; }
+
  private:
   hnswlib::HierarchicalNSW<dist_t> &get_cell_hnsw_non_const(
       const int cell) const {

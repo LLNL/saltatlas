@@ -69,6 +69,14 @@ m_index_impl.store_seeds(seed_features);
                               c, args...);
   }
 
+  template <typename Callback, typename... Callback_Args>
+  void query_with_features(const point_t &query_pt, const int k, const int hops,
+                           const int initial_queries, const int voronoi_rank,
+                           Callback c, const Callback_Args &...args) {
+    m_query_engine_impl.query_with_features(query_pt, k, hops, initial_queries,
+                                            voronoi_rank, c, args...);
+  }
+
   template <typename Function>
   void for_all_data(Function fn) {
     m_index_impl.for_all_data(fn);
