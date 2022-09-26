@@ -42,7 +42,7 @@ size_t levenshtein_distance(const String& s1, const String& s2) {
     dist_row[0] = i;
     for (size_t j = 1; j < m + 1; ++j) {
       next_diag              = dist_row[j];
-      bool substitution_cost = (s1[i - 1] != s2[j - 1]);
+      bool substitution_cost = (s1[j - 1] != s2[i - 1]);
 
       dist_row[j] =
           std::min(1 + dist_row[j],
