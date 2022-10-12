@@ -164,30 +164,11 @@ While the second example should be faster, the first is easier to use and more e
 ## Running DNND (Distributed NNDescent) Example
 
 ```shell
-./examples/dnnd_example (options, see below) point_file_0 point_file_1...
--k [int, required] Number of neighbors in a constructed k-NN index.
--f [string, required] Distance metric name.
-    "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
--p [string, required] Format of input point files.
-    Supported formats are "wsv" (whitespace-separated values),
-    "wsv-id" (WSV format and the first column is point ID),
-    "csv-id" (CSV format and the first column is point ID).
--r [double] Sample rate parameter (ρ) in NN-Descent.
--d [double] Precision parameter (δ) in NN-Descent.
--e  If specified, exchange reverse neighbors globally.
-    This feature will cause heavy communication.
-    May be able to achieve a better conversion speed and query accuracy.
--u  If specified, make the index undirected before the query.
--m [double] Pruning degree multiplier (m) in PyNNDescent.
-    Each point keeps up to 'k' x 'm' nearest neighbors.****
--l  If specified, remove long paths before the query.
--b [long int] Batch size (0 is full batch mode).
--q [string] Path to a query file.
--n [int] Number of nearest neighbors to find for each query point.
--g [string] Path to a query ground truth file.
--o [string] Prefix of the output files (constructed index, optimized index, and query results).
--v  If specified, turn on the verbose mode.
-[string, required] List of input point files at the end. 
+# Usage
+mpirun -n [#of procs] ./examples/dnnd_example (options) /path/to/point/file/0 /path/to/point/file/1 ...
+
+# Show help menu (available options)
+mpirun -n 1 ./examples/dnnd_example -h
 ```
 
 ### Running Example
@@ -205,72 +186,45 @@ mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 \
 ```
 
 
-## Running DNND PM Examples
+## Running DNND PM (persistent memory) Examples
 
 ### Required CMake Option
 
 The DNND PM examples require Metall and Boost C++ Libraries.
 Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
 
-### dnnd_pm_const_example
+Those libraries are automatically downloaded and set up properly.
+
+### Executables
+
+There are three examples executables for k-NN index construction,
+k-NN index optimization, and query, respectively.
+
+Use `-h` option to show the help menus. 
+
+#### dnnd_pm_const_example
 
 This program constructs a k-NN index.
 
 ```shell
-./examples/dnnd_pm_const_example (options, see below) point_file_0 point_file_1...
--z [string, required] Path to store constructed index.
--k [int, required] Number of neighbors in a constructed k-NN index.
--f [string, required] Distance metric name.
-    "l2" (L2), "cosine" (cosine similarity), or "jaccard" (Jaccard index) are supported now.
--p [string, required] Format of input point files.
-    Supported formats are "wsv" (whitespace-separated values),
-    "wsv-id" (WSV format and the first column is point ID),
-    "csv-id" (CSV format and the first column is point ID).
--r [double] Sample rate parameter (ρ) in NN-Descent.
--d [double] Precision parameter (δ) in NN-Descent.
--e  If specified, exchange reverse neighbors globally.
-    This feature will cause heavy communication.
-    May be able to achieve a better conversion speed and query accuracy.
--u  If specified, make the index undirected before the query.
--m [double] Pruning degree multiplier (m) in PyNNDescent.
-    Each point keeps up to 'k' x 'm' nearest neighbors.****
--b [long int] Batch size (0 is full batch mode).
--x [string] If specified, transfer index to this path at the end.
--v  If specified, turn on the verbose mode.
-[string, required] List of input point files at the end. 
+mpirun -n [#of procs] ./examples/dnnd_pm_const_example (options) point_file_0 point_file_1...
 ```
 
-
-### dnnd_pm_optimize_example
+#### dnnd_pm_optimize_example
 
 This program optimizes an already constructed k-NN index.
+
 ```shell
-./examples/dnnd_pm_optimize_example (options, see below)
--z [string, required] Path to store constructed index.
--u  If specified, make the index undirected.
--m [double] Pruning degree multiplier (m) in PyNNDescent.
-    Each point keeps up to 'k' x 'm' nearest neighbors.
-    If -1 is specified, do not perform pruning.
--l  If specified, remove long paths.
--x [string] If specified, transfer an already constructed index from this path to path 'z' at the begining.
--o [string] If specified, transfer index to this path at the end.
--v  If specified, turn on the verbose mode.
+mpirun -n [#of procs] ./examples/dnnd_pm_optimize_example (options)
 ```
 
 
-### dnnd_pm_query_example
+#### dnnd_pm_query_example
 
 This program performs queries against an already constructed index.
 
 ```shell
-./examples/dnnd_pm_query_example (options, see below)
--z [string, required] Path to index.
--q [string, required] Path to a query file.
--n [int, required] Number of nearest neighbors to find for each query point.
--b [long int] Batch size (0 is full batch mode).
--g [string] Path to a query ground truth file.
--o [string] Path to store query results.
--x [string] If specified, transfer an already constructed index from this path to path 'z' at the begining.
+mpirun -n [#of procs] ./examples/dnnd_pm_query_example (options)
 ```
 
 

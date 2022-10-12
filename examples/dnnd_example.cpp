@@ -11,19 +11,10 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
-using id_type              = uint32_t;
-using feature_element_type = float;
-using distance_type        = float;
-using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;
-using neighbor_type = typename dnnd_type::neighbor_type;
-
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
-
-void parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,
+bool parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,
                    double &delta, bool &exchange_reverse_neighbors,
                    bool   &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
@@ -32,13 +23,15 @@ void parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,
                    std::string              &query_file_name,
                    std::string &ground_truth_neighbor_ids_file_name,
                    std::string &point_file_format, std::string &out_file_prefix,
-                   bool &verbose);
+                   bool &verbose, bool &help);
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv, k_ygm_buff_size);
 
-  int                      index_k{0};
-  int                      query_k{0};
+  int                      index_k{4};
+  int                      query_k{4};
   double                   r{0.8};
   double                   delta{0.001};
   bool                     exchange_reverse_neighbors{false};
@@ -53,13 +46,22 @@ int main(int argc, char **argv) {
   std::string              point_file_format;
   std::string              out_file_prefix;
   bool                     verbose{false};
+  bool                     help{false};
 
-  parse_options(argc, argv, index_k, query_k, r, delta,
-                exchange_reverse_neighbors, make_index_undirected,
-                pruning_degree_multiplier, remove_long_paths, batch_size,
-                distance_metric_name, point_file_names, query_file_name,
-                ground_truth_neighbor_ids_file_name, point_file_format,
-                out_file_prefix, verbose);
+  if (!parse_options(argc, argv, index_k, query_k, r, delta,
+                     exchange_reverse_neighbors, make_index_undirected,
+                     pruning_degree_multiplier, remove_long_paths, batch_size,
+                     distance_metric_name, point_file_names, query_file_name,
+                     ground_truth_neighbor_ids_file_name, point_file_format,
+                     out_file_prefix, verbose, help)) {
+    comm.cerr0() << "Invalid option" << std::endl;
+    usage(argv[0], comm.cerr0());
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+  if (help) {
+    usage(argv[0], comm.cout0());
+    return 0;
+  }
 
   dnnd_type dnnd(distance_metric_name, comm, std::random_device{}(), verbose);
   comm.cf_barrier();
@@ -140,15 +142,15 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-inline void parse_options(
+inline bool parse_options(
     int argc, char **argv, int &index_k, int &query_k, double &r, double &delta,
     bool &exchange_reverse_neighbors, bool &make_index_undirected,
     double &pruning_degree_multiplier, bool &remove_long_paths,
     std::size_t &batch_size, std::string &distance_metric_name,
     std::vector<std::string> &point_file_names, std::string &query_file_name,
     std::string &ground_truth_neighbor_ids_file_name,
-    std::string &point_file_format, std::string &out_file_prefix,
-    bool &verbose) {
+    std::string &point_file_format, std::string &out_file_prefix, bool &verbose,
+    bool &help) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
@@ -157,9 +159,10 @@ inline void parse_options(
   make_index_undirected      = false;
   remove_long_paths          = false;
   verbose                    = false;
+  help                       = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:o:f:p:eb:vq:n:g:m:ul")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:o:f:p:eb:vq:n:g:m:ulh")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -221,13 +224,62 @@ inline void parse_options(
         verbose = true;
         break;
 
+      case 'h':
+        help = true;
+        return true;
+
       default:
-        std::cerr << "Invalid option" << std::endl;
-        std::abort();
+        return false;
     }
   }
 
   for (int index = optind; index < argc; index++) {
     point_file_names.emplace_back(argv[index]);
   }
+
+  if (distance_metric_name.empty() || point_file_format.empty() ||
+      point_file_names.empty()) {
+    return false;
+  }
+
+  return true;
+}
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout) {
+  cout << "Usage: mpirun -n [#of processes] " << exe_name
+       << " [options (see below)] [list of input point files (required)]"
+       << std::endl;
+  cout
+      << "\nOptions:"
+      << "\n\t-f [string, required] Distance metric name:"
+      << "\n\t\t'l2' (L2), 'cosine' (cosine similarity), or 'jaccard'"
+         "(Jaccard index)."
+      << "\n\t-p [string, required] Format of input point files:"
+      << "\n\t\t'wsv' (whitespace-separated values),"
+      << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
+      << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
+      << "\n\t-k [int] Number of neighbors to have for each point in the index."
+      << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
+      << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
+      << "\n\t-e If specified, generate reverse neighbors globally during the "
+         "index construction."
+      << "\n"
+      << "\n\t-u  If specified, make the index undirected before the query."
+      << "\n\t-m [double] Pruning degree multiplier (m) in PyNNDescent."
+      << "\n\t\tCut every points' neighbors more than 'k' x 'm' before the "
+         "query."
+      << "\n\t-l If specified, remove long paths before the query."
+      << "\n"
+      << "\n\t-q [string] Path to a query file."
+      << "\n\t-n [int] Number of nearest neighbors to find for each query "
+         "point."
+      << "\n\t-g [string] Path to a query ground truth file."
+      << "\n"
+      << "\n\t-o [string] Prefix of output files (constructed index, "
+         "optimized index, and query results)."
+      << "\n\t-b [long int] Batch size for the index construction and the "
+         "query (0 is full batch mode)."
+      << "\n\t-v If specified, turn on the verbose mode."
+      << "\n\t-h Show this menu." << std::endl;
 }
