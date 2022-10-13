@@ -38,7 +38,7 @@ namespace container =
 #endif
 }  // namespace
 
-template <typename Id = uint64_t, typename Distance = double>
+template <typename Id, typename Distance>
 struct neighbor {
   using id_type       = Id;
   using distance_type = Distance;
@@ -66,7 +66,7 @@ inline bool operator!=(const neighbor<Id, Distance>& lhs,
 }
 
 // TODO: make a version that deos not take value?
-template <typename Id = uint64_t, typename Distance = double,
+template <typename Id, typename Distance,
           typename Value = std::byte,
           typename Alloc = std::allocator<std::byte>>
 class unique_knn_heap {

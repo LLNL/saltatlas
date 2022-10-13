@@ -23,13 +23,14 @@ class nn_index_optimizer {
 
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric = distance::metric_type<feature_element_type>;
+  using distance_metric =
+      distance::metric_type<feature_element_type, distance_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   struct option {
     std::size_t index_k{0};
     bool        undirected{false};
-    double      pruning_degree_multiplier{-1}; // if < 0, no pruning.
+    double      pruning_degree_multiplier{-1};  // if < 0, no pruning.
     bool        remove_long_paths{false};
     bool        verbose{false};
   };
@@ -69,8 +70,8 @@ class nn_index_optimizer {
     if (m_option.verbose) {
       m_comm.cout0() << "Making the index undirected" << std::endl;
     }
-    auto reversed_index = priv_generate_reverse_index();
-    std::size_t max_degree = 0;
+    auto        reversed_index = priv_generate_reverse_index();
+    std::size_t max_degree     = 0;
     for (auto sitr = reversed_index.points_begin(),
               send = reversed_index.points_end();
          sitr != send; ++sitr) {
@@ -229,7 +230,7 @@ class nn_index_optimizer {
                     const int rank_to_return) {
       const auto& f = local_this->m_point_store.feature_vector(targe_id);
       const std::vector<feature_element_type> shipping_feature(f.begin(),
-                                                              f.end());
+                                                               f.end());
       local_this->m_comm.async(rank_to_return, feature_vector_gather{},
                                local_this, targe_id, shipping_feature);
     }

@@ -11,7 +11,6 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 bool parse_options(int argc, char **argv, std::string &original_datastore_path,

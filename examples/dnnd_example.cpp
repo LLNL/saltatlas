@@ -11,7 +11,7 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/point_reader.hpp>
+#include <saltatlas/dnnd/data_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 bool parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,

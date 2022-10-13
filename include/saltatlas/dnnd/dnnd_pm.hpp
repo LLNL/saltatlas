@@ -187,11 +187,11 @@ class dnnd_pm {
         .rnd_seed                   = m_data_core->rnd_seed,
         .verbose                    = m_verbose};
 
-    nn_kernel_type kernel(option, m_data_core->point_store,
-                          get_point_partitioner(),
-                          dndetail::distance::metric<feature_element_type>(
-                              m_data_core->metric_id),
-                          m_comm);
+    nn_kernel_type kernel(
+        option, m_data_core->point_store, get_point_partitioner(),
+        dndetail::distance::metric<feature_element_type, distance_type>(
+            m_data_core->metric_id),
+        m_comm);
     kernel.construct(m_data_core->knn_index);
     m_data_core->index_k = k;
   }
@@ -219,7 +219,7 @@ class dnnd_pm {
         opt,
         m_data_core->point_store,
         get_point_partitioner(),
-        dndetail::distance::metric<feature_element_type>(
+        dndetail::distance::metric<feature_element_type, distance_type>(
             m_data_core->metric_id),
         m_data_core->knn_index,
         m_comm};
@@ -240,11 +240,11 @@ class dnnd_pm {
                                               .rnd_seed = m_data_core->rnd_seed,
                                               .verbose  = m_verbose};
 
-    query_kernel_type kernel(option, m_data_core->point_store,
-                             get_point_partitioner(),
-                             dndetail::distance::metric<feature_element_type>(
-                                 m_data_core->metric_id),
-                             m_data_core->knn_index, m_comm);
+    query_kernel_type kernel(
+        option, m_data_core->point_store, get_point_partitioner(),
+        dndetail::distance::metric<feature_element_type, distance_type>(
+            m_data_core->metric_id),
+        m_data_core->knn_index, m_comm);
 
     query_result_store_type query_result;
     kernel.query_batch(query_point_store, query_result);
@@ -257,6 +257,14 @@ class dnnd_pm {
   /// \return Returns true on success; otherwise, false.
   bool snapshot(const std::string_view& destination_path) {
     return m_metall->snapshot(destination_path.data());
+  }
+
+  /// \brief Checks if a datastore can be opened.
+  /// \param datastore_path Datastore path.
+  /// \return Returns true if the datastore is openable; otherwise, false.
+  static bool openable(const std::string_view& datastore_path) {
+    return metall::utility::metall_mpi_adaptor::consistent(
+        datastore_path.data());
   }
 
   /// \brief Copies a datastore.

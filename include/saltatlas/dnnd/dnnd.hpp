@@ -11,7 +11,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <fstream>
 
 #include <ygm/comm.hpp>
 
@@ -47,11 +46,12 @@ class dnnd {
       dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
   using nn_index_optimizer_type =
       dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
+  using distance_metric = typename nn_kernel_type::distance_metric;
 
  public:
   using query_point_store_type =
       typename query_kernel_type::query_point_store_type;
-  using point_partitioner = typename nn_kernel_type::point_partitioner;
+  using point_partitioner       = typename nn_kernel_type::point_partitioner;
   using query_result_store_type = typename query_kernel_type::knn_store_type;
 
   /// \brief Constructor.
@@ -62,8 +62,9 @@ class dnnd {
   dnnd(const std::string_view distance_metric_name, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : m_distance_metric(dndetail::distance::metric<feature_element_type>(
-            distance_metric_name)),
+      : m_distance_metric(
+            dndetail::distance::metric<feature_element_type, distance_type>(
+                distance_metric_name)),
         m_comm(comm),
         m_rnd_seed(rnd_seed),
         m_verbose(verbose) {}
@@ -129,12 +130,9 @@ class dnnd {
         .pruning_degree_multiplier = pruning_degree_multiplier,
         .remove_long_paths         = remove_long_paths,
         .verbose                   = m_verbose};
-    nn_index_optimizer_type optimizer{opt,
-                                      m_point_store,
-                                      get_point_partitioner(),
-                                      m_distance_metric,
-                                      m_knn_index,
-                                      m_comm};
+    nn_index_optimizer_type optimizer{
+        opt,         m_point_store, get_point_partitioner(), m_distance_metric,
+        m_knn_index, m_comm};
     optimizer.run();
   }
 
@@ -152,9 +150,8 @@ class dnnd {
                                               .rnd_seed   = m_rnd_seed,
                                               .verbose    = m_verbose};
 
-    query_kernel_type kernel(option, m_point_store,
-                             get_point_partitioner(), m_distance_metric,
-                             m_knn_index, m_comm);
+    query_kernel_type kernel(option, m_point_store, get_point_partitioner(),
+                             m_distance_metric, m_knn_index, m_comm);
 
     query_result_store_type query_result;
     kernel.query_batch(query_point_store, query_result);
@@ -169,7 +166,6 @@ class dnnd {
   }
 
  private:
-
   void priv_read_points(const std::vector<std::string>& point_file_names,
                         const std::string_view          point_file_format) {
     m_point_store.clear();
@@ -213,14 +209,13 @@ class dnnd {
     m_comm.cf_barrier();
   }
 
-  const dndetail::distance::metric_type<feature_element_type>&
-                   m_distance_metric;
-  ygm::comm&       m_comm;
-  uint64_t         m_rnd_seed{123};
-  bool             m_verbose{false};
-  point_store_type m_point_store{};
-  knn_index_type   m_knn_index{};
-  std::size_t      m_index_k{0};
+  const distance_metric& m_distance_metric;
+  ygm::comm&             m_comm;
+  uint64_t               m_rnd_seed{123};
+  bool                   m_verbose{false};
+  point_store_type       m_point_store{};
+  knn_index_type         m_knn_index{};
+  std::size_t            m_index_k{0};
 };
 
 }  // namespace saltatlas
