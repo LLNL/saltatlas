@@ -48,9 +48,8 @@ class dknn_batch_query_kernel {
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   // These data stores are allocated on DRAM
-  using query_point_store_type = point_store<id_type, feature_element_type>;
-  using knn_store_type =
-      std::unordered_map<id_type, std::vector<neighbor_type>>;
+  using query_store_type    = std::vector<std::vector<feature_element_type>>;
+  using neighbor_store_type = std::vector<std::vector<neighbor_type>>;
 
   struct option {
     int         k{4};
@@ -73,13 +72,13 @@ class dknn_batch_query_kernel {
         m_rnd_generator(m_option.rnd_seed + m_comm.rank()) {
     m_global_max_id = m_comm.all_reduce_max(m_point_store.max_id());
     m_comm.cf_barrier();
-    m_this.check(m_comm);
+    m_self.check(m_comm);
   }
 
   /// Assumes that all processes have the same query_points data.
-  void query_batch(const query_point_store_type& query_points,
-                   knn_store_type&               query_result) {
-    priv_query_batch(query_points, query_result);
+  void query_batch(const query_store_type& queries,
+                   neighbor_store_type&    query_results) {
+    priv_query_batch(queries, query_results);
   }
 
   ygm::comm& comm() { return m_comm; }
@@ -89,32 +88,53 @@ class dknn_batch_query_kernel {
   using self_pointer_type   = ygm::ygm_ptr<self_type>;
   using knn_heap_type       = unique_knn_heap<id_type, distance_type>;
   using knn_heap_table_type = std::unordered_map<std::size_t, knn_heap_type>;
+  using internal_query_store_type = point_store<id_type, feature_element_type>;
 
-  void priv_query_batch(const query_point_store_type& query_points,
-                        knn_store_type&               query_result) {
-    m_query_points = query_points;
+  id_type priv_all_gather_query(const query_store_type& queries) {
+    const std::size_t max_num_queries = m_comm.all_reduce_max(queries.size());
+    const id_type     offset          = max_num_queries * m_comm.rank();
 
-    const std::size_t num_global_queries = query_points.size();
-    const auto        range =
-        partial_range(num_global_queries, m_comm.rank(), m_comm.size());
+    for (int r = 0; r < m_comm.size(); ++r) {
+      for (std::size_t i = 0; i < queries.size(); ++i) {
+        m_comm.async(
+            r,
+            [](const ygm::ygm_ptr<self_type>& dst_self, const id_type id,
+               const auto& q) {
+              assert(!dst_self->m_query_store.contains(id));
+              dst_self->m_query_store.set(id, q.begin(), q.end());
+            },
+            m_self, i + offset, queries[i]);
+      }
+    }
+    m_comm.barrier();
 
+    // Local ID offset.
+    // Query IDs are sequentially increased within locals.
+    return offset;
+  }
+
+  void priv_query_batch(const query_store_type& queries,
+                        neighbor_store_type&    query_results) {
+    const auto local_id_offset = priv_all_gather_query(queries);
+
+    const std::size_t num_global_queries = m_query_store.size();
     if (m_option.verbose) {
       m_comm.cout0() << "#of queries\t" << num_global_queries << std::endl;
       m_comm.cout0() << "Batch Size\t" << m_option.batch_size << std::endl;
     }
 
-    std::size_t query_no_offset     = range.first;
-    std::size_t last_query_no       = range.second - 1;
-    std::size_t count_local_queries = 0;
+    std::size_t query_no_offset   = local_id_offset;
+    std::size_t num_local_remains = queries.size();
     for (std::size_t batch_no = 0;; ++batch_no) {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Batch No. " << batch_no << "]" << std::endl;
       }
 
-      const auto local_batch_size = mpi::assign_tasks(
-          last_query_no - query_no_offset + 1, m_option.batch_size,
-          m_comm.rank(), m_comm.size(), m_option.verbose);
+      const auto local_batch_size =
+          mpi::assign_tasks(num_local_remains, m_option.batch_size,
+                            m_comm.rank(), m_comm.size(), m_option.verbose);
 
+      // Initialize the variable used during the query.
       m_knn_heap_table.clear();
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
@@ -122,47 +142,51 @@ class dknn_batch_query_kernel {
       }
       m_comm.cf_barrier();
 
+      // Launch queries.
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         priv_launch_asynch_single_query(query_no, m_rnd_generator);
-        ++count_local_queries;
+        --num_local_remains;
       }
       m_comm.barrier();
 
-      // Convert the query results
+      // Move query results from heap to an array-like data structure.
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
-        auto&      knn      = query_result[query_no];
-
-        auto& heap = m_knn_heap_table.at(query_no);
+        auto&      heap     = m_knn_heap_table.at(query_no);
         if (heap.empty()) {
-          std::cerr << query_no << "-th knn heap is empty." << std::endl;
+          m_comm.cerr0() << query_no << "-th query result is empty."
+                         << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
+
+        query_results.resize(query_results.size() + 1);
+        auto& result_knn = query_results.back();
         while (!heap.empty()) {
-          knn.push_back(heap.top());
+          result_knn.push_back(heap.top());
           heap.pop();
         }
-        std::sort(knn.begin(), knn.end());
+        std::sort(result_knn.begin(), result_knn.end());
       }
       query_no_offset += local_batch_size;
       m_comm.cf_barrier();
 
-      const auto global_remaining_queries =
-          m_comm.all_reduce_sum(last_query_no - query_no_offset + 1);
-      if (global_remaining_queries == 0) break;
+      const auto num_global_remains = m_comm.all_reduce_sum(num_local_remains);
+      if (num_global_remains == 0) break;
       if (m_option.verbose) {
-        m_comm.cout0() << "#of remaining queries\t" << global_remaining_queries
+        m_comm.cout0() << "#of remaining queries\t" << num_global_remains
                        << std::endl;
       }
     }
-    if (m_comm.all_reduce_sum(count_local_queries) != num_global_queries) {
+    if (m_comm.all_reduce_sum(num_local_remains) > 0) {
       m_comm.cout0() << "Logic error!! Not all queries have been processed"
                      << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
   }
 
+  /// Launches a single query asynchronously.
+  /// The query result is stored to m_knn_heap_table in the owner of the query.
   template <typename random_generator_type>
   void priv_launch_asynch_single_query(const std::size_t      query_no,
                                        random_generator_type& rnd_gen) {
@@ -175,7 +199,7 @@ class dknn_batch_query_kernel {
         set.insert(id);
         assert(m_point_partitioner);
         m_comm.async(m_point_partitioner(id), neighbor_visitor_launcher{},
-                     m_this, m_comm.rank(), query_no, id,
+                     m_self, m_comm.rank(), query_no, id,
                      std::numeric_limits<distance_type>::max());
         break;
       }
@@ -183,9 +207,9 @@ class dknn_batch_query_kernel {
   }
 
   struct neighbor_visitor_launcher {
-    void operator()(self_pointer_type local_this, const int query_owner_rank,
-                    const std::size_t query_no, const id_type src_id,
-                    const distance_type max_distance) {
+    void operator()(const self_pointer_type& local_this,
+                    const int query_owner_rank, const std::size_t query_no,
+                    const id_type src_id, const distance_type max_distance) {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
@@ -205,11 +229,11 @@ class dknn_batch_query_kernel {
   };
 
   struct distance_calculator {
-    void operator()(self_pointer_type local_this, const int query_owner_rank,
-                    const std::size_t query_no, const id_type trg_id,
-                    const distance_type& max_distance) {
+    void operator()(const self_pointer_type& local_this,
+                    const int query_owner_rank, const std::size_t query_no,
+                    const id_type trg_id, const distance_type& max_distance) {
       const auto& query_feature =
-          local_this->m_query_points->feature_vector(query_no);
+          local_this->m_query_store.feature_vector(query_no);
       assert(local_this->m_point_store.contains(trg_id));
       const auto& trg_feature =
           local_this->m_point_store.feature_vector(trg_id);
@@ -223,8 +247,9 @@ class dknn_batch_query_kernel {
   };
 
   struct neighbor_updator {
-    void operator()(self_pointer_type local_this, const std::size_t query_no,
-                    const id_type nid, const distance_type d) {
+    void operator()(const self_pointer_type& local_this,
+                    const std::size_t query_no, const id_type nid,
+                    const distance_type d) {
       knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
       if (!heap.push_unique(nid, d)) {
         return;
@@ -240,17 +265,17 @@ class dknn_batch_query_kernel {
     }
   };
 
-  option                                m_option;
-  const point_store_type&               m_point_store;
-  const point_partitioner               m_point_partitioner;
-  const distance_metric&                m_distance_metric;
-  const nn_index_type&                  m_nn_index;
-  ygm::comm&                            m_comm;
-  self_pointer_type                     m_this{this};
-  knn_heap_table_type                   m_knn_heap_table;
-  id_type                               m_global_max_id{0};
-  std::optional<query_point_store_type> m_query_points{std::nullopt};
-  std::mt19937                          m_rnd_generator;
+  option                    m_option;
+  const point_store_type&   m_point_store;
+  const point_partitioner   m_point_partitioner;
+  const distance_metric&    m_distance_metric;
+  const nn_index_type&      m_nn_index;
+  ygm::comm&                m_comm;
+  self_pointer_type         m_self{this};
+  knn_heap_table_type       m_knn_heap_table;
+  id_type                   m_global_max_id{0};
+  internal_query_store_type m_query_store;
+  std::mt19937              m_rnd_generator;
 };
 
 }  // namespace saltatlas::dndetail

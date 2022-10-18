@@ -88,6 +88,19 @@ class point_store {
     return m_point_table.at(id);
   }
 
+  /// \brief Sets the feature of point 'id' to
+  /// the elements from range ['first', 'last').
+  /// \tparam iterator Iterator type of an input feature.
+  /// \param id Point ID.
+  /// \param first Iterator pointing to the first element inserted.
+  /// \param last Iterator pointing to the end element inserted.
+  template <typename iterator>
+  void set(const id_type &id, iterator first, iterator last) {
+    auto& f = feature_vector(id);
+    f.clear();
+    f.insert(f.begin(), first, last);
+  }
+
   /// \brief Returns an iterator that points the first element.
   /// \return An iterator that points the first element.
   iterator begin() { return m_point_table.begin(); }

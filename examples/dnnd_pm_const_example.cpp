@@ -8,10 +8,6 @@
 #include <string>
 #include <vector>
 
-#include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
-
-#include <saltatlas/dnnd/data_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 bool parse_options(int argc, char **argv, int &index_k, double &r,
@@ -62,7 +58,7 @@ int main(int argc, char **argv) {
     comm.cout0() << "\n<<Read Points>>" << std::endl;
     ygm::timer point_read_timer;
     saltatlas::read_points(point_file_names, point_file_format, verbose,
-                           dnnd.get_point_store(), dnnd.get_point_partitioner(),
+                           dnnd.get_point_partitioner(), dnnd.get_point_store(),
                            comm);
     comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
                  << std::endl;

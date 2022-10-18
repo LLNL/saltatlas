@@ -164,25 +164,9 @@ While the second example should be faster, the first is easier to use and more e
 ## Running DNND (Distributed NNDescent) Example
 
 ```shell
-# Usage
-mpirun -n [#of procs] ./examples/dnnd_example (options) /path/to/point/file/0 /path/to/point/file/1 ...
-
-# Show help menu (available options)
-mpirun -n 1 ./examples/dnnd_example -h
-```
-
-### Running Example
-
-```shell
 cd build
 
-# Construct a k-NN index
-mpirun -n 2 ./examples/dnnd_example -k 4 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
-
-# Construct a k-NN index, query nearest neighbors, and show the accuracy.
-mpirun -n 2 ./examples/dnnd_example -k 2 -f l2 \
-  -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat \ 
-  -p wsv ../examples/datasets/point_5-4.dat
+mpirun -n 2 ./examples/dnnd_example
 ```
 
 

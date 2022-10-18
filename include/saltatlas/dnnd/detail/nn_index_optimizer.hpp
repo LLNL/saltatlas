@@ -117,8 +117,7 @@ class nn_index_optimizer {
             m_point_partitioner(neighbor.id),
             [](const id_type reverse_neighbor, const id_type reverse_source,
                const distance_type distance) {
-              neighbor_type neighbor{.id       = reverse_neighbor,
-                                     .distance = distance};
+              neighbor_type neighbor(reverse_neighbor, distance);
               ref_reversed_index.insert(reverse_source, neighbor);
             },
             source, neighbor.id, neighbor.distance);

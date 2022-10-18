@@ -1,0 +1,6 @@
+add_executable(convert_big_ann_bench_dataset convert_big_ann_bench_dataset.cpp)
+target_link_libraries(convert_big_ann_bench_dataset PUBLIC saltatlas)
+if (OpenMP_CXX_FOUND)
+    target_link_libraries(convert_big_ann_bench_dataset PRIVATE Threads::Threads)
+    target_link_libraries(convert_big_ann_bench_dataset PRIVATE OpenMP::OpenMP_CXX)
+endif ()

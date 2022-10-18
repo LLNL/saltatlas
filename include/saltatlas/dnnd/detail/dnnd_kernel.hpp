@@ -196,7 +196,7 @@ class dnnd_kernel {
   struct distance_calculator {
     // Calculate the distance between sid and nid on the rank nid is assigned.
     // Then, send back the calculated distance value to sid.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type sid,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type sid,
                     const id_type                            nid,
                     const std::vector<feature_element_type>& src_feature_vec) {
       const auto& nbr_feature_vec =
@@ -334,7 +334,7 @@ class dnnd_kernel {
       const auto& neighbors = table.at(source);
       m_comm.async(
           m_point_partitioner(source),
-          [](auto, const id_type vid,
+          [](const id_type                              vid,
              const typename adj_lsit_type::mapped_type& neighbors) {
             ref_received[vid].insert(ref_received[vid].end(), neighbors.begin(),
                                      neighbors.end());
@@ -454,7 +454,7 @@ class dnnd_kernel {
   struct neighbor_updater {
     // Called first.
     // sends u1's feature vector to u2.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type u2) {
       const auto heap = local_this->m_knn_heap_table.at(u1);
       // If the candidate is in the heap,
@@ -482,7 +482,7 @@ class dnnd_kernel {
 
     // 2nd call.
     // Update u2's knn heap and sends the computed distance to u1, if needed.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type                            u2,
                     const std::vector<feature_element_type>& u1_feature,
                     const distance_type&                     u1_max_distance =
@@ -515,7 +515,7 @@ class dnnd_kernel {
 
     // Third call,
     // Update the nearest neighbors of u1.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type u2, const distance_type& d) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u1);
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u2, d, true);

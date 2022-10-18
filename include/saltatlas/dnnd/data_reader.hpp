@@ -15,10 +15,11 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/big_ann_bench_data_reader.hpp>
+#include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/string_cast.hpp>
+#include <saltatlas/dnnd/detail/utilities/ygm.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -105,11 +106,8 @@ void read_points_helper(
       // Send to the corresponding process
       comm.async(
           point_partitioner(id),
-          [](auto, const id_t id, const auto &sent_feature,
-             auto ptr_point_store) {
-            auto &feature = ptr_point_store->feature_vector(id);
-            feature.insert(feature.begin(), sent_feature.begin(),
-                           sent_feature.end());
+          [](auto, const id_t id, const auto &feature, auto ptr_point_store) {
+            ptr_point_store->set(id, feature.begin(), feature.end());
           },
           id, feature, ptr_point_store);
 
@@ -280,9 +278,9 @@ template <typename id_type, typename feature_element_type,
 inline void read_points(
     const std::vector<std::string> &point_file_names,
     const std::string_view &format, const bool verbose,
+    const std::function<int(const id_type &id)>       &point_partitioner,
     dndetail::point_store<id_type, feature_element_type,
                           point_store_allocator_type> &local_point_store,
-    const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm                                         &comm) {
   if (format == "wsv") {
     if (verbose)
@@ -309,4 +307,168 @@ inline void read_points(
     comm.cerr0() << "Invalid reader mode" << std::endl;
   }
 }
+
+namespace {
+using saltatlas::dndetail::neighbor;
+
+template <typename id_t, typename dist_t>
+using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
+}  // namespace
+
+/// \brief
+/// \tparam id_type
+/// \tparam distance_type
+/// \param file_path
+/// \param store
+template <typename id_type, typename distance_type>
+inline void read_neighbors(const std::string_view                &file_path,
+                           neighbors_tbl<id_type, distance_type> &store) {
+  std::ifstream ifs(file_path.data());
+  if (!ifs.is_open()) {
+    std::cerr << "Failed to open: " << file_path << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+
+  std::size_t num_entries = 0;
+  {
+    std::size_t cnt_lines = 0;
+    for (std::string buf; std::getline(ifs, buf);) {
+      ++cnt_lines;
+    }
+    if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
+      std::cerr << "Failed reading data from " << file_path << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    ifs.clear();
+    ifs.seekg(0);
+
+    if (cnt_lines % 2 != 0) {
+      std::cerr << "#of lines in the file is not an even number: " << file_path
+                << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    num_entries = cnt_lines / 2;
+  }
+  store.reserve(num_entries);
+
+  std::size_t num_neighbors_per_entry = 0;
+  {
+    std::string buf;
+    std::getline(ifs, buf);
+    std::stringstream ss(buf);
+    id_type           id;
+    while (ss >> id) {
+      ++num_neighbors_per_entry;
+    }
+    if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
+      std::cerr << "Failed reading data from " << file_path << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    ifs.clear();
+    ifs.seekg(0);
+  }
+
+  // Reads neighbor IDs.
+  for (std::string buf; std::getline(ifs, buf);) {
+    std::vector<dndetail::neighbor<id_type, distance_type>> neighbors;
+    std::stringstream                                       ss(buf);
+    id_type                                                 id;
+    while (ss >> id) {
+      neighbors.emplace_back(id, distance_type{});
+    }
+    if (neighbors.size() != num_neighbors_per_entry) {
+      std::cerr << "#of neighbors per line are not the same" << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    store.push_back(std::move(neighbors));
+    if (store.size() == num_entries) break;
+  }
+  if (store.size() != num_entries || ifs.bad() || ifs.fail()) {
+    std::cerr << "Failed reading data from " << file_path << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+
+  // Reads distances.
+  std::size_t i = 0;
+  for (std::string buf; std::getline(ifs, buf);) {
+    std::stringstream ss(buf);
+    distance_type     d;
+    std::size_t       k = 0;
+    while (ss >> d) {
+      store[i][k++].distance = d;
+    }
+    if (k != num_neighbors_per_entry) {
+      std::cerr << "#of neighbors per line are not the same" << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    ++i;
+  }
+  if (i != num_entries ||
+      (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
+    std::cerr << "Failed reading data from " << file_path << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+}
+
+/// \tparam id_type
+/// \tparam distance_type
+/// \param file_path
+/// \param store
+/// \param comm
+template <typename id_type, typename distance_type>
+inline void read_neighbors(const std::string_view                &file_path,
+                           neighbors_tbl<id_type, distance_type> &store,
+                           ygm::comm                             &comm) {
+  neighbors_tbl<id_type, distance_type> global_store;
+  if (comm.rank0()) {
+    read_neighbors(file_path, global_store);
+  }
+  dndetail::distribute_elements_by_block(global_store, store, comm);
+}
+
+/// \brief Reads a file that contain queries.
+/// Each line is the feature vector of a query point.
+/// Can read the white space separated format (without ID).
+/// \tparam feature_element_type Feature element type.
+/// \param query_file_path Path to a query file.
+/// \param queries Buffer to store read queries.
+template <typename feature_element_type>
+inline void read_query(
+    const std::string_view                         &query_file_path,
+    std::vector<std::vector<feature_element_type>> &queries) {
+  if (query_file_path.empty()) return;
+
+  std::ifstream ifs(query_file_path.data());
+  if (!ifs.is_open()) {
+    std::cerr << "Failed to open " << query_file_path << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+
+  std::string buf;
+  while (std::getline(ifs, buf)) {
+    std::stringstream    ss(buf);
+    feature_element_type v;
+    queries.resize(queries.size() + 1);
+    while (ss >> v) {
+      queries.back().push_back(v);
+    }
+  }
+}
+
+/// \brief
+/// \tparam feature_element_type
+/// \param query_file_path
+/// \param queries
+/// \param comm
+template <typename feature_element_type>
+inline void read_query(const std::string_view &query_file_path,
+                       std::vector<std::vector<feature_element_type>> &queries,
+                       ygm::comm                                      &comm) {
+  std::vector<std::vector<feature_element_type>> global_store;
+  if (comm.rank0()) {
+    read_query(query_file_path, global_store);
+  }
+  dndetail::distribute_elements_by_block(global_store, queries, comm);
+}
+
 }  // namespace saltatlas
