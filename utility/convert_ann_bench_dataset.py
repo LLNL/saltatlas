@@ -20,6 +20,7 @@ python3 convert_ann_bench_dataset.py -i ann-bench/hdf5/gist-960-euclidean.hdf5  
 import sys
 import getopt
 import h5py
+import numpy as np
 
 
 class Option:
@@ -47,43 +48,64 @@ def parse_options(argv):
 
 def read_data(dataset_path):
     with h5py.File(dataset_path, "r") as hdf5_file:
-        return hdf5_file['train'], hdf5_file['test'], hdf5_file['neighbors'], hdf5_file.attrs['distance']
+        print('Open ' + dataset_path)
+        print (hdf5_file['train'])
+        print (hdf5_file['test'])
+        print (hdf5_file['neighbors'])
+        print (hdf5_file['distances'])
+        print('Distance =\t' + hdf5_file.attrs['distance'])
+        return np.array(hdf5_file['train']), np.array(hdf5_file['test']), np.array(hdf5_file['neighbors']), np.array(hdf5_file['distances'])
 
 
 def write_train(data, out_file_prefix):
+    print('Write train')
+    print(data.shape)
+    print(data)
+    if data.dtype == bool:
+        print('Convert bool to int')
+        data = data.astype(int)
+        print(data)
     with open(out_file_prefix + '-train.txt', 'w') as f:
         for point in data:
             for i, feature in enumerate(point):
                 if i > 0:
                     f.write('\t')
-                f.write(feature)
+                f.write(str(feature))
             f.write('\n')
 
 
 def write_test(data, out_file_prefix):
+    print('Write test')
+    print(data.shape)
+    print(data)
     with open(out_file_prefix + '-test.txt', 'w') as f:
         for point in data:
             for i, feature in enumerate(point):
                 if i > 0:
                     f.write('\t')
-                f.write(feature)
+                f.write(str(feature))
             f.write('\n')
 
 
-def write_ground_truth(neighbors, distance, out_file_prefix):
+def write_ground_truth(neighbors, distances, out_file_prefix):
+    print('Write ground truth')
+    print(neighbors.shape)
+    print(neighbors)
+    print(distances.shape)
+    print(distances)
     with open(out_file_prefix + '-gt.txt', 'w') as f:
         for entry in neighbors:
             for i, id in enumerate(entry):
                 if i > 0:
                     f.write('\t')
-                f.write(id)
+                f.write(str(id))
             f.write('\n')
 
-        for entry in distance:
+        for entry in distances:
             for i, d in enumerate(entry):
                 if i > 0:
                     f.write('\t')
-                f.write(d)
+                f.write(str(d))
             f.write('\n')
 
 
@@ -91,11 +113,11 @@ def main(argv):
     option = parse_options(argv)
 
     print ("Read data from : ", option.input_dataset_path)
-    train, test, neighbors, distance = parse_options(option.input_dataset_path)
+    train, test, neighbors, distances = read_data(option.input_dataset_path)
 
     write_train(train, option.output_prefix)
     write_test(test, option.output_prefix)
-    write_ground_truth(neighbors, distance, option.output_prefix)
+    write_ground_truth(neighbors, distances, option.output_prefix)
 
     print('Finished conversion')
 
