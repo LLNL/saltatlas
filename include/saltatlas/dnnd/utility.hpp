@@ -6,10 +6,12 @@
 #pragma once
 
 #include <algorithm>
+#include <limits>
 #include <numeric>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
+
 #include <ygm/comm.hpp>
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
@@ -20,11 +22,13 @@ namespace saltatlas::utility {
 /// \tparam T Element type.
 /// \param test_result Test result set.
 /// \param ground_truth Ground truth set.
+/// \param k If give, calculates recall@k.
 /// \return Returns recall scores.
 template <typename T>
 inline std::vector<double> get_recall_scores(
     const std::vector<std::vector<T>> &test_result,
-    const std::vector<std::vector<T>> &ground_truth) {
+    const std::vector<std::vector<T>> &ground_truth,
+    const std::size_t k = std::numeric_limits<std::size_t>::max()) {
   if (ground_truth.size() != test_result.size()) {
     std::cerr << "#of ground truth and test result neighbors are different: "
               << test_result.size() << " != " << ground_truth.size()
@@ -45,11 +49,13 @@ inline std::vector<double> get_recall_scores(
     }
 
     std::unordered_set<T> true_set;
-    for (const auto &n : ground_truth[i]) true_set.insert(n);
+    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n) {
+      true_set.insert(ground_truth[i][n]);
+    }
 
     std::size_t num_corrects = 0;
-    for (const auto &n : test_result[i]) {
-      num_corrects += true_set.count(n);
+    for (std::size_t n = 0; n < std::min(test_result[i].size(), k); ++n) {
+      num_corrects += true_set.count(test_result[i][n]);
     }
 
     scores.push_back((double)num_corrects / (double)test_result[i].size() *
@@ -68,7 +74,8 @@ using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
 template <typename id_t, typename dist_t>
 inline std::vector<double> get_recall_scores_flexible(
     const neighbors_tbl<id_t, dist_t> &test_result,
-    const neighbors_tbl<id_t, dist_t> &ground_truth) {
+    const neighbors_tbl<id_t, dist_t> &ground_truth,
+    const std::size_t k = std::numeric_limits<std::size_t>::max()) {
   if (ground_truth.size() != test_result.size()) {
     std::cerr << "#of ground truth and test result neighbors are different: "
               << test_result.size() << " != " << ground_truth.size()
@@ -91,15 +98,15 @@ inline std::vector<double> get_recall_scores_flexible(
     std::unordered_set<id_t> true_set;
     for (const auto &n : ground_truth[i]) true_set.insert(n.id);
 
-    dist_t max_distance = ground_truth[i].front().distance;
-    for (const auto &n : ground_truth[i])
-      max_distance = std::max(n.distance, max_distance);
+    dist_t max_distance = std::numeric_limits<dist_t>::min();
+    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n)
+      max_distance = std::max(ground_truth[i][n].distance, max_distance);
 
     std::size_t num_corrects = 0;
-    for (const auto &n : test_result[i]) {
-      if (true_set.count(n.id)) {
+    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n) {
+      if (true_set.count(test_result[i][n].id)) {
         ++num_corrects;
-      } else if (n.distance <= max_distance) {
+      } else if (test_result[i][n].distance <= max_distance) {
         ++num_corrects;
       }
     }

@@ -55,7 +55,7 @@ inline void show_query_recall_score(
   }
 
   const auto local_sores =
-      saltatlas::utility::get_recall_scores(test_ids, gt_ids);
+      saltatlas::utility::get_recall_scores(test_ids, gt_ids, test_ids.size());
 
   const auto local_min =
       *std::min_element(local_sores.begin(), local_sores.end());
@@ -81,8 +81,8 @@ inline void show_query_recall_score_flexible(
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-  const auto local_sores =
-      saltatlas::utility::get_recall_scores_flexible(test_result, ground_truth);
+  const auto local_sores = saltatlas::utility::get_recall_scores_flexible(
+      test_result, ground_truth, test_result.size());
 
   const auto local_min =
       *std::min_element(local_sores.begin(), local_sores.end());
