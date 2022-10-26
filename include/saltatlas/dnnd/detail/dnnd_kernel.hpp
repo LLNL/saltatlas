@@ -527,6 +527,7 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "\nMini-batch No. " << m_mini_batch_no << std::endl;
     }
+    ygm::timer mini_batch_timer;
     ++m_mini_batch_no;
 
     const auto local_mini_batch_size =
@@ -555,6 +556,10 @@ class dnnd_kernel {
     priv_show_msg_dst_count_statistics(msg_dst_count);
 #endif
     m_comm.barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "Mini-batch No. " << m_mini_batch_no << " took (s)\t"
+                     << mini_batch_timer.elapsed() << std::endl;
+    }
   }
 
   template <typename allocator>

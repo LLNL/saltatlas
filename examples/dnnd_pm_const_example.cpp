@@ -70,6 +70,8 @@ int main(int argc, char **argv) {
     comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
   }
+  comm.cf_barrier();
+  comm.cout0() << "\nClosed Metall." << std::endl;
 
   if (!datastore_transfer_path.empty()) {
     comm.cout0() << "\nTransferring index data store " << datastore_path
@@ -78,10 +80,8 @@ int main(int argc, char **argv) {
       comm.cerr0() << "\nFailed to transfer index." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
+    comm.cout0() << "Finished transfer." << std::endl;
   }
-
-  comm.cout0() << "\nThe index is ready for query." << std::endl;
-  comm.cf_barrier();
 
   return 0;
 }
