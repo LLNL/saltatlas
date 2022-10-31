@@ -109,6 +109,7 @@ m_query_point, m_initial_num_queries, closest_seeds);
    private:
     void update_nearest_neighbors(const dist_ngbr_mmap_t &returned_neighbors,
                                   const int               owner_rank) {
+      ASSERT_RELEASE(owner_rank < engine->m_comm->size());
       if (m_nearest_neighbors.size() > 0) {
         merge_nearest_neighbors(returned_neighbors, owner_rank);
       } else {
@@ -200,10 +201,14 @@ m_query_point, m_initial_num_queries, closest_seeds);
                                                       const point_t &q,
                                                       const index_t  ngbr_index,
                                                       const point_t &ngbr) {
+            ASSERT_RELEASE(engine->m_query_controllers.count(q) > 0);
             auto &query_controller =
                 engine->m_query_controllers.find(q)->second;
 
             query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
+            ASSERT_RELEASE(
+                query_controller.m_nearest_neighbor_features.size() <=
+                query_controller.m_k);
 
             if (query_controller.m_nearest_neighbor_features.size() ==
                 query_controller.m_nearest_neighbors.size()) {
@@ -223,8 +228,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
                   query_controller.m_callbacks.data(),
                   query_controller.m_callbacks.size());
               for (int i = 0; i < query_controller.m_num_callbacks; ++i) {
-                // TODO: This is a copy of deserialize_lambda with a different
-                // multimap type to accomodate feature vectors...
+                // TODO: This is a copy of deserialize_lambda with a
+                // different multimap type to accomodate feature vectors...
                 int64_t iptr;
                 iarchive(iptr);
                 iptr += (int64_t)&reference;
@@ -242,12 +247,14 @@ m_query_point, m_initial_num_queries, closest_seeds);
           const auto &ngbr_pt =
               engine->m_dist_index_impl_ptr->get_point(ngbr_index);
 
+          ASSERT_RELEASE(controller_owner < engine->m_comm->size());
           engine->m_comm->async(controller_owner,
                                 neighbor_features_response_lambda,
                                 engine->pthis, q, ngbr_index, ngbr_pt);
         };
 
         for (const auto &[idx, owner_rank] : m_nearest_neighbor_owners) {
+          ASSERT_RELEASE(owner_rank < engine->m_comm->size());
           engine->m_comm->async(owner_rank, get_neighbor_features_lambda,
                                 engine->m_comm->rank(), engine->pthis,
                                 m_query_point, idx);
@@ -373,6 +380,8 @@ m_query_point, m_initial_num_queries, closest_seeds);
       : m_comm(&g->comm()),
         m_dist_index_impl_ptr(g),
         pthis(g->comm().make_ygm_ptr(*this)){};
+
+  ~query_engine_impl() { m_comm->barrier(); }
 
   ygm::comm &comm() { return *m_comm; }
 
