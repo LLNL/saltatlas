@@ -60,6 +60,7 @@ class dhnsw_impl {
   }
 
   ~dhnsw_impl() {
+    m_comm->barrier();
     for (int i = 0; i < m_voronoi_cell_hnsw.size(); ++i) {
       delete m_voronoi_cell_hnsw[i];
     }
@@ -158,7 +159,10 @@ class dhnsw_impl {
     return m_map_point_to_cells[index];
   }
 
-  const point_t &get_point(index_t index) { return m_local_data[index]; }
+  const point_t &get_point(index_t index) {
+    ASSERT_RELEASE(m_local_data.count(index) > 0);
+    return m_local_data[index];
+  }
 
  private:
   hnswlib::HierarchicalNSW<dist_t> &get_cell_hnsw_non_const(

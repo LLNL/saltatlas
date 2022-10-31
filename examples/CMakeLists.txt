@@ -17,6 +17,7 @@ add_saltatlas_example(binary_nn_benchmark)
 add_saltatlas_example(space_wrapper_example)
 add_saltatlas_example(dhnsw_example)
 add_saltatlas_example(dhnsw_levenshtein)
+add_saltatlas_example(dhnsw_ascii_levenshtein)
 
 if (SALTATLAS_USE_HDF5)
     add_saltatlas_example(benchmark_hdf5)
