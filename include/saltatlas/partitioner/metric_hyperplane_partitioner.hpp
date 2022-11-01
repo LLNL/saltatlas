@@ -34,6 +34,7 @@ class metric_hyperplane_partitioner {
 
   ~metric_hyperplane_partitioner() {
     m_comm.cout0("Median time: ", m_median_time);
+    m_comm.barrier();
   }
 
   template <template <typename, typename> class Container>
@@ -43,7 +44,7 @@ class metric_hyperplane_partitioner {
         &m_space, num_partitions, 16, 200, 3149);
 
     m_num_partitions = num_partitions;
-    m_num_levels     = log2(num_partitions);
+    m_num_levels     = log2(num_partitions) + 1;
 
     std::vector<std::vector<point_t>> current_level_points(1);
     std::vector<std::vector<point_t>> next_level_points;
@@ -61,9 +62,9 @@ class metric_hyperplane_partitioner {
           point_assignments[id] = 0;
         });
 
-    m_tree.resize((1 << m_num_levels) - 1);
+    m_tree.resize((1 << m_num_levels - 1) - 1);
 
-    for (uint32_t l = 0; l < m_num_levels; ++l) {
+    for (uint32_t l = 0; l < m_num_levels - 1; ++l) {
       m_comm.cout0("Partitioner level: ", l);
 
       uint32_t num_level_nodes = ((uint32_t)1) << l;
@@ -77,10 +78,19 @@ class metric_hyperplane_partitioner {
 
         m_tree[index].selectors = selectors;
 
-        if (l == m_num_levels - 1) {
-          m_hnsw_ptr->addPoint(&m_tree[index].selectors.first, 2 * node);
-          m_hnsw_ptr->addPoint(&m_tree[index].selectors.second, 2 * node + 1);
-        }
+        // if (l == m_num_levels - 1) {
+        // m_hnsw_ptr->addPoint(&m_tree[index].selectors.first, 2 * node);
+        // m_hnsw_ptr->addPoint(&m_tree[index].selectors.second, 2 * node + 1);
+        // }
+      }
+
+      // Add bottom level to hnsw
+      // Bottom level only exists implicitly as the split points to the
+      // second-to-last layer
+      for (int32_t i = 0; i < (1 << m_num_levels - 2); ++i) {
+        auto tree_index = ln_to_index(m_num_levels - 2, i);
+        m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.first, 2 * i);
+        m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.second, 2 * i + 1);
       }
 
       auto node_thetas =
@@ -102,7 +112,10 @@ class metric_hyperplane_partitioner {
     std::vector<index_t> to_return;
     to_return.reserve(num_partitions);
 
-    to_return.push_back(search_tree(features));
+    auto search_tree_results = search_tree(features);
+    ASSERT_RELEASE(search_tree_results < m_num_partitions);
+
+    to_return.push_back(search_tree_results);
 
     auto hnsw_nearest =
         m_hnsw_ptr->searchKnnCloserFirst(&features, num_partitions);
@@ -110,6 +123,7 @@ class metric_hyperplane_partitioner {
     size_t i = 0;
     while (to_return.size() < num_partitions) {
       index_t seed_ID = hnsw_nearest[i].second;
+      ASSERT_RELEASE(seed_ID < m_num_partitions);
       if (seed_ID != to_return[0]) {
         to_return.push_back(seed_ID);
       }
@@ -118,6 +132,8 @@ class metric_hyperplane_partitioner {
 
     return to_return;
   }
+
+  uint32_t num_partitions() { return m_num_partitions; }
 
   std::vector<dist_t> get_thetas() {
     std::vector<dist_t> to_return;
@@ -172,9 +188,11 @@ class metric_hyperplane_partitioner {
   }
 
  private:
-  uint32_t log2(uint32_t a) {
+  uint32_t log2(const uint32_t a) {
+    ASSERT_RELEASE(a > 0);
+    uint32_t tmp       = a;
     uint32_t to_return = 0;
-    while (a >>= 1) {
+    while (tmp >>= 1) {
       ++to_return;
     }
 
@@ -186,9 +204,7 @@ class metric_hyperplane_partitioner {
   }
 
   std::pair<uint32_t, uint32_t> index_to_ln(const uint32_t index) {
-    uint32_t tmp = index;
-
-    uint32_t level = log2(tmp + 1);
+    uint32_t level = log2(index + 1);
     uint32_t node  = index - (((uint32_t)1) << level) + 1;
 
     return std::make_pair(level, node);
@@ -215,6 +231,7 @@ class metric_hyperplane_partitioner {
 
     if (m_comm.rank() == rank) {
       std::sort(tmp_vals.begin(), tmp_vals.end());
+      ASSERT_RELEASE(tmp_vals.size() > 0);
       to_return = tmp_vals[tmp_vals.size() / 2];
 
       m_comm.async_bcast(
@@ -248,7 +265,12 @@ class metric_hyperplane_partitioner {
       }
     }
 
-    return index_to_ln(tree_index).second;
+    auto level_node = index_to_ln(tree_index);
+
+    ASSERT_RELEASE(level_node.first < m_num_levels);
+    ASSERT_RELEASE(level_node.second < pow(2, level_node.first));
+
+    return level_node.second;
   }
 
   std::vector<uint64_t> reconstruct_search_path(const uint64_t &leaf_node) {
@@ -271,8 +293,9 @@ class metric_hyperplane_partitioner {
     std::pair<point_t, point_t> to_return;
     auto                        to_return_ptr = m_comm.make_ygm_ptr(to_return);
 
-    std::default_random_engine            gen;
-    std::uniform_real_distribution<float> dist(0.0, 1000.0);
+    std::default_random_engine            gen(m_comm.rank() +
+                                              node_points.size() * m_comm.size() + 10);
+    std::uniform_real_distribution<float> dist;
 
     // Choose first point
 
@@ -291,49 +314,56 @@ class metric_hyperplane_partitioner {
     uint32_t sampled_index;
 
     if (max.second == m_comm.rank()) {
+      ASSERT_RELEASE(node_points.size() > 0);
       std::uniform_int_distribution<uint32_t> array_dist(
           0, node_points.size() - 1);
 
       sampled_from  = true;
       sampled_index = array_dist(gen);
+      ASSERT_RELEASE(sampled_index < node_points.size());
 
+      auto selector1 = node_points[sampled_index];
       m_comm.async_bcast(
           [](const auto &sampled_point, auto to_return_ptr) {
             (*to_return_ptr).first = sampled_point;
           },
-          node_points[sampled_index], to_return_ptr);
+          selector1, to_return_ptr);
     }
 
     // Choose second point
-    sample_selector;
-    if ((node_points.size() == 0) ||
-        (node_points.size() == 1 && sampled_from)) {
-      sample_selector = std::make_pair(-1.0, m_comm.rank());
-    } else {
-      sample_selector = std::make_pair(dist(gen), m_comm.rank());
-    }
-
-    max = m_comm.all_reduce(sample_selector, [](const auto &a, const auto &b) {
-      return a > b ? a : b;
-    });
-
-    if (max.second == m_comm.rank()) {
-      std::uniform_int_distribution<uint32_t> array_dist(
-          0, node_points.size() - 1);
-
-      auto index = array_dist(gen);
-      while (sampled_from && index == sampled_index) {
-        index = array_dist(gen);
+    to_return.second = to_return.first;
+    // loop until first and second selector are different
+    while (to_return.second == to_return.first) {
+      if ((node_points.size() == 0) ||
+          (node_points.size() == 1 && sampled_from)) {
+        sample_selector = std::make_pair(-1.0, m_comm.rank());
+      } else {
+        sample_selector = std::make_pair(dist(gen), m_comm.rank());
       }
 
-      m_comm.async_bcast(
-          [](const auto &sampled_point, auto to_return_ptr) {
-            (*to_return_ptr).second = sampled_point;
-          },
-          node_points[index], to_return_ptr);
-    }
+      max = m_comm.all_reduce(
+          sample_selector,
+          [](const auto &a, const auto &b) { return a > b ? a : b; });
 
-    m_comm.barrier();
+      if (max.second == m_comm.rank()) {
+        std::uniform_int_distribution<uint32_t> array_dist(
+            0, node_points.size() - 1);
+
+        auto index = array_dist(gen);
+        while (sampled_from && index == sampled_index) {
+          index = array_dist(gen);
+        }
+
+        ASSERT_RELEASE(index < node_points.size());
+        m_comm.async_bcast(
+            [](const auto &sampled_point, auto to_return_ptr) {
+              (*to_return_ptr).second = sampled_point;
+            },
+            node_points[index], to_return_ptr);
+      }
+
+      m_comm.barrier();
+    }
 
     return to_return;
   }
@@ -379,6 +409,7 @@ class metric_hyperplane_partitioner {
 
       auto index = ln_to_index(level, i);
 
+      ASSERT_RELEASE(index < m_tree.size());
       m_tree[index].theta = theta_median;
     }
   }
@@ -405,11 +436,13 @@ class metric_hyperplane_partitioner {
         point_assignments[index] = 2 * tree_index + 1;
 
         auto [level, node] = index_to_ln(2 * tree_index + 1);
+        ASSERT_RELEASE(node < next_level_points.size());
         next_level_points[node].push_back(point);
       } else {
         point_assignments[index] = 2 * tree_index + 2;
 
         auto [level, node] = index_to_ln(2 * tree_index + 2);
+        ASSERT_RELEASE(node < next_level_points.size());
         next_level_points[node].push_back(point);
       }
     });
