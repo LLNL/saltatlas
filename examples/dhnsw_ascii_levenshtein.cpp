@@ -10,6 +10,7 @@
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
+#include <saltatlas/partitioner/voronoi_partitioner.hpp>
 
 #include <ygm/comm.hpp>
 #include <ygm/container/map.hpp>
@@ -261,6 +262,8 @@ int main(int argc, char** argv) {
 
   saltatlas::metric_hyperplane_partitioner<dist_t, index_t, point_t>
       fuzzy_partitioner(world, fuzzy_leven_space);
+  // saltatlas::voronoi_partitioner<dist_t, index_t, point_t> fuzzy_partitioner(
+  // world, fuzzy_leven_space);
 
   ygm::container::pair_bag<index_t, point_t> bag_data(world);
   size_t                                     local_counter;
