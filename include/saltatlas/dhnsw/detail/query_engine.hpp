@@ -197,52 +197,62 @@ m_query_point, m_initial_num_queries, closest_seeds);
         auto get_neighbor_features_lambda = [](const int controller_owner,
                                                auto engine, const point_t &q,
                                                const index_t ngbr_index) {
-          auto neighbor_features_response_lambda = [](auto           engine,
-                                                      const point_t &q,
-                                                      const index_t  ngbr_index,
-                                                      const point_t &ngbr) {
-            ASSERT_RELEASE(engine->m_query_controllers.count(q) > 0);
-            auto &query_controller =
-                engine->m_query_controllers.find(q)->second;
+          auto neighbor_features_response_lambda =
+              [](auto engine, const point_t &q, const index_t ngbr_index,
+                 const point_t &ngbr) {
+                ASSERT_RELEASE(engine->m_query_controllers.count(q) > 0);
+                auto &query_controller =
+                    engine->m_query_controllers.find(q)->second;
 
-            query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
-            ASSERT_RELEASE(
-                query_controller.m_nearest_neighbor_features.size() <=
-                query_controller.m_k);
+                query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
+                ASSERT_RELEASE(
+                    query_controller.m_nearest_neighbor_features.size() <=
+                    query_controller.m_k);
 
-            if (query_controller.m_nearest_neighbor_features.size() ==
-                query_controller.m_nearest_neighbors.size()) {
-              dist_ngbr_features_mmap_t nn_mmap;
-              for (const auto &dist_index :
-                   query_controller.m_nearest_neighbors) {
-                const auto &[ngbr_dist, ngbr_index] = dist_index;
-                nn_mmap.insert(std::make_pair(
-                    ngbr_dist,
-                    std::make_pair(
-                        ngbr_index,
-                        query_controller
-                            .m_nearest_neighbor_features[ngbr_index])));
-              }
+                if (query_controller.m_nearest_neighbor_features.size() ==
+                    query_controller.m_nearest_neighbors.size()) {
+                  dist_ngbr_features_mmap_t nn_mmap;
+                  for (const auto &dist_index :
+                       query_controller.m_nearest_neighbors) {
+                    const auto &[ngbr_dist, ngbr_index] = dist_index;
+                    nn_mmap.insert(std::make_pair(
+                        ngbr_dist,
+                        std::make_pair(
+                            ngbr_index,
+                            query_controller
+                                .m_nearest_neighbor_features[ngbr_index])));
+                  }
 
-              cereal::YGMInputArchive iarchive(
-                  query_controller.m_callbacks.data(),
-                  query_controller.m_callbacks.size());
-              for (int i = 0; i < query_controller.m_num_callbacks; ++i) {
-                // TODO: This is a copy of deserialize_lambda with a
-                // different multimap type to accomodate feature vectors...
-                int64_t iptr;
-                iarchive(iptr);
-                iptr += (int64_t)&reference;
-                void (*fun_ptr)(const point_t &,
-                                const dist_ngbr_features_mmap_t &,
-                                ygm::ygm_ptr<query_engine_impl_t>,
-                                cereal::YGMInputArchive &);
-                memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
-                fun_ptr(q, nn_mmap, engine, iarchive);
-              }
-              engine->m_query_controllers.erase(query_controller.m_query_point);
-            }
-          };
+                  cereal::YGMInputArchive iarchive(
+                      query_controller.m_callbacks.data(),
+                      query_controller.m_callbacks.size());
+                  for (int i = 0; i < query_controller.m_num_callbacks; ++i) {
+                    // TODO: This is a copy of deserialize_lambda with a
+                    // different multimap type to accomodate feature vectors...
+                    int64_t iptr;
+                    iarchive(iptr);
+                    iptr += (int64_t)&reference;
+                    void (*fun_ptr)(const point_t &,
+                                    const dist_ngbr_features_mmap_t &,
+                                    ygm::ygm_ptr<query_engine_impl_t>,
+                                    cereal::YGMInputArchive &);
+                    memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
+                    fun_ptr(q, nn_mmap, engine, iarchive);
+                  }
+                  // Can't erase query_controller.
+                  // engine->m_query_controllers.erase(query_controller.m_query_point);
+                  query_controller.m_nearest_neighbor_features.clear();
+                  query_controller.m_nearest_neighbors.clear();
+                  query_controller.m_queried_cells.clear();
+                  query_controller.m_next_cells.clear();
+                  query_controller.m_nearest_neighbor_owners.clear();
+                  query_controller.m_callbacks.clear();
+                  query_controller.m_queries_spawned  = 0;
+                  query_controller.m_queries_returned = 0;
+                  query_controller.m_current_hops     = 0;
+                  query_controller.m_num_callbacks    = 0;
+                }
+              };
 
           const auto &ngbr_pt =
               engine->m_dist_index_impl_ptr->get_point(ngbr_index);
