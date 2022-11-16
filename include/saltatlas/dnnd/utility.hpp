@@ -61,8 +61,8 @@ inline std::vector<double> get_recall_scores(
       num_corrects += true_set.count(test_result[i][n]);
     }
 
-    scores.push_back((double)num_corrects / (double)test_result[i].size() *
-                     100.0);
+    scores.push_back((double)num_corrects /
+                     (double)std::min(sorted_ground_truth.size(), k) * 100.0);
   }
   return scores;
 }
@@ -119,8 +119,8 @@ inline std::vector<double> get_recall_scores_flexible(
       }
     }
 
-    scores.push_back((double)num_corrects / (double)test_result[i].size() *
-                     100.0);
+    scores.push_back((double)num_corrects /
+                     (double)std::min(sorted_ground_truth.size(), k) * 100.0);
   }
   return scores;
 }
