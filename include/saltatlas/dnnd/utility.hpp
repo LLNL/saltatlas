@@ -48,9 +48,12 @@ inline std::vector<double> get_recall_scores(
       return {};
     }
 
+    auto sorted_ground_truth = ground_truth[i];
+    std::sort(sorted_ground_truth.begin(), sorted_ground_truth.end());
+
     std::unordered_set<T> true_set;
-    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n) {
-      true_set.insert(ground_truth[i][n]);
+    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
+      true_set.insert(sorted_ground_truth[n]);
     }
 
     std::size_t num_corrects = 0;
@@ -95,15 +98,20 @@ inline std::vector<double> get_recall_scores_flexible(
       return {};
     }
 
+    auto sorted_ground_truth = ground_truth[i];
+    std::sort(sorted_ground_truth.begin(), sorted_ground_truth.end());
+
     std::unordered_set<id_t> true_set;
-    for (const auto &n : ground_truth[i]) true_set.insert(n.id);
+    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
+      true_set.insert(sorted_ground_truth[n].id);
+    }
 
     dist_t max_distance = std::numeric_limits<dist_t>::min();
-    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n)
-      max_distance = std::max(ground_truth[i][n].distance, max_distance);
+    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n)
+      max_distance = std::max(sorted_ground_truth[n].distance, max_distance);
 
     std::size_t num_corrects = 0;
-    for (std::size_t n = 0; n < std::min(ground_truth[i].size(), k); ++n) {
+    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
       if (true_set.count(test_result[i][n].id)) {
         ++num_corrects;
       } else if (test_result[i][n].distance <= max_distance) {

@@ -126,7 +126,7 @@ class dnnd_kernel {
       m_comm.cf_barrier();
 
       if (m_option.verbose) {
-        m_comm.cout0() << "\nepoch took (s)\t" << epoch_timer.elapsed()
+        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_timer.elapsed()
                        << std::endl;
       }
       // Test the terminal condition
@@ -528,7 +528,6 @@ class dnnd_kernel {
       m_comm.cout0() << "\nMini-batch No. " << m_mini_batch_no << std::endl;
     }
     ygm::timer mini_batch_timer;
-    ++m_mini_batch_no;
 
     const auto local_mini_batch_size =
         mpi::assign_tasks(targets.size(), m_option.mini_batch_size,
@@ -557,9 +556,10 @@ class dnnd_kernel {
 #endif
     m_comm.barrier();
     if (m_option.verbose) {
-      m_comm.cout0() << "Mini-batch No. " << m_mini_batch_no << " took (s)\t"
+      m_comm.cout0() << "Mini-batch took (s)\t"
                      << mini_batch_timer.elapsed() << std::endl;
     }
+    ++m_mini_batch_no;
   }
 
   template <typename allocator>
