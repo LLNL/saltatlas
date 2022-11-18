@@ -329,8 +329,9 @@ int main(int argc, char** argv) {
   query_lines.for_all([&p_ofs, &dist_index, k, num_hops, num_initial_queries,
                        voronoi_rank,
                        write_output_lambda](const auto& query_str) {
-    dist_index.query_with_features(query_str, k, num_hops, num_initial_queries,
-                                   voronoi_rank, write_output_lambda, p_ofs);
+    dist_index.query_with_features(query_str, k, num_hops, voronoi_rank,
+                                   num_initial_queries, write_output_lambda,
+                                   p_ofs);
   });
 
   world.barrier();

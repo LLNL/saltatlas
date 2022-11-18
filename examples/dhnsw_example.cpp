@@ -106,13 +106,13 @@ int main(int argc, char **argv) {
 
     // Spawn queries from different ranks
     if (mpi_rank == 0) {
-      knn_index.query(q1, k, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
-      knn_index.query(q3, 2, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
+      knn_index.query(q1, k, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
+      knn_index.query(q3, 2, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
     } else if (mpi_rank == 1) {
-      knn_index.query(q2, k, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
+      knn_index.query(q2, k, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
     }
 
     knn_index.comm().barrier();
@@ -137,13 +137,16 @@ int main(int argc, char **argv) {
         };
 
     if (mpi_rank == 0) {
-      knn_index.query_with_features(q1, k, query_hops, initial_num_queries,
-                                    query_voronoi_rank, report_features_lambda);
-      knn_index.query_with_features(q3, 2, query_hops, initial_num_queries,
-                                    query_voronoi_rank, report_features_lambda);
+      knn_index.query_with_features(q1, k, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
+      knn_index.query_with_features(q3, 2, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
     } else if (mpi_rank == 1) {
-      knn_index.query_with_features(q2, k, query_hops, initial_num_queries,
-                                    query_voronoi_rank, report_features_lambda);
+      knn_index.query_with_features(q2, k, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
     }
 
     knn_index.comm().barrier();
