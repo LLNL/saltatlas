@@ -188,7 +188,7 @@ if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
         GIT_REPOSITORY https://github.com/LLNL/ygm
-        GIT_TAG v${SALTATLAS_YGM_VERSION}
+        GIT_TAG develop #v${SALTATLAS_YGM_VERSION}
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
