@@ -153,10 +153,7 @@ std::vector<std::string> generic_column_names(int n) {
 }
 
 float my_l2_sqr(const std::vector<float> &x, const std::vector<float> &y) {
-  if (x.size() != y.size()) {
-    std::cerr << "Size mismatch for l2 distance" << std::endl;
-    exit;
-  }
+  ASSERT_RELEASE(x.size() == y.size());
 
   float dist_sqr{0.0};
 

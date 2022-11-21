@@ -77,20 +77,6 @@ class metric_hyperplane_partitioner {
             choose_selectors(current_level_points[node]);
 
         m_tree[index].selectors = selectors;
-
-        // if (l == m_num_levels - 1) {
-        // m_hnsw_ptr->addPoint(&m_tree[index].selectors.first, 2 * node);
-        // m_hnsw_ptr->addPoint(&m_tree[index].selectors.second, 2 * node + 1);
-        // }
-      }
-
-      // Add bottom level to hnsw
-      // Bottom level only exists implicitly as the split points to the
-      // second-to-last layer
-      for (int32_t i = 0; i < (1 << m_num_levels - 2); ++i) {
-        auto tree_index = ln_to_index(m_num_levels - 2, i);
-        m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.first, 2 * i);
-        m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.second, 2 * i + 1);
       }
 
       auto node_thetas =
@@ -102,6 +88,16 @@ class metric_hyperplane_partitioner {
 
       current_level_points.clear();
       std::swap(current_level_points, next_level_points);
+    }
+
+    m_comm.cout0("Adding points to HNSW");
+    // Add bottom level to hnsw
+    // Bottom level only exists implicitly as the split points to the
+    // second-to-last layer
+    for (uint32_t i = 0; i < (((uint32_t)1) << m_num_levels - 2); ++i) {
+      auto tree_index = ln_to_index(m_num_levels - 2, i);
+      m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.first, 2 * i);
+      m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.second, 2 * i + 1);
     }
 
     m_comm.cout0("Partitioner initialization time: ", t.elapsed());
@@ -122,6 +118,7 @@ class metric_hyperplane_partitioner {
 
     size_t i = 0;
     while (to_return.size() < num_partitions) {
+      ASSERT_RELEASE(i < hnsw_nearest.size());
       index_t seed_ID = hnsw_nearest[i].second;
       ASSERT_RELEASE(seed_ID < m_num_partitions);
       if (seed_ID != to_return[0]) {
