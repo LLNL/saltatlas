@@ -65,8 +65,6 @@ class metric_hyperplane_partitioner {
     m_tree.resize((1 << m_num_levels - 1) - 1);
 
     for (uint32_t l = 0; l < m_num_levels - 1; ++l) {
-      m_comm.cout0("Partitioner level: ", l);
-
       uint32_t num_level_nodes = ((uint32_t)1) << l;
       next_level_points.resize(2 * num_level_nodes);
 
