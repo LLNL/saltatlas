@@ -72,12 +72,12 @@ def numpy_datatype_to_formatting_types(datatype):
 
 
 # Performance optimized numpy.savetxt()
-def save_numpy_2d_array(output_file, append, array, data_element_format):
-    with open(output_file, 'a' if append else 'w') as f:
+def save_numpy_2d_array(output_file_path, append, array, data_element_format):
+    with open(output_file_path, 'a' if append else 'w') as f:
         fmt = ' '.join([data_element_format] * array.shape[1])
         fmt = '\n'.join([fmt] * array.shape[0])
         data = fmt % tuple(array.ravel())
-        f.write(data)
+        f.write(data + '\n')
 
 
 def convert_points(input_file_path, output_file_path, count, start_idx,
