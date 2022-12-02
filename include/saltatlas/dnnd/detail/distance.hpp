@@ -26,6 +26,18 @@ inline distance_type invalid(const std::size_t,
 }
 
 template <typename feature_element_type, typename distance_type>
+inline distance_type l1(const std::size_t                 len,
+                        const feature_element_type *const f0,
+                        const feature_element_type *const f1) {
+  distance_type d = 0;
+  for (std::size_t i = 0; i < len; ++i) {
+    const auto x = std::abs(f0[i] - f1[i]);
+    d += x;
+  }
+  return static_cast<distance_type>(std::sqrt(d));
+}
+
+template <typename feature_element_type, typename distance_type>
 inline distance_type l2(const std::size_t                 len,
                         const feature_element_type *const f0,
                         const feature_element_type *const f1) {
@@ -35,6 +47,20 @@ inline distance_type l2(const std::size_t                 len,
     d += x * x;
   }
   return static_cast<distance_type>(std::sqrt(d));
+}
+
+/// \brief Squared Euclidean distance, which omits the final square root in the
+/// calculation of l2 norm.
+template <typename feature_element_type, typename distance_type>
+inline distance_type sql2(const std::size_t                 len,
+                          const feature_element_type *const f0,
+                          const feature_element_type *const f1) {
+  distance_type d = 0;
+  for (std::size_t i = 0; i < len; ++i) {
+    const auto x = (f0[i] - f1[i]);
+    d += x * x;
+  }
+  return d;
 }
 
 template <typename feature_element_type, typename distance_type>
@@ -74,11 +100,15 @@ inline distance_type jaccard_index(const std::size_t                 len,
            static_cast<distance_type>(num_non_zero);
 }
 
-enum class metric_id : uint8_t { invalid, l2, cosine, jaccard };
+enum class metric_id : uint8_t { invalid, l1, l2, sql2, cosine, jaccard };
 
 inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
-  if (metric_name == "l2") {
+  if (metric_name == "l1") {
+    return metric_id::l1;
+  } else if (metric_name == "l2") {
     return metric_id::l2;
+  } else if (metric_name == "sql2") {
+    return metric_id::sql2;
   } else if (metric_name == "cosine") {
     return metric_id::cosine;
   } else if (metric_name == "jaccard") {
@@ -90,8 +120,12 @@ inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
 template <typename feature_element_type, typename distance_type>
 inline metric_type<feature_element_type, distance_type> &metric(
     const metric_id &id) {
-  if (id == metric_id::l2) {
+  if (id == metric_id::l1) {
+    return l1<feature_element_type, distance_type>;
+  } else if (id == metric_id::l2) {
     return l2<feature_element_type, distance_type>;
+  } else if (id == metric_id::sql2) {
+    return sql2<feature_element_type, distance_type>;
   } else if (id == metric_id::cosine) {
     return cosine<feature_element_type, distance_type>;
   } else if (id == metric_id::jaccard) {
