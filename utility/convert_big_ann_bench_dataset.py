@@ -1,4 +1,11 @@
 '''
+Copyright 2020-2022 Lawrence Livermore National Security, LLC and other
+saltatlas Project Developers. See the top-level COPYRIGHT file for details.
+
+SPDX-License-Identifier: MIT
+'''
+
+'''
 Convert the original (binary) Big ANN Benchmark dataset to text.
 Original datasets are available at https://big-ann-benchmarks.com/.
 
@@ -8,7 +15,7 @@ base (points), query, and ground truth.
 Base datasets are split into multiple files (1 file per thread)
 Query and ground truth datasets are converted to a single file for each.
 
-To show usage:
+[Usage]
 python3 ./convert_big_ann_bench_dataset.py -h
 '''
 
@@ -101,7 +108,7 @@ def convert_points(input_file_path, output_file_path, count, start_idx,
 
         for i in range(0, count, chunk_size):
             n = min(chunk_size, count - i)
-            print(f'{(i / count * 100):.2f} %') # Show progress
+            print(f'{(i / count * 100):.2f} %')  # Show progress
             arr = np.fromfile(fi, count=n * dim, dtype=dtype)
             assert arr.size > 0
             arr = arr.reshape(n, dim)

@@ -1,4 +1,11 @@
 '''
+Copyright 2020-2022 Lawrence Livermore National Security, LLC and other
+saltatlas Project Developers. See the top-level COPYRIGHT file for details.
+
+SPDX-License-Identifier: MIT
+'''
+
+'''
 Convert the original (HDF5 format) ANN-Benchmarks dataset to text.
 Original datasets are available at https://github.com/erikbern/ann-benchmarks/.
 
@@ -12,7 +19,6 @@ python3 -m pip install h5py
 python3 convert_ann_bench_dataset.py -h
 
 '''
-
 
 import sys
 import argparse
