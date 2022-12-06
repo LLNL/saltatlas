@@ -1,10 +1,15 @@
 '''
-Convert the original (binary) Big ANN Benchmark dataset (https://big-ann-benchmarks.com/) to text.
+Convert the original (binary) Big ANN Benchmark dataset to text.
+Original datasets are available at https://big-ann-benchmarks.com/.
 
-This program converts three types of datasets: base (points), query, and ground truth.
+This program converts three types of datasets:
+base (points), query, and ground truth.
 
 Base datasets are split into multiple files (1 file per thread)
 Query and ground truth datasets are converted to a single file for each.
+
+To show usage:
+python3 ./convert_big_ann_bench_dataset.py -h
 '''
 
 import os
