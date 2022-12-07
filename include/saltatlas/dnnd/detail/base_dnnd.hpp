@@ -6,7 +6,10 @@
 #pragma once
 
 #include <cstdlib>
+#include <optional>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
@@ -123,21 +126,48 @@ class base_dnnd {
   void construct_index(const int k, const double r, const double delta,
                        const bool        exchange_reverse_neighbors,
                        const std::size_t mini_batch_size) {
-    typename nn_kernel_type::option option{
-        .k                          = k,
-        .r                          = r,
-        .delta                      = delta,
-        .exchange_reverse_neighbors = exchange_reverse_neighbors,
-        .mini_batch_size            = mini_batch_size,
-        .rnd_seed                   = m_data_core->rnd_seed,
-        .verbose                    = m_verbose};
-
-    nn_kernel_type kernel(
-        option, m_data_core->point_store, get_point_partitioner(),
-        dndetail::distance::metric<feature_element_type, distance_type>(
-            m_data_core->metric_id),
-        m_comm);
+    auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
+                                   mini_batch_size);
     kernel.construct(m_data_core->knn_index);
+    m_data_core->index_k = k;
+  }
+
+  /// \brief Construct an k-NN index.
+  /// \param k The number of nearest neighbors each point in the index has.
+  /// \param r Sample rate parameter in NN-Descent.
+  /// \param delta Precision parameter in NN-Descent.
+  /// \param exchange_reverse_neighbors If true is specified, exchange reverse
+  /// neighbors globally.
+  /// \param mini_batch_size Mini batch size.
+  /// \param init_index k-NN index for initialization.
+  void construct_index(
+      const int k, const double r, const double delta,
+      const bool exchange_reverse_neighbors, const std::size_t mini_batch_size,
+      const std::unordered_map<id_type, std::vector<id_type>>& init_index) {
+    auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
+                                   mini_batch_size);
+    kernel.construct(init_index, m_data_core->knn_index);
+    m_data_core->index_k = k;
+  }
+
+  /// \brief Construct an k-NN index.
+  /// \tparam init_index_alloc_type Allocator type for init_index.
+  /// \param k The number of nearest neighbors each point in the index has.
+  /// \param r Sample rate parameter in NN-Descent.
+  /// \param delta Precision parameter in NN-Descent.
+  /// \param exchange_reverse_neighbors If true is specified, exchange reverse
+  /// neighbors globally.
+  /// \param mini_batch_size Mini batch size.
+  /// \param init_index k-NN index for initialization.
+  template <typename init_index_alloc_type>
+  void construct_index(const int k, const double r, const double delta,
+                       const bool        exchange_reverse_neighbors,
+                       const std::size_t mini_batch_size,
+                       const nn_index<id_type, distance_type,
+                                      init_index_alloc_type>& init_index) {
+    auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
+                                   mini_batch_size);
+    kernel.construct(init_index, m_data_core->knn_index);
     m_data_core->index_k = k;
   }
 
@@ -216,6 +246,28 @@ class base_dnnd {
   }
 
  private:
+  nn_kernel_type priv_init_kernel(const int k, const double r,
+                                  const double      delta,
+                                  const bool        exchange_reverse_neighbors,
+                                  const std::size_t mini_batch_size) {
+    typename nn_kernel_type::option option{
+        .k                          = k,
+        .r                          = r,
+        .delta                      = delta,
+        .exchange_reverse_neighbors = exchange_reverse_neighbors,
+        .mini_batch_size            = mini_batch_size,
+        .rnd_seed                   = m_data_core->rnd_seed,
+        .verbose                    = m_verbose};
+
+    nn_kernel_type kernel(
+        option, m_data_core->point_store, get_point_partitioner(),
+        dndetail::distance::metric<feature_element_type, distance_type>(
+            m_data_core->metric_id),
+        m_comm);
+
+    return kernel;
+  }
+
   void priv_dump_index_distributed_file(const std::string& out_file_prefix) {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();

@@ -23,6 +23,8 @@
 #include <mutex>
 #include <random>
 #include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
@@ -75,12 +77,45 @@ class dnnd_kernel {
     m_this.check(m_comm);
   }
 
-  template <typename allocator>
-  void construct(nn_index<id_type, distance_type, allocator>& knn_index) {
+  /// \brief Construct a knn-index.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename index_alloc_type>
+  void construct(
+      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
     }
-    priv_construct();
+    priv_construct_with_random_init();
+    priv_convert(knn_index);
+  }
+
+  /// \brief Construct a knn-index, starting from a given initial neighbors.
+  /// \param init_knn_index Initial neighbors. The distance values will not
+  /// be used.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename init_index_alloc_type, typename index_alloc_type>
+  void construct(
+      const nn_index<id_type, distance_type, init_index_alloc_type>&
+                                                          init_knn_index,
+      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+    }
+    priv_construct_with_initial_index(init_knn_index);
+    priv_convert(knn_index);
+  }
+
+  /// \brief Construct a knn-index, starting from a given initial neighbors.
+  /// \param init_knn_index Initial neighbors.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename alloc_type>
+  void construct(
+      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
+      nn_index<id_type, distance_type, alloc_type>&            knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+    }
+    priv_construct_with_initial_index(init_knn_index);
     priv_convert(knn_index);
   }
 
@@ -97,12 +132,28 @@ class dnnd_kernel {
   using neighbor_type = neighbor<id_type, distance_type>;
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
 
-  void priv_construct() {
+  void priv_construct_with_random_init() {
     if (m_option.verbose) {
-      m_comm.cout0() << "Initializing the k-NN index." << std::endl;
+      m_comm.cout0() << "Initializing the k-NN index with random neighbors."
+                     << std::endl;
     }
     priv_init_knn_heap_random();
+    priv_construct_kernel();
+  }
 
+  template <typename init_index_store_type>
+  void priv_construct_with_initial_index(
+      const init_index_store_type& init_knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0()
+          << "Initializing the k-NN index using the given initial neighbors."
+          << std::endl;
+    }
+    priv_init_knn_heap_with_initial_index(init_knn_index);
+    priv_construct_kernel();
+  }
+
+  void priv_construct_kernel() {
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
     m_num_neighbor_suggestion_msgs = 0;
     m_num_feature_msgs             = 0;
@@ -160,14 +211,7 @@ class dnnd_kernel {
   }
 
   void priv_init_knn_heap_random() {
-    m_knn_heap_table.clear();
-    // Allocate memory first
-    m_knn_heap_table.reserve(m_point_store.size());
-    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
-      const auto sid = itr->first;
-      m_knn_heap_table.emplace(sid, m_option.k);
-    }
-    m_comm.cf_barrier();
+    priv_init_knn_heap();
 
     std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
     assert(m_option.k < m_global_max_id);
@@ -193,11 +237,64 @@ class dnnd_kernel {
     m_comm.barrier();
   }
 
+  template <typename alloc>
+  void priv_init_knn_heap_with_initial_index(
+      const nn_index<id_type, distance_type, alloc>& init_knn_index) {
+    priv_init_knn_heap();
+
+    for (auto pitr = init_knn_index.points_begin();
+         pitr != init_knn_index.points_end(); ++pitr) {
+      const auto& sid = pitr->first;
+      for (auto nitr = init_knn_index.neighbors_begin(sid);
+           nitr != init_knn_index.neighbors_end(sid); ++nitr) {
+        const auto& nid     = nitr->id;
+        const auto& feature = m_point_store.feature_vector(sid);
+        const std::vector<feature_element_type> tmp_feature(feature.begin(),
+                                                            feature.end());
+        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
+                     sid, nid, tmp_feature);
+      }
+    }
+    m_comm.barrier();
+  }
+
+  void priv_init_knn_heap_with_initial_index(
+      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index) {
+    priv_init_knn_heap();
+
+    for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.begin();
+         ++pitr) {
+      const auto& sid = pitr->first;
+      for (auto nitr = pitr->second.begin(); nitr != pitr->second.end();
+           ++nitr) {
+        const auto& nid     = *nitr;
+        const auto& feature = m_point_store.feature_vector(sid);
+        const std::vector<feature_element_type> tmp_feature(feature.begin(),
+                                                            feature.end());
+        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
+                     sid, nid, tmp_feature);
+      }
+    }
+    m_comm.barrier();
+  }
+
+  void priv_init_knn_heap() {
+    m_knn_heap_table.clear();
+
+    m_knn_heap_table.reserve(m_point_store.size());
+    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
+      const auto sid = itr->first;
+      m_knn_heap_table.emplace(sid, m_option.k);
+    }
+
+    m_comm.cf_barrier();
+  }
+
   struct distance_calculator {
     // Calculate the distance between sid and nid on the rank nid is assigned.
     // Then, send back the calculated distance value to sid.
-    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type sid,
-                    const id_type                            nid,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this,
+                    const id_type sid, const id_type nid,
                     const std::vector<feature_element_type>& src_feature_vec) {
       const auto& nbr_feature_vec =
           local_this->m_point_store.feature_vector(nid);
@@ -497,7 +594,7 @@ class dnnd_kernel {
       // current neighbors.
       const auto& u2_feature = local_this->m_point_store.feature_vector(u2);
       const auto  d          = local_this->m_distance_function(
-                    u1_feature.size(), u1_feature.data(), u2_feature.data());
+          u1_feature.size(), u1_feature.data(), u2_feature.data());
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
 
       if (d < u1_max_distance) {
@@ -556,8 +653,8 @@ class dnnd_kernel {
 #endif
     m_comm.barrier();
     if (m_option.verbose) {
-      m_comm.cout0() << "Mini-batch took (s)\t"
-                     << mini_batch_timer.elapsed() << std::endl;
+      m_comm.cout0() << "Mini-batch took (s)\t" << mini_batch_timer.elapsed()
+                     << std::endl;
     }
     ++m_mini_batch_no;
   }
