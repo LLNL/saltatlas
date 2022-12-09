@@ -75,13 +75,13 @@ inline void show_query_recall_score(
 }
 
 template <typename neighbor_store_type>
-inline void show_query_recall_score_flexible(
+inline void show_query_recall_score_tied_distance(
     const neighbor_store_type& test_result,
     const std::string_view& ground_truth_file_path, ygm::comm& comm) {
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-  const auto local_sores = saltatlas::utility::get_recall_scores_flexible(
+  const auto local_sores = saltatlas::utility::get_recall_scores_tied_distance(
       test_result, ground_truth, test_result.size());
 
   const auto local_min =
@@ -94,10 +94,11 @@ inline void show_query_recall_score_flexible(
   const auto global_sum = comm.all_reduce_sum(local_sum);
   const auto num_scores = comm.all_reduce_sum(local_sores.size());
 
-  comm.cout0() << "Min flexible recall score\t"
+  comm.cout0() << "Min tied-distance recall score\t"
                << comm.all_reduce_min(local_min)
-               << "\nMean flexible recall score\t" << global_sum / num_scores
-               << "\nMax flexible recall score\t"
+               << "\nMean tied-distance recall score\t"
+               << global_sum / num_scores
+               << "\nMax tied-distance recall score\t"
                << comm.all_reduce_max(local_max) << std::endl;
   comm.cf_barrier();
 }
