@@ -19,55 +19,6 @@
 
 namespace saltatlas::utility {
 
-/// \brief Calculate recall scores.
-/// \tparam T Element type.
-/// \param test_result Test result set.
-/// \param ground_truth Ground truth set.
-/// \param k If give, calculates recall@k.
-/// \return Returns recall scores.
-template <typename T>
-inline std::vector<double> get_recall_scores(
-    const std::vector<std::vector<T>> &test_result,
-    const std::vector<std::vector<T>> &ground_truth,
-    const std::size_t k = std::numeric_limits<std::size_t>::max()) {
-  if (ground_truth.size() != test_result.size()) {
-    std::cerr << "#of ground truth and test result neighbors are different: "
-              << test_result.size() << " != " << ground_truth.size()
-              << std::endl;
-    return {};
-  }
-
-  std::vector<double> scores;
-  for (std::size_t i = 0; i < test_result.size(); ++i) {
-    if (test_result[i].empty()) {
-      std::cerr << i << "-th test result is empty" << std::endl;
-      return {};
-    }
-
-    if (ground_truth[i].empty()) {
-      std::cerr << i << "-th ground truth is empty" << std::endl;
-      return {};
-    }
-
-    auto sorted_ground_truth = ground_truth[i];
-    std::sort(sorted_ground_truth.begin(), sorted_ground_truth.end());
-
-    std::unordered_set<T> true_set;
-    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
-      true_set.insert(sorted_ground_truth[n]);
-    }
-
-    std::size_t num_corrects = 0;
-    for (std::size_t n = 0; n < std::min(test_result[i].size(), k); ++n) {
-      num_corrects += true_set.count(test_result[i][n]);
-    }
-
-    scores.push_back((double)num_corrects /
-                     (double)std::min(sorted_ground_truth.size(), k) * 100.0);
-  }
-  return scores;
-}
-
 namespace {
 using saltatlas::dndetail::neighbor;
 
@@ -75,21 +26,18 @@ template <typename id_t, typename dist_t>
 using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
 }  // namespace
 
-/// \brief Calculate recall scores.
-/// In this function, returning a neighbor not in the ground truth set but whose
-/// distance is tied with an entry in the ground truth is counted as success.
+/// \brief Calculate recall@k scores.
 /// \tparam T Element type.
 /// \param test_result Test result set.
 /// \param ground_truth Ground truth set.
-/// \param k If give, calculates recall@k.
+/// \param k Calculates recall@k.
 /// \return Returns recall scores.
 template <typename id_t, typename dist_t>
-inline std::vector<double> get_recall_scores_tied_distance(
+inline std::vector<double> get_recall_scores(
     const neighbors_tbl<id_t, dist_t> &test_result,
-    const neighbors_tbl<id_t, dist_t> &ground_truth,
-    const std::size_t k = std::numeric_limits<std::size_t>::max()) {
+    const neighbors_tbl<id_t, dist_t> &ground_truth, const std::size_t k) {
   if (ground_truth.size() != test_result.size()) {
-    std::cerr << "#of ground truth and test result neighbors are different: "
+    std::cerr << "#of ground truth and test result entries are different: "
               << test_result.size() << " != " << ground_truth.size()
               << std::endl;
     return {};
@@ -97,49 +45,138 @@ inline std::vector<double> get_recall_scores_tied_distance(
 
   std::vector<double> scores;
   for (std::size_t i = 0; i < test_result.size(); ++i) {
-    if (test_result[i].empty()) {
-      std::cerr << i << "-th test result is empty" << std::endl;
+    const auto &test = test_result[i];
+    if (test.size() < k) {
+      std::cerr << "#of elements in " << i << "-th test result (" << test.size()
+                << ") < k (" << k << ")" << std::endl;
       return {};
     }
 
-    if (ground_truth[i].empty()) {
-      std::cerr << i << "-th ground truth is empty" << std::endl;
+    const auto &gt = ground_truth[i];
+    if (gt.size() < k) {
+      std::cerr << "#of elements in " << i << "-th ground truth (" << gt.size()
+                << ") < k (" << k << ")" << std::endl;
       return {};
     }
 
-    auto sorted_ground_truth = ground_truth[i];
-    std::sort(sorted_ground_truth.begin(), sorted_ground_truth.end());
+    auto sorted_gt = gt;
+    std::sort(sorted_gt.begin(), sorted_gt.end());
 
     std::unordered_set<id_t> true_id_set;
-    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
-      true_id_set.insert(sorted_ground_truth[n].id);
+    for (std::size_t n = 0; n < k; ++n) {
+      true_id_set.insert(sorted_gt[n].id);
     }
-
-    std::vector<dist_t> true_distance_set;
-    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
-      true_distance_set.emplace_back(sorted_ground_truth[n].distance);
-    }
-    std::sort(true_distance_set.begin(), true_distance_set.end());
-    auto find_equal_distance = [&true_distance_set](const dist_t d) {
-      for (const auto v : true_distance_set) {
-        if (dndetail::nearly_equal(v, d)) {
-          return true;
-        }
-      }
-      return false;
-    };
 
     std::size_t num_corrects = 0;
-    for (std::size_t n = 0; n < std::min(sorted_ground_truth.size(), k); ++n) {
-      if (true_id_set.count(test_result[i][n].id)) {
-        ++num_corrects;
-      } else if (find_equal_distance(test_result[i][n].distance)) {
-        ++num_corrects;
-      }
+    for (std::size_t n = 0; n < k; ++n) {
+      num_corrects += true_id_set.count(test[n].id);
     }
 
-    scores.push_back((double)num_corrects /
-                     (double)std::min(sorted_ground_truth.size(), k) * 100.0);
+    scores.push_back((double)num_corrects / (double)k * 100.0);
+  }
+  return scores;
+}
+
+/// \brief Calculate recall@k scores, considering only distances.
+/// \tparam T Element type.
+/// \param test_result Test result set.
+/// \param ground_truth Ground truth set.
+/// \param k Calculates recall@k.
+/// \return Returns recall scores.
+template <typename id_t, typename dist_t>
+inline std::vector<double> get_recall_scores_with_only_distance(
+    const neighbors_tbl<id_t, dist_t> &test_result,
+    const neighbors_tbl<id_t, dist_t> &ground_truth, const std::size_t k) {
+  if (ground_truth.size() != test_result.size()) {
+    std::cerr << "#of ground truth and test result entries are different: "
+              << test_result.size() << " != " << ground_truth.size()
+              << std::endl;
+    return {};
+  }
+
+  std::vector<double> scores;
+  for (std::size_t i = 0; i < test_result.size(); ++i) {
+    const auto &test = test_result[i];
+    if (test.size() < k) {
+      std::cerr << "#of elements in " << i << "-th test result (" << test.size()
+                << ") < k (" << k << ")" << std::endl;
+      return {};
+    }
+
+    const auto &gt = ground_truth[i];
+    if (gt.size() < k) {
+      std::cerr << "#of elements in " << i << "-th ground truth (" << gt.size()
+                << ") < k (" << k << ")" << std::endl;
+      return {};
+    }
+
+    auto sorted_gt = gt;
+    std::sort(sorted_gt.begin(), sorted_gt.end());
+
+    const auto  max_distance = sorted_gt[k - 1].distance;
+    std::size_t num_corrects = 0;
+    for (std::size_t n = 0; n < k; ++n) {
+      num_corrects += (test[n].distance < max_distance ||
+                       dndetail::nearly_equal(test[n].distance, max_distance));
+    }
+
+    scores.push_back((double)num_corrects / (double)k * 100.0);
+  }
+  return scores;
+}
+
+/// \brief Calculate recall@k scores, accepting distance ties.
+/// More than k ground truth neighbors are used in the recall calculation,
+/// if their distances are tied with k-th ground truth neighbor.
+/// \tparam T Element type.
+/// \param test_result Test result set.
+/// \param ground_truth Ground truth set.
+/// \param k Calculates recall@k.
+/// \return Returns recall scores.
+template <typename id_t, typename dist_t>
+inline std::vector<double> get_recall_scores_with_distance_ties(
+    const neighbors_tbl<id_t, dist_t> &test_result,
+    const neighbors_tbl<id_t, dist_t> &ground_truth, const std::size_t k) {
+  if (ground_truth.size() != test_result.size()) {
+    std::cerr << "#of ground truth and test result entries are different: "
+              << test_result.size() << " != " << ground_truth.size()
+              << std::endl;
+    return {};
+  }
+
+  std::vector<double> scores;
+  for (std::size_t i = 0; i < test_result.size(); ++i) {
+    const auto &test = test_result[i];
+    if (test.size() < k) {
+      std::cerr << "#of elements in " << i << "-th test result (" << test.size()
+                << ") < k (" << k << ")" << std::endl;
+      return {};
+    }
+
+    const auto &gt = ground_truth[i];
+    if (gt.size() < k) {
+      std::cerr << "#of elements in " << i << "-th ground truth (" << gt.size()
+                << ") < k (" << k << ")" << std::endl;
+      return {};
+    }
+
+    auto sorted_gt = gt;
+    std::sort(sorted_gt.begin(), sorted_gt.end());
+
+    std::unordered_set<id_t> true_id_set;
+    const auto               max_distance = sorted_gt[k - 1].distance;
+    for (std::size_t n = 0; n < sorted_gt.size(); ++n) {
+      if (n >= k && !dndetail::nearly_equal(sorted_gt[n].distance, max_distance))
+        break;
+      true_id_set.insert(sorted_gt[n].id);
+    }
+
+    std::size_t num_corrects = 0;
+    for (std::size_t n = 0; n < k; ++n) {
+      num_corrects += true_id_set.count(test[n].id);
+    }
+
+    scores.push_back((double)num_corrects / (double)k * 100.0);
   }
   return scores;
 }

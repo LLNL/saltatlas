@@ -38,24 +38,11 @@ template <typename neighbor_store_type>
 inline void show_query_recall_score(
     const neighbor_store_type& test_result,
     const std::string_view& ground_truth_file_path, ygm::comm& comm) {
-  std::vector<std::vector<id_t>> test_ids(test_result.size());
-  for (std::size_t i = 0; i < test_result.size(); ++i) {
-    for (const auto& n : test_result[i]) {
-      test_ids[i].push_back(n.id);
-    }
-  }
-
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
-  std::vector<std::vector<id_t>> gt_ids(ground_truth.size());
-  for (std::size_t i = 0; i < ground_truth.size(); ++i) {
-    for (const auto& n : ground_truth[i]) {
-      gt_ids[i].push_back(n.id);
-    }
-  }
 
-  const auto local_sores =
-      saltatlas::utility::get_recall_scores(test_ids, gt_ids, test_ids.size());
+  const auto local_sores = saltatlas::utility::get_recall_scores(
+      test_result, ground_truth, test_result[0].size());
 
   const auto local_min =
       *std::min_element(local_sores.begin(), local_sores.end());
@@ -75,14 +62,45 @@ inline void show_query_recall_score(
 }
 
 template <typename neighbor_store_type>
-inline void show_query_recall_score_tied_distance(
+inline void show_query_recall_score_with_only_distance(
     const neighbor_store_type& test_result,
     const std::string_view& ground_truth_file_path, ygm::comm& comm) {
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-  const auto local_sores = saltatlas::utility::get_recall_scores_tied_distance(
-      test_result, ground_truth, test_result.size());
+  const auto local_sores =
+      saltatlas::utility::get_recall_scores_with_only_distance(
+          test_result, ground_truth, test_result[0].size());
+
+  const auto local_min =
+      *std::min_element(local_sores.begin(), local_sores.end());
+  const auto local_max =
+      *std::max_element(local_sores.begin(), local_sores.end());
+  const auto local_sum =
+      std::accumulate(local_sores.begin(), local_sores.end(), 0.0);
+
+  const auto global_sum = comm.all_reduce_sum(local_sum);
+  const auto num_scores = comm.all_reduce_sum(local_sores.size());
+
+  comm.cout0() << "Min distance-only recall score\t"
+               << comm.all_reduce_min(local_min)
+               << "\nMean distance-only recall score\t"
+               << global_sum / num_scores
+               << "\nMax distance-only recall score\t"
+               << comm.all_reduce_max(local_max) << std::endl;
+  comm.cf_barrier();
+}
+
+template <typename neighbor_store_type>
+inline void show_query_recall_score_with_distance_ties(
+    const neighbor_store_type& test_result,
+    const std::string_view& ground_truth_file_path, ygm::comm& comm) {
+  neighbor_store_type ground_truth;
+  saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
+
+  const auto local_sores =
+      saltatlas::utility::get_recall_scores_with_distance_ties(
+          test_result, ground_truth, test_result[0].size());
 
   const auto local_min =
       *std::min_element(local_sores.begin(), local_sores.end());

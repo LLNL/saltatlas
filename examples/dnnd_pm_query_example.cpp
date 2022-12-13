@@ -72,8 +72,12 @@ int main(int argc, char **argv) {
 
     if (!ground_truth_file_path.empty()) {
       show_query_recall_score(query_results, ground_truth_file_path, comm);
-      show_query_recall_score_tied_distance(query_results,
-                                            ground_truth_file_path, comm);
+      comm.cout0() << std::endl;
+      show_query_recall_score_with_only_distance(query_results,
+                                                 ground_truth_file_path, comm);
+      comm.cout0() << std::endl;
+      show_query_recall_score_with_distance_ties(query_results,
+                                                 ground_truth_file_path, comm);
     }
 
     if (!query_result_file_path.empty()) {
