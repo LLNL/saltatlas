@@ -116,8 +116,10 @@ inline std::vector<double> get_recall_scores_with_only_distance(
     const auto  max_distance = sorted_gt[k - 1].distance;
     std::size_t num_corrects = 0;
     for (std::size_t n = 0; n < k; ++n) {
-      num_corrects += (test[n].distance < max_distance ||
-                       dndetail::nearly_equal(test[n].distance, max_distance));
+      // 1e-6 comes from big ann benchmarks
+      num_corrects +=
+          (test[n].distance < max_distance ||
+           dndetail::nearly_equal(test[n].distance, max_distance, 1e-6));
     }
 
     scores.push_back((double)num_corrects / (double)k * 100.0);
@@ -166,7 +168,9 @@ inline std::vector<double> get_recall_scores_with_distance_ties(
     std::unordered_set<id_t> true_id_set;
     const auto               max_distance = sorted_gt[k - 1].distance;
     for (std::size_t n = 0; n < sorted_gt.size(); ++n) {
-      if (n >= k && !dndetail::nearly_equal(sorted_gt[n].distance, max_distance))
+      // 1e-6 comes from big ann benchmarks
+      if (n >= k &&
+          !dndetail::nearly_equal(sorted_gt[n].distance, max_distance, 1e-6))
         break;
       true_id_set.insert(sorted_gt[n].id);
     }
