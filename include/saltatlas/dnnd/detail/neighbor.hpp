@@ -49,7 +49,7 @@ struct neighbor {
       : id(_id), distance(_distance) {}
 
   friend bool operator<(const neighbor& lhd, const neighbor& rhd) {
-    if (!nearly_equal(lhd.distance, rhd.distance))
+    if (lhd.distance != rhd.distance)
       return lhd.distance < rhd.distance;
     return lhd.id < rhd.id;
   }
