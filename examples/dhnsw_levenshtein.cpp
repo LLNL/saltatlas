@@ -136,6 +136,27 @@ int main(int argc, char** argv) {
     dist_index.query(test_string, 2, 2, voronoi_rank, 1, fuzzy_result_lambda);
   }
 
+  world.cout0("Attempting query for '", test_string,
+              "' with features returned");
+  world.barrier();
+
+  auto fuzzy_result_features_lambda =
+      [](const point_t& query_string,
+         const std::multimap<dist_t, std::pair<index_t, point_t>>&
+              nearest_neighbors,
+         auto dist_knn_index) {
+        for (const auto& result_pair : nearest_neighbors) {
+          dist_knn_index->comm().cout()
+              << "Point ID: " << result_pair.second.first << ": "
+              << result_pair.second.second
+              << " fuzzy dist: " << result_pair.first << std::endl;
+        }
+      };
+  if (world.rank0()) {
+    dist_index.query_with_features(test_string, 2, 2, voronoi_rank, 1,
+                                   fuzzy_result_features_lambda);
+  }
+
   world.barrier();
 
   return 0;
