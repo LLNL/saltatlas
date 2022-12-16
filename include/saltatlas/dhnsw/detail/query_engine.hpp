@@ -32,7 +32,6 @@ class query_engine_impl {
   class query_controller {
    private:
     struct query_locator {
-      // query_locator(int r, query_id_t l) : rank(r), local_id(l) {}
       int        rank;
       query_id_t local_id;
 
@@ -60,7 +59,6 @@ class query_engine_impl {
           m_queries_spawned{0},
           m_queries_returned{0},
           m_current_hops{0},
-          m_num_callbacks{0},
           m_id{id},
           engine{e},
           m_query_with_features{false} {
@@ -80,7 +78,6 @@ class query_engine_impl {
           m_queries_spawned{0},
           m_queries_returned{0},
           m_current_hops{0},
-          m_num_callbacks{0},
           m_id{id},
           engine{e},
           m_query_with_features{true} {
@@ -88,12 +85,6 @@ class query_engine_impl {
     };
 
     void start_query() {
-      /*
-std::vector<index_t> closest_seeds;
-engine->m_dist_index_impl_ptr->find_approx_closest_seeds(
-m_query_point, m_initial_num_queries, closest_seeds);
-                      */
-
       std::vector<index_t> point_partitions =
           engine->m_dist_index_impl_ptr->partitioner().find_point_partitions(
               m_query_point, m_initial_num_queries);
@@ -119,7 +110,6 @@ m_query_point, m_initial_num_queries, closest_seeds);
     void add_callback(const std::vector<std::byte> &packed_lambda) {
       m_callbacks.insert(m_callbacks.end(), packed_lambda.begin(),
                          packed_lambda.end());
-      m_num_callbacks++;
     }
 
    private:
@@ -187,7 +177,6 @@ m_query_point, m_initial_num_queries, closest_seeds);
       for (auto &cell : cells_set) {
         spawn_cell_query(cell, m_k, m_voronoi_rank);
       }
-      // m_next_cells.clear();
     }
 
     void complete_query_round() {
@@ -203,80 +192,59 @@ m_query_point, m_initial_num_queries, closest_seeds);
       if (!m_query_with_features) {
         cereal::YGMInputArchive iarchive(m_callbacks.data(),
                                          m_callbacks.size());
-        for (int i = 0; i < m_num_callbacks; ++i) {
-          engine->deserialize_lambda(iarchive, m_query_point,
-                                     m_nearest_neighbors, engine);
-        }
-        // engine->m_query_controllers.erase(m_query_point);
+        engine->deserialize_lambda(iarchive, m_query_point, m_nearest_neighbors,
+                                   engine);
+
         engine->m_query_id_recycler.return_id(m_id);
         return;
       } else {
         auto get_neighbor_features_lambda = [](auto                engine,
                                                const query_locator locator,
                                                const index_t       ngbr_index) {
-          auto neighbor_features_response_lambda =
-              [](auto engine, const query_id_t &id, const index_t ngbr_index,
-                 const point_t &ngbr) {
-                auto &query_controller = engine->m_query_controllers[id];
-                /*
-auto &query_controller =
-engine->m_query_controllers.find(q)->second;
-                                */
+          auto neighbor_features_response_lambda = [](auto              engine,
+                                                      const query_id_t &id,
+                                                      const index_t  ngbr_index,
+                                                      const point_t &ngbr) {
+            auto &query_controller = engine->m_query_controllers[id];
 
-                query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
-                ASSERT_RELEASE(
-                    query_controller.m_nearest_neighbor_features.size() <=
-                    query_controller.m_k);
+            query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
+            ASSERT_RELEASE(
+                query_controller.m_nearest_neighbor_features.size() <=
+                query_controller.m_k);
 
-                if (query_controller.m_nearest_neighbor_features.size() ==
-                    query_controller.m_nearest_neighbors.size()) {
-                  dist_ngbr_features_mmap_t nn_mmap;
-                  for (const auto &dist_index :
-                       query_controller.m_nearest_neighbors) {
-                    const auto &[ngbr_dist, ngbr_index] = dist_index;
-                    nn_mmap.insert(std::make_pair(
-                        ngbr_dist,
-                        std::make_pair(
-                            ngbr_index,
-                            query_controller
-                                .m_nearest_neighbor_features[ngbr_index])));
-                  }
+            if (query_controller.m_nearest_neighbor_features.size() ==
+                query_controller.m_nearest_neighbors.size()) {
+              dist_ngbr_features_mmap_t nn_mmap;
+              for (const auto &dist_index :
+                   query_controller.m_nearest_neighbors) {
+                const auto &[ngbr_dist, ngbr_index] = dist_index;
+                nn_mmap.insert(std::make_pair(
+                    ngbr_dist,
+                    std::make_pair(
+                        ngbr_index,
+                        query_controller
+                            .m_nearest_neighbor_features[ngbr_index])));
+              }
 
-                  cereal::YGMInputArchive iarchive(
-                      query_controller.m_callbacks.data(),
-                      query_controller.m_callbacks.size());
-                  for (int i = 0; i < query_controller.m_num_callbacks; ++i) {
-                    // TODO: This is a copy of deserialize_lambda with a
-                    // different multimap type to accomodate feature vectors...
-                    int64_t iptr;
-                    iarchive(iptr);
-                    iptr += (int64_t)&reference;
-                    void (*fun_ptr)(const point_t &,
-                                    const dist_ngbr_features_mmap_t &,
-                                    ygm::ygm_ptr<query_engine_impl_t>,
-                                    cereal::YGMInputArchive &);
-                    memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
-                    fun_ptr(query_controller.m_query_point, nn_mmap, engine,
-                            iarchive);
-                  }
-                  // Can't erase query_controller.
-                  // engine->m_query_controllers.erase(query_controller.m_query_point);
-                  /*
-query_controller.m_nearest_neighbor_features.clear();
-query_controller.m_nearest_neighbors.clear();
-query_controller.m_queried_cells.clear();
-query_controller.m_next_cells.clear();
-query_controller.m_nearest_neighbor_owners.clear();
-query_controller.m_callbacks.clear();
-query_controller.m_queries_spawned  = 0;
-query_controller.m_queries_returned = 0;
-query_controller.m_current_hops     = 0;
-query_controller.m_num_callbacks    = 0;
-                  */
+              cereal::YGMInputArchive iarchive(
+                  query_controller.m_callbacks.data(),
+                  query_controller.m_callbacks.size());
 
-                  engine->m_query_id_recycler.return_id(id);
-                }
-              };
+              // TODO: This is a copy of deserialize_lambda with a
+              // different multimap type to accomodate feature vectors...
+              int64_t iptr;
+              iarchive(iptr);
+              iptr += (int64_t)&reference;
+              void (*fun_ptr)(
+                  const point_t &, const dist_ngbr_features_mmap_t &,
+                  ygm::ygm_ptr<query_engine_impl_t>, cereal::YGMInputArchive &);
+              memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
+              fun_ptr(query_controller.m_query_point, nn_mmap, engine,
+                      iarchive);
+
+              engine->m_query_id_recycler.return_id(id);
+            }
+          };
 
           const auto &ngbr_pt =
               engine->m_dist_index_impl_ptr->get_point(ngbr_index);
@@ -286,9 +254,7 @@ query_controller.m_num_callbacks    = 0;
                                 ngbr_pt);
         };
 
-        query_locator locator;
-        locator.rank     = engine->m_comm->rank();
-        locator.local_id = m_id;
+        query_locator locator{engine->m_comm->rank(), m_id};
         for (const auto &[idx, owner_rank] : m_nearest_neighbor_owners) {
           ASSERT_RELEASE(owner_rank < engine->m_comm->size());
           engine->m_comm->async(owner_rank, get_neighbor_features_lambda,
@@ -379,11 +345,8 @@ query_controller.m_num_callbacks    = 0;
 
       dist_t max_distance = neighbors_max_distance();
 
-      int dest = engine->m_dist_index_impl_ptr->cell_owner(cell);
-      //  query_locator locator(engine->m_comm->rank(), m_id);
-      query_locator locator;
-      locator.rank     = engine->m_comm->rank();
-      locator.local_id = m_id;
+      int           dest = engine->m_dist_index_impl_ptr->cell_owner(cell);
+      query_locator locator{engine->m_comm->rank(), m_id};
       engine->m_comm->async(dest, cell_query_lambda, engine->pthis,
                             m_query_point, cell, max_distance, k, voronoi_rank,
                             locator);
@@ -409,7 +372,6 @@ query_controller.m_num_callbacks    = 0;
     dist_ngbr_features_map_t m_nearest_neighbor_features;
 
     std::vector<std::byte> m_callbacks;
-    int                    m_num_callbacks;
 
     query_id_t m_id;
 
@@ -457,18 +419,6 @@ query_controller.m_num_callbacks    = 0;
 
     initiate_query(query_pt, k, max_hops, voronoi_rank, initial_num_queries,
                    packed_lambda);
-    /*
-  m_comm->async(
-  controller_owner(query_pt),
-  [](auto comm, const point_t &q, const int s_k, const int s_max_hops,
-  const int s_voronoi_rank, const int s_initial_num_queries,
-  const std::vector<std::byte> &packed_lambda, auto pthis) {
-  pthis->initiate_query(q, s_k, s_max_hops, s_voronoi_rank,
-                    s_initial_num_queries, packed_lambda);
-  },
-  query_pt, k, max_hops, voronoi_rank, initial_num_queries, packed_lambda,
-  pthis);
-                    */
   }
 
   template <typename Callback, typename... CallbackArgs>
@@ -480,32 +430,11 @@ query_controller.m_num_callbacks    = 0;
 
     initiate_query_with_features(query_pt, k, max_hops, voronoi_rank,
                                  initial_num_queries, packed_lambda);
-    /*
-  m_comm->async(
-  controller_owner(query_pt),
-  [](auto comm, const point_t &q, const int s_k, const int s_max_hops,
-  const int s_voronoi_rank, const int s_initial_num_queries,
-  const std::vector<std::byte> &packed_lambda, auto pthis) {
-  pthis->initiate_query_with_features(
-  q, s_k, s_max_hops, s_voronoi_rank, s_initial_num_queries,
-  packed_lambda);
-  },
-  query_pt, k, max_hops, voronoi_rank, initial_num_queries, packed_lambda,
-  pthis);
-                    */
   }
 
   int local_cell_index(const int cell) const {
     return m_dist_index_impl_ptr->local_cell_index(cell);
   }
-
-  /*
-  int controller_owner(const point_t &q) const {
-  std::vector<index_t> partitions =
-  m_dist_index_impl_ptr->partitioner().find_point_partitions(q, 1);
-  return m_dist_index_impl_ptr->cell_owner(partitions[0]);
-  }
-  */
 
  private:
   void initiate_query(const point_t &q, int k, int max_hops, int voronoi_rank,
@@ -551,19 +480,6 @@ query_controller.m_num_callbacks    = 0;
 
       m_query_controllers[id].start_query();
     }
-
-    /*
-  // Create controller record locally
-  auto it = m_query_controllers.find(q);
-  if (it == m_query_controllers.end()) {
-  auto insert_ret = m_query_controllers.insert(
-  {q, query_controller(q, k, max_hops, voronoi_rank,
-                   initial_num_queries, packed_lambda, pthis)});
-  insert_ret.first->second.start_query();
-  } else {
-  (*it).second.add_callback(packed_lambda);
-  }
-    */
   }
 
   void initiate_query_with_features(
@@ -611,20 +527,6 @@ query_controller.m_num_callbacks    = 0;
 
       m_query_controllers[id].start_query();
     }
-
-    /*
-  // Create controller record locally
-  auto it = m_query_controllers.find(q);
-  if (it == m_query_controllers.end()) {
-  auto insert_ret = m_query_controllers.insert(
-  {q, query_controller(q, k, max_hops, voronoi_rank,
-                   initial_num_queries, packed_lambda, pthis,
-                   query_controller::with_features_tag)});
-  insert_ret.first->second.start_query();
-  } else {
-  (*it).second.add_callback(packed_lambda);
-  }
-    */
   }
 
   // Stolen from YGM for lambda serialization purposes
@@ -652,8 +554,7 @@ query_controller.m_num_callbacks    = 0;
         };
 
     cereal::YGMOutputArchive oarchive(to_return);  // Create an output archive
-                                                   // // oarchive(fun_ptr);
-    int64_t iptr = (int64_t)fun_ptr - (int64_t)&reference;
+    int64_t                  iptr = (int64_t)fun_ptr - (int64_t)&reference;
     oarchive(iptr, tuple_args);
 
     return to_return;
@@ -683,8 +584,7 @@ query_controller.m_num_callbacks    = 0;
         };
 
     cereal::YGMOutputArchive oarchive(to_return);  // Create an output archive
-                                                   // // oarchive(fun_ptr);
-    int64_t iptr = (int64_t)fun_ptr - (int64_t)&reference;
+    int64_t                  iptr = (int64_t)fun_ptr - (int64_t)&reference;
     oarchive(iptr, tuple_args);
 
     return to_return;
@@ -704,7 +604,6 @@ query_controller.m_num_callbacks    = 0;
     fun_ptr(query_pt, nearest_neighbors, query_engine_ptr, iarchive);
   }
 
-  // std::map<point_t, query_controller> m_query_controllers;
   std::vector<query_controller> m_query_controllers;
   id_recycler<query_id_t>       m_query_id_recycler;
 
