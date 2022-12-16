@@ -27,7 +27,7 @@ using point_t   = std::vector<feature_t>;
 using dist_t    = float;
 using index_t   = uint32_t;
 
-dist_t l2_dist(const point_t& v1, const point_t& v2) {
+dist_t l2_sqr(const point_t& v1, const point_t& v2) {
   if (v1.size() != v2.size()) {
     std::cout << "Size mismatch: " << v1.size() << " != " << v2.size()
               << std::endl;
@@ -39,62 +39,31 @@ dist_t l2_dist(const point_t& v1, const point_t& v2) {
     d += (v2[i] - v1[i]) * (v2[i] - v1[i]);
   }
 
-  return std::sqrt(d);
-}
-
-index_t calculate_line_offset(const std::vector<std::string>& filenames,
-                              ygm::comm&                      world) {
-  static index_t line_offset;
-  static index_t line_count;
-  line_offset = 0;
-  line_count  = 0;
-
-  ygm::io::line_parser linep(world, filenames);
-
-  linep.for_all([](auto& line) { ++line_count; });
-
-  world.barrier();
-
-  struct recursive_offset_scan {
-    void operator()(ygm::comm* c, index_t cumulative_size) {
-      line_offset = cumulative_size;
-
-      if (c->rank() < c->size() - 1) {
-        c->async(c->rank() + 1, recursive_offset_scan(),
-                 line_offset + line_count);
-      }
-    }
-  };
-
-  if (world.rank0() && world.size() > 1) {
-    world.async(1, recursive_offset_scan(), line_count);
-  }
-
-  world.barrier();
-
-  return line_offset;
+  return d;
 }
 
 ygm::container::pair_bag<index_t, point_t> read_points(
     const std::vector<std::string>& filenames, ygm::comm& world) {
   ygm::container::pair_bag<index_t, point_t> to_return(world);
 
-  auto line_offset = calculate_line_offset(filenames, world);
-
   ygm::io::line_parser linep(world, filenames);
 
-  index_t line_count{0};
-  linep.for_all([&to_return, &line_offset, &line_count](auto& line) {
+  linep.for_all([&to_return](auto& line) {
     point_t pt;
 
     std::stringstream ss(line);
-    feature_t         feature;
+
+    index_t id;
+    ss >> id;
+
+    feature_t feature;
     while (ss >> feature) {
       pt.push_back(feature);
     }
 
-    to_return.async_insert(std::make_pair(line_offset + line_count, pt));
-    ++line_count;
+    ASSERT_RELEASE(pt.size() == 128);
+
+    to_return.async_insert(std::make_pair(id, pt));
   });
 
   world.barrier();
@@ -102,34 +71,110 @@ ygm::container::pair_bag<index_t, point_t> read_points(
   return to_return;
 }
 
-ygm::container::map<index_t, std::vector<index_t>> read_ground_truth(
-    const std::vector<std::string>& filenames, ygm::comm& world, int k) {
-  ygm::container::map<index_t, std::vector<index_t>> to_return(world);
+ygm::container::pair_bag<index_t, point_t> read_query_points(
+    const std::string& filename, ygm::comm& world) {
+  ygm::container::pair_bag<index_t, point_t> to_return(world);
 
-  auto line_offset = calculate_line_offset(filenames, world);
+  if (world.rank0()) {
+    size_t curr_line{0};
 
-  ygm::io::line_parser linep(world, filenames);
+    std::ifstream ifs(filename);
+    ifs.imbue(std::locale::classic());
 
-  index_t line_count{0};
-  linep.for_all([&to_return, &line_offset, &line_count, k](auto& line) {
-    std::vector<index_t> true_ngbrs;
-    int                  ngbrs_found{0};
+    std::string line;
+    while (std::getline(ifs, line)) {
+      std::stringstream ss(line);
 
-    std::stringstream ss(line);
-    index_t           ngbr;
-    while (ss >> ngbr && ngbrs_found < k) {
-      true_ngbrs.push_back(ngbr);
-      ++ngbrs_found;
+      point_t   pt;
+      feature_t feature;
+      while (ss >> feature) {
+        pt.push_back(feature);
+      }
+
+      to_return.async_insert(std::make_pair(curr_line, pt));
+      ++curr_line;
     }
-
-    to_return.async_insert(
-        std::make_pair(line_offset + line_count, true_ngbrs));
-    ++line_count;
-  });
+  }
 
   world.barrier();
 
   return to_return;
+}
+
+ygm::container::map<index_t, std::vector<std::pair<index_t, dist_t>>>
+read_ground_truth(const std::string& filename, ygm::comm& world) {
+  ygm::container::map<index_t, std::vector<std::pair<index_t, dist_t>>>
+      nn_dist_truth(world);
+
+  if (world.rank0()) {
+    size_t curr_offset{0};
+    int    num_lines{0};
+
+    // Count lines
+    {
+      std::ifstream ifs(filename);
+      ifs.imbue(std::locale::classic());
+
+      std::string line;
+
+      while (std::getline(ifs, line)) {
+        num_lines++;
+      }
+    }
+
+    int num_ground_truth_entries = num_lines / 2;
+
+    std::vector<std::vector<std::pair<index_t, dist_t>>> truth_vec(
+        num_ground_truth_entries);
+
+    // Read ground-truth data
+    {
+      std::ifstream ifs(filename);
+      ifs.imbue(std::locale::classic());
+
+      int curr_line{0};
+
+      std::string line;
+      while (std::getline(ifs, line)) {
+        std::stringstream ss(line);
+
+        if (curr_line < num_ground_truth_entries) {
+          // Get neighbor IDs
+          index_t ngbr;
+          while (ss >> ngbr) {
+            truth_vec[curr_line].push_back(std::make_pair(ngbr, -1.0));
+          }
+        } else {
+          dist_t dist;
+          int    curr_k{0};
+          while (ss >> dist) {
+            truth_vec[curr_line - num_ground_truth_entries][curr_k].second =
+                dist;
+
+            ++curr_k;
+          }
+        }
+        ++curr_line;
+      }
+    }
+
+    for (size_t i = 0; i < truth_vec.size(); ++i) {
+      nn_dist_truth.async_insert(i + curr_offset, truth_vec[i]);
+    }
+  }
+
+  world.barrier();
+
+  // Sanity check on ground-truth
+  nn_dist_truth.for_all([](const auto& id_nn_vec_pair) {
+    const auto& [id, nn_vec] = id_nn_vec_pair;
+
+    for (const auto& nn_dist : nn_vec) {
+      ASSERT_RELEASE(nn_dist.second >= 0.0);
+    }
+  });
+
+  return nn_dist_truth;
 }
 
 void usage(ygm::comm& comm) {
@@ -156,12 +201,14 @@ void usage(ygm::comm& comm) {
   }
 }
 
-void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
-                    int& num_hops, int& num_seeds, int& k,
-                    int&                      num_initial_queries,
+void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
+                    std::vector<int>& voronoi_rank_vec,
+                    std::vector<int>& num_hops_vec, int& num_seeds,
+                    std::vector<int>&         k_vec,
+                    std::vector<int>&         num_initial_queries_vec,
                     std::vector<std::string>& index_filenames,
-                    std::vector<std::string>& query_filenames,
-                    std::vector<std::string>& ground_truth_filenames) {
+                    std::string&              query_filename,
+                    std::string&              ground_truth_filename) {
   if (comm.rank0()) {
     std::cout << "CMD line:";
     for (int i = 0; i < argc; ++i) {
@@ -171,51 +218,54 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
   }
 
   num_seeds                      = -1;
-  k                              = -1;
   bool found_voronoi_rank        = false;
   bool found_num_hops            = false;
   bool found_initial_num_queries = false;
 
   int  c;
-  bool inserting_index_filenames        = false;
-  bool inserting_query_filenames        = false;
-  bool inserting_ground_truth_filenames = false;
-  bool prn_help                         = false;
+  bool inserting_index_filenames     = false;
+  bool inserting_voronoi_ranks       = false;
+  bool inserting_num_hops            = false;
+  bool inserting_k                   = false;
+  bool inserting_num_initial_queries = false;
+  bool prn_help                      = false;
   while (true) {
-    while ((c = getopt(argc, argv, "+v:p:s:k:n:iqgh ")) != -1) {
-      inserting_index_filenames        = false;
-      inserting_query_filenames        = false;
-      inserting_ground_truth_filenames = false;
+    while ((c = getopt(argc, argv, "+vps:kniq:g:h ")) != -1) {
+      inserting_index_filenames     = false;
+      inserting_voronoi_ranks       = false;
+      inserting_num_hops            = false;
+      inserting_k                   = false;
+      inserting_num_initial_queries = false;
       switch (c) {
         case 'h':
           prn_help = true;
           break;
         case 'v':
-          voronoi_rank       = atoi(optarg);
-          found_voronoi_rank = true;
+          inserting_voronoi_ranks = true;
+          found_voronoi_rank      = true;
           break;
         case 's':
           num_seeds = atoi(optarg);
           break;
         case 'p':
-          num_hops       = atoi(optarg);
-          found_num_hops = true;
+          inserting_num_hops = true;
+          found_num_hops     = true;
           break;
         case 'k':
-          k = atoi(optarg);
+          inserting_k = true;
           break;
         case 'n':
-          num_initial_queries       = atoi(optarg);
-          found_initial_num_queries = true;
+          inserting_num_initial_queries = true;
+          found_initial_num_queries     = true;
           break;
         case 'i':
           inserting_index_filenames = true;
           break;
         case 'q':
-          inserting_query_filenames = true;
+          query_filename = optarg;
           break;
         case 'g':
-          inserting_ground_truth_filenames = true;
+          ground_truth_filename = optarg;
           break;
         default:
           std::cerr << "Unrecognized option: " << c << ", ignore." << std::endl;
@@ -228,11 +278,17 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
     if (inserting_index_filenames) {
       index_filenames.push_back(argv[optind]);
     }
-    if (inserting_query_filenames) {
-      query_filenames.push_back(argv[optind]);
+    if (inserting_voronoi_ranks) {
+      voronoi_rank_vec.push_back(atoi(argv[optind]));
     }
-    if (inserting_ground_truth_filenames) {
-      ground_truth_filenames.push_back(argv[optind]);
+    if (inserting_num_hops) {
+      num_hops_vec.push_back(atoi(argv[optind]));
+    }
+    if (inserting_k) {
+      k_vec.push_back(atoi(argv[optind]));
+    }
+    if (inserting_num_initial_queries) {
+      num_initial_queries_vec.push_back(atoi(argv[optind]));
     }
 
     ++optind;
@@ -240,16 +296,16 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
 
   if (!found_voronoi_rank) {
     comm.cout0("Using default voronoi rank: ", DEFAULT_VORONOI_RANK);
-    voronoi_rank = DEFAULT_VORONOI_RANK;
+    voronoi_rank_vec.push_back(DEFAULT_VORONOI_RANK);
   }
   if (!found_num_hops) {
     comm.cout0("Using default number of hops: ", DEFAULT_NUM_HOPS);
-    num_hops = DEFAULT_NUM_HOPS;
+    num_hops_vec.push_back(DEFAULT_NUM_HOPS);
   }
   if (!found_initial_num_queries) {
     comm.cout0("Using default number of initial queries: ",
                DEFAULT_NUM_INITIAL_QUERIES);
-    num_initial_queries = DEFAULT_NUM_INITIAL_QUERIES;
+    num_initial_queries_vec.push_back(DEFAULT_NUM_INITIAL_QUERIES);
   }
 
   // Detect misconfigured options
@@ -257,11 +313,11 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
     comm.cout0("Must specify file to build index from");
     prn_help = true;
   }
-  if (query_filenames.size() < 1) {
+  if (query_filename.size() < 1) {
     comm.cout0("Must specify file(s) to specifying queries");
     prn_help = true;
   }
-  if (ground_truth_filenames.size() < 1) {
+  if (ground_truth_filename.size() < 1) {
     comm.cout0("Must specify file(s) containing ground truth");
     prn_help = true;
   }
@@ -271,7 +327,7 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
         "distributed index");
     prn_help = true;
   }
-  if (k < 1) {
+  if (k_vec.size() < 1) {
     comm.cout0(
         "Must specify positive number of nearest neighbors to query index "
         "for");
@@ -287,22 +343,27 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm, int& voronoi_rank,
 int main(int argc, char** argv) {
   ygm::comm world(&argc, &argv);
 
-  int                      voronoi_rank;
-  int                      num_hops;
+  std::vector<int>         voronoi_rank_vec;
+  std::vector<int>         num_hops_vec;
   int                      num_seeds;
-  int                      k;
-  int                      num_initial_queries;
+  std::vector<int>         k_vec;
+  std::vector<int>         num_initial_queries_vec;
   std::vector<std::string> index_filenames;
-  std::vector<std::string> query_filenames;
-  std::vector<std::string> ground_truth_filenames;
+  std::string              query_filename;
+  std::string              ground_truth_filename;
 
-  parse_cmd_line(argc, argv, world, voronoi_rank, num_hops, num_seeds, k,
-                 num_initial_queries, index_filenames, query_filenames,
-                 ground_truth_filenames);
+  parse_cmd_line(argc, argv, world, voronoi_rank_vec, num_hops_vec, num_seeds,
+                 k_vec, num_initial_queries_vec, index_filenames,
+                 query_filename, ground_truth_filename);
+
+  std::sort(voronoi_rank_vec.begin(), voronoi_rank_vec.end());
+  std::sort(num_hops_vec.begin(), num_hops_vec.end());
+  std::sort(k_vec.begin(), k_vec.end());
+  std::sort(num_initial_queries_vec.begin(), num_initial_queries_vec.end());
 
   auto index_points = read_points(index_filenames, world);
 
-  auto l2_space = saltatlas::dhnsw_detail::SpaceWrapper(l2_dist);
+  auto l2_space = saltatlas::dhnsw_detail::SpaceWrapper(l2_sqr);
 
   saltatlas::metric_hyperplane_partitioner<dist_t, index_t, point_t>
       l2_partitioner(world, l2_space);
@@ -311,8 +372,8 @@ int main(int argc, char** argv) {
 
   world.cout0("===Building nearest neighbor index===");
 
-  saltatlas::dhnsw dist_index(voronoi_rank, num_seeds, &l2_space, &world,
-                              l2_partitioner);
+  saltatlas::dhnsw dist_index(voronoi_rank_vec.back(), num_seeds, &l2_space,
+                              &world, l2_partitioner);
 
   world.barrier();
   ygm::timer t{};
@@ -336,39 +397,119 @@ int main(int argc, char** argv) {
   world.cout0("Total build time: ", t.elapsed());
   world.cout0("Global HNSW size: ", dist_index.global_size());
 
-  auto query_points = read_points(query_filenames, world);
-  auto ground_truth = read_ground_truth(ground_truth_filenames, world, k);
+  auto query_points = read_query_points(query_filename, world);
+  auto ground_truth = read_ground_truth(ground_truth_filename, world);
   auto num_queries  = query_points.size();
 
+  world.cout0("Query size: ", query_points.size(),
+              "\nGround truth size: ", ground_truth.size());
+
   world.cout0("===Beginning queries===");
-  static std::vector<std::pair<index_t, std::vector<index_t>>> query_results;
-  world.barrier();
-  t.reset();
+  static std::vector<
+      std::pair<index_t, std::vector<std::pair<index_t, dist_t>>>>
+                query_results;
+  static size_t total_correct;
+  static size_t total_query_results;
+  static dist_t total_correct_dist;
+  static dist_t total_result_dist;
 
-  auto store_results_lambda =
-      [](const point_t&                        query_point,
-         const std::multimap<dist_t, index_t>& nearest_neighbors,
-         auto dist_knn_index, index_t query_ID) {
-        std::pair<index_t, std::vector<index_t>> results;
-        results.first = query_ID;
+  for (const auto k : k_vec) {
+    for (const auto num_initial_queries : num_initial_queries_vec) {
+      for (const auto num_hops : num_hops_vec) {
+        for (const auto voronoi_rank : voronoi_rank_vec) {
+          world.cout0("\nVoronoi rank: ", voronoi_rank, "\nHops: ", num_hops,
+                      "\nInitial queries: ", num_initial_queries, "\nk: ", k);
 
-        for (const auto& dist_ID_pair : nearest_neighbors) {
-          results.second.push_back(dist_ID_pair.second);
+          query_results.clear();
+          total_correct       = 0;
+          total_query_results = 0;
+          total_correct_dist  = 0.0;
+          total_result_dist   = 0.0;
+
+          world.barrier();
+          t.reset();
+
+          auto store_results_lambda = [](const point_t& query_point,
+                                         const std::multimap<dist_t, index_t>&
+                                                 nearest_neighbors,
+                                         auto    dist_knn_index,
+                                         index_t query_ID) {
+            std::pair<index_t, std::vector<std::pair<index_t, dist_t>>> results;
+            results.first = query_ID;
+
+            for (const auto& dist_ID_pair : nearest_neighbors) {
+              results.second.push_back(
+                  std::make_pair(dist_ID_pair.second, dist_ID_pair.first));
+            }
+
+            query_results.push_back(results);
+          };
+
+          query_points.for_all([&dist_index, k, num_hops, num_initial_queries,
+                                voronoi_rank,
+                                store_results_lambda](const auto& query_point) {
+            dist_index.query(query_point.second, k, num_hops,
+                             num_initial_queries, voronoi_rank,
+                             store_results_lambda, query_point.first);
+          });
+
+          world.barrier();
+
+          auto elapsed = t.elapsed();
+          world.cout0("Query time: ", elapsed);
+          world.cout0("\t", num_queries / elapsed, " queries/sec");
+
+          world.cout0("Checking results");
+
+          auto calculate_recall_lambda =
+              [](auto& id_truth_vec_pair,
+                 const std::vector<std::pair<index_t, dist_t>>& results) {
+                const auto& [id, truth_vec] = id_truth_vec_pair;
+
+                std::set<index_t> truth_set;
+
+                for (int i = 0; i < results.size(); ++i) {
+                  truth_set.insert(truth_vec[i].first);
+                  total_correct_dist += std::sqrt(truth_vec[i].second);
+                }
+
+                for (const auto& query_result : results) {
+                  total_correct += truth_set.count(query_result.first);
+                  total_result_dist += std::sqrt(query_result.second);
+                }
+
+                total_query_results += results.size();
+              };
+
+          for (const auto& index_nn_vec : query_results) {
+            const auto& [id, nn_vec] = index_nn_vec;
+
+            ground_truth.async_visit(id, calculate_recall_lambda, nn_vec);
+          }
+
+          world.barrier();
+
+          size_t global_correct = world.all_reduce_sum(total_correct);
+          size_t global_nearest_ngbrs =
+              world.all_reduce_sum(total_query_results);
+          dist_t global_correct_dist = world.all_reduce_sum(total_correct_dist);
+          dist_t global_result_dist  = world.all_reduce_sum(total_result_dist);
+
+          /*
+        world.cout0("Total Correct: ", global_correct,
+                "\nTotal query results: ", global_nearest_ngbrs);
+                                                          */
+          world.cout0("Recall: ",
+                      ((float)global_correct) / global_nearest_ngbrs);
+
+          world.cout0(
+              "Total correct dist: ", global_correct_dist,
+              "\nTotal result dist: ", global_result_dist,
+              "\nApprox Ratio: ", global_result_dist / global_correct_dist);
         }
-      };
-
-  query_points.for_all([&dist_index, k, num_hops, num_initial_queries,
-                        voronoi_rank,
-                        store_results_lambda](const auto& query_point) {
-    dist_index.query(query_point.second, k, num_hops, num_initial_queries,
-                     voronoi_rank, store_results_lambda, query_point.first);
-  });
-
-  world.barrier();
-
-  auto elapsed = t.elapsed();
-  world.cout0("Query time: ", elapsed);
-  world.cout0("\t", num_queries / elapsed, " queries/sec");
+      }
+    }
+  }
 
   return 0;
 }
