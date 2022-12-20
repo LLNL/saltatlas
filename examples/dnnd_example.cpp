@@ -28,7 +28,7 @@ template <typename cout_type>
 void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv, k_ygm_buff_size);
+  ygm::comm comm(&argc, &argv);
 
   int                      index_k{4};
   int                      query_k{4};
