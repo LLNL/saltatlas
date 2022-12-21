@@ -29,8 +29,6 @@ using dnnd_pm_type =
     saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
 using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
-
 template <typename cout_type>
 inline void option_common(cout_type &cout) {
   cout << "\n\t-f [string, required] Distance metric name:"
@@ -44,15 +42,17 @@ inline void option_common(cout_type &cout) {
 
 template <typename cout_type>
 inline void option_index_const(cout_type &cout) {
-  cout << "\n\t-p [string, required] Format of input point files:"
-       << "\n\t\t'wsv' (whitespace-separated values),"
-       << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
-       << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
-       << "\n\t-k [int] Number of neighbors to have for each point in the index."
-       << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
-       << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
-       << "\n\t-e If specified, generate reverse neighbors globally during the index construction."
-       << std::endl;
+  cout
+      << "\n\t-p [string, required] Format of input point files:"
+      << "\n\t\t'wsv' (whitespace-separated values),"
+      << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
+      << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
+      << "\n\t-k [int] Number of neighbors to have for each point in the index."
+      << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
+      << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
+      << "\n\t-e If specified, generate reverse neighbors globally during the "
+         "index construction."
+      << std::endl;
 }
 
 template <typename cout_type>
@@ -77,7 +77,8 @@ template <typename cout_type>
 inline void option_pm_reattach(cout_type &cout) {
   cout << "\nIndex reattaching options:"
        << "\n\t-z [string, required] Path to an already constructed index."
-       << "\n\t-x [string] If specified, transfer an already constructed index from this path to path 'z' at the beginning."
+       << "\n\t-x [string] If specified, transfer an already constructed index "
+          "from this path to path 'z' at the beginning."
        << std::endl;
 }
 
