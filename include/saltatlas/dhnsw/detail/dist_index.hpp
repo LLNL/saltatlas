@@ -60,6 +60,7 @@ class dhnsw_impl {
   }
 
   ~dhnsw_impl() {
+    m_comm->barrier();
     for (int i = 0; i < m_voronoi_cell_hnsw.size(); ++i) {
       delete m_voronoi_cell_hnsw[i];
     }
@@ -82,6 +83,7 @@ class dhnsw_impl {
   void add_data_point_to_insertion_queue(const index_t index, const point_t &v,
                                          const index_vec_t &closest_seeds) {
     auto insertion_cell = closest_seeds[0];
+    ASSERT_RELEASE(insertion_cell < m_num_cells);
     m_comm->async(
         cell_owner(insertion_cell),
         [](auto mbox, ygm::ygm_ptr<dhnsw_impl> pthis, index_t index,
@@ -98,13 +100,12 @@ class dhnsw_impl {
   void initialize_hnsw() {
     // Initialize HNSW structures
     for (int i = 0; i < num_local_cells(); ++i) {
+      ASSERT_RELEASE(m_cell_add_vec[i].size() > 0);
+
       hnswlib::HierarchicalNSW<dist_t> *hnsw =
           new hnswlib::HierarchicalNSW<dist_t>(
               m_metric_space_ptr, m_cell_add_vec[i].size(), 16, 200, 1);
       m_voronoi_cell_hnsw.push_back(hnsw);
-
-      // m_comm->cout() << "Initializing local HNSW with "
-      //<< m_cell_add_vec[i].size() << " points" << std::endl;
 
       // Add data points to HNSW
       set_cell_add_vec_ordering(m_cell_add_vec[i]);
@@ -156,6 +157,11 @@ class dhnsw_impl {
 
   const index_vec_t &get_cell_pointers(index_t index) {
     return m_map_point_to_cells[index];
+  }
+
+  const point_t &get_point(index_t index) {
+    ASSERT_RELEASE(m_local_data.count(index) > 0);
+    return m_local_data[index];
   }
 
  private:

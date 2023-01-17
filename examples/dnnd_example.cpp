@@ -14,7 +14,7 @@
 #include "dnnd_example_common.hpp"
 
 int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv, k_ygm_buff_size);
+  ygm::comm comm(&argc, &argv);
 
   int                      index_k{2};
   int                      query_k{4};

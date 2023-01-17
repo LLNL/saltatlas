@@ -106,13 +106,47 @@ int main(int argc, char **argv) {
 
     // Spawn queries from different ranks
     if (mpi_rank == 0) {
-      knn_index.query(q1, k, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
-      knn_index.query(q3, 2, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
+      knn_index.query(q1, k, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
+      knn_index.query(q3, 2, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
     } else if (mpi_rank == 1) {
-      knn_index.query(q2, k, query_hops, initial_num_queries,
-                      query_voronoi_rank, report_lambda);
+      knn_index.query(q2, k, query_hops, query_voronoi_rank,
+                      initial_num_queries, report_lambda);
+    }
+
+    knn_index.comm().barrier();
+
+    // Now query to get features of neighbors
+    auto report_features_lambda =
+        [](const point_t &query_pt,
+           const std::multimap<dist_t, std::pair<index_t, point_t>>
+               &nearest_neighbors,
+           auto dhnsw) {
+          std::cout << "Nearest neighbors for (" << query_pt[0] << ", "
+                    << query_pt[1] << "): ";
+          for (const auto &[dist, index_point] : nearest_neighbors) {
+            const auto &[idx, pt] = index_point;
+            std::cout << "\n\t" << idx << ": (" << pt[0];
+            for (int i = 1; i < pt.size(); ++i) {
+              std::cout << ", " << pt[i];
+            }
+            std::cout << ")";
+          }
+          std::cout << std::endl;
+        };
+
+    if (mpi_rank == 0) {
+      knn_index.query_with_features(q1, k, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
+      knn_index.query_with_features(q3, 2, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
+    } else if (mpi_rank == 1) {
+      knn_index.query_with_features(q2, k, query_hops, query_voronoi_rank,
+                                    initial_num_queries,
+                                    report_features_lambda);
     }
 
     knn_index.comm().barrier();

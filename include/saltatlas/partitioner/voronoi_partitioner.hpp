@@ -78,6 +78,8 @@ class voronoi_partitioner {
     return to_return;
   }
 
+  uint32_t num_partitions() { return m_seeds.size(); }
+
   void fill_seed_hnsw() {
     m_seed_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
         &m_space, m_seeds.size(), 16, 200, 3149);
