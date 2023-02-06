@@ -9,6 +9,8 @@
 #include <saltatlas/dhnsw/detail/functional.hpp>
 #include <saltatlas/dhnsw/detail/query_engine.hpp>
 
+#include <ygm/container/array.hpp>
+
 namespace saltatlas {
 
 template <typename DistType, typename IndexType, typename Point,
@@ -30,6 +32,11 @@ class dhnsw {
   template <template <typename, typename, typename...> class Container>
   void partition_data(Container<index_t, point_t> &data,
                       const uint32_t               num_partitions) {
+    m_index_impl.partition_data(data, num_partitions);
+  }
+
+  void partition_data(ygm::container::array<point_t, index_t> &data,
+                      const uint32_t                           num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
