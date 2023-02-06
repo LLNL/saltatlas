@@ -383,9 +383,10 @@ int main(int argc, char** argv) {
   world.barrier();
 
   world.cout0("Distributing data to local HNSWs");
-  index_points.for_all([&dist_index, &world](const auto& ID_point) {
-    dist_index.queue_data_point_insertion(ID_point.first, ID_point.second);
-  });
+  index_points.for_all(
+      [&dist_index, &world](const auto& id, const auto& point) {
+        dist_index.queue_data_point_insertion(id, point);
+      });
 
   world.barrier();
 
@@ -447,10 +448,10 @@ int main(int argc, char** argv) {
 
           query_points.for_all([&dist_index, k, num_hops, num_initial_queries,
                                 voronoi_rank,
-                                store_results_lambda](const auto& query_point) {
-            dist_index.query(query_point.second, k, num_hops,
-                             num_initial_queries, voronoi_rank,
-                             store_results_lambda, query_point.first);
+                                store_results_lambda](const auto& query_index,
+                                                      const auto& query_point) {
+            dist_index.query(query_point, k, num_hops, num_initial_queries,
+                             voronoi_rank, store_results_lambda, query_index);
           });
 
           world.barrier();

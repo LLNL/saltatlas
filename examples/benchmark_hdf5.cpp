@@ -216,9 +216,9 @@ void build_index(
 
   dist_index.comm().cout0("Distributing data across ranks");
 
-  auto add_point_lambda = [&dist_index, &bag_data](const auto &index_point) {
-    dist_index.queue_data_point_insertion(index_point.first,
-                                          index_point.second);
+  auto add_point_lambda = [&dist_index, &bag_data](const auto &index,
+                                                   const auto &point) {
+    dist_index.queue_data_point_insertion(index, point);
   };
 
   dist_index.comm().barrier();
@@ -262,9 +262,8 @@ void benchmark_query_trial(
          auto                                      dhnsw) { ++num_queries; };
 
   auto perform_query_lambda = [&empty_lambda, &dist_index, &hops, &voronoi_rank,
-                               &k](const auto &index_point) {
-    dist_index.query(index_point.second, k, hops, voronoi_rank, 1,
-                     empty_lambda);
+                               &k](const auto &index, const auto &point) {
+    dist_index.query(point, k, hops, voronoi_rank, 1, empty_lambda);
   };
 
   auto bag_query_points =
@@ -389,10 +388,10 @@ void benchmark_query_trial_ground_truth(
       };
 
   auto perform_query_lambda = [&query_nearest_neighbors_lambda, &dist_index,
-                               &hops, &voronoi_rank, &k,
-                               &ground_truth](const auto &index_point) {
-    dist_index.query(index_point.second, k, hops, voronoi_rank, 1,
-                     query_nearest_neighbors_lambda, index_point.first,
+                               &hops, &voronoi_rank, &k, &ground_truth](
+                                  const auto &index, const auto &point) {
+    dist_index.query(point, k, hops, voronoi_rank, 1,
+                     query_nearest_neighbors_lambda, index,
                      ground_truth.get_ygm_ptr());
   };
 

@@ -181,9 +181,9 @@ void build_index(
 
   dist_index.comm().cout0("Distributing data across ranks");
 
-  auto add_point_lambda = [&dist_index, &bag_data](const auto &index_point) {
-    dist_index.queue_data_point_insertion(index_point.first,
-                                          index_point.second);
+  auto add_point_lambda = [&dist_index, &bag_data](const auto &index,
+                                                   const auto &point) {
+    dist_index.queue_data_point_insertion(index, point);
   };
 
   dist_index.comm().barrier();

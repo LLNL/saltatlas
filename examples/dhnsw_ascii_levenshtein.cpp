@@ -289,8 +289,8 @@ int main(int argc, char** argv) {
   world.barrier();
 
   world.cout0("Distributing data to local HNSWs");
-  bag_data.for_all([&dist_index, &world](const auto& ID_line) {
-    dist_index.queue_data_point_insertion(ID_line.first, ID_line.second);
+  bag_data.for_all([&dist_index, &world](const auto& id, const auto& line) {
+    dist_index.queue_data_point_insertion(id, line);
   });
 
   world.barrier();
