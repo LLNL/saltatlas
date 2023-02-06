@@ -159,9 +159,7 @@ class metric_hyperplane_partitioner {
       Container<index_t, point_t> &data) {
     ygm::container::map<index_t, node_statistics> stats_map;
 
-    data.for_all([&stats_map, this](const auto &index_pt_pair) {
-      const auto &[index, point] = index_pt_pair;
-
+    data.for_all([&stats_map, this](const auto &index, const auto &point) {
       auto leaf_index = search_tree(point);
 
       auto search_path = reconstruct_search_path(leaf_index);
