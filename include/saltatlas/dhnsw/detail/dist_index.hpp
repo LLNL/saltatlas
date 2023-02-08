@@ -28,6 +28,12 @@ namespace dhnsw_detail {
 template <typename DistType, typename IndexType, typename Point>
 class query_engine;
 
+struct hnsw_params_t {
+  size_t M               = 16;
+  size_t ef_construction = 200;
+  size_t random_seed     = 100;
+};
+
 template <typename DistType, typename IndexType, typename Point,
           template <typename, typename, typename> class Partitioner>
 class dhnsw_impl {
@@ -72,6 +78,15 @@ class dhnsw_impl {
     m_partitioner.initialize(data, num_partitions);
   }
 
+  void set_hnsw_params(const hnsw_params_t &p) {
+    if (not m_constructed_index) {
+      m_hnsw_params = p;
+    } else {
+      m_comm->cerr(
+          "Setting HNSW parameters after HNSW construction has no effect");
+    }
+  }
+
   void add_data_point_to_insertion_queue(const index_t  index,
                                          const point_t &v) {
     index_vec_t point_partitions =
@@ -98,13 +113,17 @@ class dhnsw_impl {
   }
 
   void initialize_hnsw() {
+    ASSERT_RELEASE(m_constructed_index == false);
+
     // Initialize HNSW structures
     for (int i = 0; i < num_local_cells(); ++i) {
       ASSERT_RELEASE(m_cell_add_vec[i].size() > 0);
 
       hnswlib::HierarchicalNSW<dist_t> *hnsw =
           new hnswlib::HierarchicalNSW<dist_t>(
-              m_metric_space_ptr, m_cell_add_vec[i].size(), 16, 200, 1);
+              m_metric_space_ptr, m_cell_add_vec[i].size(), m_hnsw_params.M,
+              m_hnsw_params.ef_construction,
+              m_hnsw_params.random_seed);  // 16, 200, 1);
       m_voronoi_cell_hnsw.push_back(hnsw);
 
       // Add data points to HNSW
@@ -116,6 +135,8 @@ class dhnsw_impl {
       m_cell_add_vec[i].clear();
     }
     m_cell_add_vec.clear();
+
+    m_constructed_index = true;
   }
 
   inline int cell_owner(index_t index) {
@@ -212,8 +233,12 @@ class dhnsw_impl {
 
   partitioner_t &m_partitioner;
 
+  hnsw_params_t m_hnsw_params;
+
   int m_max_voronoi_rank;
   int m_num_cells;
+
+  bool m_constructed_index = false;
 };
 
 }  // namespace dhnsw_detail
