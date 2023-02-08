@@ -53,6 +53,7 @@ class dknn_batch_query_kernel {
 
   struct option {
     int         k{4};
+    double      m{0.1};
     double      epsilon{0.1};
     std::size_t batch_size{0};
     uint64_t    rnd_seed{128};
@@ -140,7 +141,7 @@ class dknn_batch_query_kernel {
       m_visited.clear();
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
-        m_knn_heap_table.emplace(query_no, m_option.k);
+        m_knn_heap_table.emplace(query_no, m_option.k * m_option.m);
         m_visited[query_no].clear();
       }
       m_comm.cf_barrier();
@@ -165,7 +166,7 @@ class dknn_batch_query_kernel {
 
         query_results.resize(query_results.size() + 1);
         auto& result_knn = query_results.back();
-        while (!heap.empty()) {
+        while (!heap.empty() && result_knn.size() < m_option.k) {
           result_knn.push_back(heap.top());
           heap.pop();
         }
@@ -195,7 +196,8 @@ class dknn_batch_query_kernel {
                                        random_generator_type& rnd_gen) {
     std::unordered_set<id_type>            set;
     std::uniform_int_distribution<id_type> dis(0, m_global_max_id);
-    for (std::size_t k = 0; k < m_option.k; ++k) {  // sqrt(k) is enough?
+    for (std::size_t k = 0; k < m_option.k * m_option.m;
+         ++k) {  // sqrt(k) is enough?
       while (true) {
         const id_type id = dis(rnd_gen);
         if (set.count(id)) continue;
@@ -268,7 +270,7 @@ class dknn_batch_query_kernel {
       //      }
 
       auto acceptable_distance =
-          heap.size() < local_this->m_option.k
+          heap.size() < local_this->m_option.k * local_this->m_option.m
               ? std::numeric_limits<distance_type>::max()
               : heap.top().distance * (1.0 + local_this->m_option.epsilon);
       if (d > acceptable_distance) {
@@ -277,7 +279,8 @@ class dknn_batch_query_kernel {
 
       // Note: push_unique() does nothing if d > acceptable_distance and
       // returns true only when the heap is updated
-      if (heap.push_unique(nid, d) && heap.size() < local_this->m_option.k) {
+      if (heap.push_unique(nid, d) &&
+          heap.size() < local_this->m_option.k * local_this->m_option.m) {
         acceptable_distance =
             heap.top().distance * (1.0 + local_this->m_option.epsilon);
       }
