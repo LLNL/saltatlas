@@ -212,7 +212,8 @@ class dknn_batch_query_kernel {
   struct neighbor_visitor_launcher {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
-                    const id_type src_id, const distance_type max_distance) {
+                    const id_type       src_id,
+                    const distance_type acceptable_distance) {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
@@ -226,7 +227,7 @@ class dknn_batch_query_kernel {
         const auto& nid = nitr->id;
         local_this->comm().async(partitioner(nid), distance_calculator{},
                                  local_this, query_owner_rank, query_no, nid,
-                                 max_distance);
+                                 acceptable_distance);
       }
     }
   };
@@ -234,7 +235,8 @@ class dknn_batch_query_kernel {
   struct distance_calculator {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
-                    const id_type trg_id, const distance_type& max_distance) {
+                    const id_type        trg_id,
+                    const distance_type& acceptable_distance) {
       const auto& query_feature =
           local_this->m_query_store.feature_vector(query_no);
       assert(local_this->m_point_store.contains(trg_id));
@@ -242,7 +244,7 @@ class dknn_batch_query_kernel {
           local_this->m_point_store.feature_vector(trg_id);
       const auto d = local_this->m_distance_metric(
           query_feature.size(), query_feature.data(), trg_feature.data());
-      if (d >= max_distance) return;
+      if (d >= acceptable_distance) return;
 
       local_this->comm().async(query_owner_rank, neighbor_updator{}, local_this,
                                query_no, trg_id, d);
@@ -255,34 +257,36 @@ class dknn_batch_query_kernel {
                     const distance_type d) {
       assert(local_this->m_visited.count(query_no));
       if (local_this->m_visited[query_no].count(nid)) {
-        return; // Already visited
+        return;  // Already visited
       }
       local_this->m_visited[query_no].insert(nid);
 
       knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
       // m_visited does the same work
-//      if (heap.contains(nid)) {
-//        return;  // Already one the nearest neighbors
-//      }
+      //      if (heap.contains(nid)) {
+      //        return;  // Already one the nearest neighbors
+      //      }
 
-      auto max_distance = heap.size() < local_this->m_option.k
-                              ? std::numeric_limits<distance_type>::max()
-                              : heap.top().distance;
-      if (d / (1.0 + local_this->m_option.epsilon) > max_distance) {
-        return ; // Too far neighbor.
+      auto acceptable_distance =
+          heap.size() < local_this->m_option.k
+              ? std::numeric_limits<distance_type>::max()
+              : heap.top().distance * (1.0 + local_this->m_option.epsilon);
+      if (d > acceptable_distance) {
+        return;  // Too far neighbor.
       }
 
-      // Note: push_unique() does nothing if d > max_distance and
+      // Note: push_unique() does nothing if d > acceptable_distance and
       // returns true only when the heap is updated
       if (heap.push_unique(nid, d) && heap.size() < local_this->m_option.k) {
-        max_distance = heap.top().distance;
+        acceptable_distance =
+            heap.top().distance * (1.0 + local_this->m_option.epsilon);
       }
 
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
       local_this->comm().async(partitioner(nid), neighbor_visitor_launcher{},
                                local_this, local_this->comm().rank(), query_no,
-                               nid, max_distance);
+                               nid, acceptable_distance);
     }
   };
 
