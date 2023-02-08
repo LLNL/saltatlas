@@ -39,8 +39,9 @@ void usage(ygm::comm &comm) {
 }
 
 void parse_cmd_line(int argc, char **argv, ygm::comm &comm, int &voronoi_rank,
-                    int &num_hops, int &num_seeds, int &k,
-                    std::string &index_filename, std::string &query_filename,
+                    int &num_hops, int &num_seeds, int &k, int &hnsw_m,
+                    int &hnsw_ef_construction, std::string &index_filename,
+                    std::string &query_filename,
                     std::string &ground_truth_filename) {
   if (comm.rank0()) {
     std::cout << "CMD line:";
@@ -58,13 +59,15 @@ void parse_cmd_line(int argc, char **argv, ygm::comm &comm, int &voronoi_rank,
   num_hops              = -1;
   num_seeds             = -1;
   k                     = -1;
+  hnsw_m                = 16;
+  hnsw_ef_construction  = 200;
   index_filename        = "";
   query_filename        = "";
   ground_truth_filename = "";
 
   int  c;
   bool prn_help = false;
-  while ((c = getopt(argc, argv, "v:p:s:k:i:q:g:h ")) != -1) {
+  while ((c = getopt(argc, argv, "v:p:s:k:i:q:g:m:e:h ")) != -1) {
     switch (c) {
       case 'h':
         prn_help = true;
@@ -92,6 +95,12 @@ void parse_cmd_line(int argc, char **argv, ygm::comm &comm, int &voronoi_rank,
       case 'g':
         found_ground_truth_filename = true;
         ground_truth_filename       = optarg;
+        break;
+      case 'm':
+        hnsw_m = atoi(optarg);
+        break;
+      case 'e':
+        hnsw_ef_construction = atoi(optarg);
         break;
       default:
         std::cerr << "Unrecognized option: " << c << ", ignore." << std::endl;
@@ -453,12 +462,16 @@ int main(int argc, char **argv) {
     int num_seeds;
     int k;
 
+    int hnsw_m;
+    int hnsw_ef_construction;
+
     std::string index_filename;
     std::string query_filename;
     std::string ground_truth_filename;
 
-    parse_cmd_line(argc, argv, world, voronoi_rank, hops, num_seeds, k,
-                   index_filename, query_filename, ground_truth_filename);
+    parse_cmd_line(argc, argv, world, voronoi_rank, hops, num_seeds, k, hnsw_m,
+                   hnsw_ef_construction, index_filename, query_filename,
+                   ground_truth_filename);
 
     ygm::container::bag<std::string> bag_index_filenames(world);
 
@@ -472,6 +485,11 @@ int main(int argc, char **argv) {
                      partitioner(world, my_l2_space);
     saltatlas::dhnsw dist_index(voronoi_rank, num_seeds, &my_l2_space, &world,
                                 partitioner);
+
+    saltatlas::dhnsw_detail::hnsw_params_t hnsw_params;
+    hnsw_params.M               = hnsw_m;
+    hnsw_params.ef_construction = hnsw_ef_construction;
+    dist_index.set_hnsw_params(hnsw_params);
 
     // extra column for indices
     int num_cols =

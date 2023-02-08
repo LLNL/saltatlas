@@ -21,6 +21,8 @@
 #define DEFAULT_VORONOI_RANK 3
 #define DEFAULT_NUM_HOPS 3
 #define DEFAULT_NUM_INITIAL_QUERIES 1
+#define DEFAULT_HNSW_M 16
+#define DEFAULT_HNSW_EF_CONSTRUCTION 200
 
 using feature_t = uint16_t;
 using point_t   = std::vector<feature_t>;
@@ -201,14 +203,12 @@ void usage(ygm::comm& comm) {
   }
 }
 
-void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
-                    std::vector<int>& voronoi_rank_vec,
-                    std::vector<int>& num_hops_vec, int& num_seeds,
-                    std::vector<int>&         k_vec,
-                    std::vector<int>&         num_initial_queries_vec,
-                    std::vector<std::string>& index_filenames,
-                    std::string&              query_filename,
-                    std::string&              ground_truth_filename) {
+void parse_cmd_line(
+    int argc, char** argv, ygm::comm& comm, std::vector<int>& voronoi_rank_vec,
+    std::vector<int>& num_hops_vec, int& num_seeds, std::vector<int>& k_vec,
+    std::vector<int>& num_initial_queries_vec, int& hnsw_m,
+    int& hnsw_ef_construction, std::vector<std::string>& index_filenames,
+    std::string& query_filename, std::string& ground_truth_filename) {
   if (comm.rank0()) {
     std::cout << "CMD line:";
     for (int i = 0; i < argc; ++i) {
@@ -217,10 +217,12 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
     std::cout << std::endl;
   }
 
-  num_seeds                      = -1;
-  bool found_voronoi_rank        = false;
-  bool found_num_hops            = false;
-  bool found_initial_num_queries = false;
+  num_seeds                       = -1;
+  bool found_voronoi_rank         = false;
+  bool found_num_hops             = false;
+  bool found_initial_num_queries  = false;
+  bool found_hnsw_m               = false;
+  bool found_hnsw_ef_construction = false;
 
   int  c;
   bool inserting_index_filenames     = false;
@@ -230,7 +232,7 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
   bool inserting_num_initial_queries = false;
   bool prn_help                      = false;
   while (true) {
-    while ((c = getopt(argc, argv, "+vps:kniq:g:h ")) != -1) {
+    while ((c = getopt(argc, argv, "+vps:kniq:g:m:e:h ")) != -1) {
       inserting_index_filenames     = false;
       inserting_voronoi_ranks       = false;
       inserting_num_hops            = false;
@@ -266,6 +268,14 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
           break;
         case 'g':
           ground_truth_filename = optarg;
+          break;
+        case 'm':
+          hnsw_m       = atoi(optarg);
+          found_hnsw_m = true;
+          break;
+        case 'e':
+          hnsw_ef_construction       = atoi(optarg);
+          found_hnsw_ef_construction = true;
           break;
         default:
           std::cerr << "Unrecognized option: " << c << ", ignore." << std::endl;
@@ -306,6 +316,13 @@ void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
     comm.cout0("Using default number of initial queries: ",
                DEFAULT_NUM_INITIAL_QUERIES);
     num_initial_queries_vec.push_back(DEFAULT_NUM_INITIAL_QUERIES);
+  }
+  if (!found_hnsw_m) {
+    comm.cout0("Using default hnsw_m: ", DEFAULT_HNSW_M);
+  }
+  if (!found_hnsw_ef_construction) {
+    comm.cout0("Using default hnsw_ef_construction: ",
+               DEFAULT_HNSW_EF_CONSTRUCTION);
   }
 
   // Detect misconfigured options
@@ -348,13 +365,15 @@ int main(int argc, char** argv) {
   int                      num_seeds;
   std::vector<int>         k_vec;
   std::vector<int>         num_initial_queries_vec;
+  int                      hnsw_m;
+  int                      hnsw_ef_construction;
   std::vector<std::string> index_filenames;
   std::string              query_filename;
   std::string              ground_truth_filename;
 
   parse_cmd_line(argc, argv, world, voronoi_rank_vec, num_hops_vec, num_seeds,
-                 k_vec, num_initial_queries_vec, index_filenames,
-                 query_filename, ground_truth_filename);
+                 k_vec, num_initial_queries_vec, hnsw_m, hnsw_ef_construction,
+                 index_filenames, query_filename, ground_truth_filename);
 
   std::sort(voronoi_rank_vec.begin(), voronoi_rank_vec.end());
   std::sort(num_hops_vec.begin(), num_hops_vec.end());
@@ -374,6 +393,11 @@ int main(int argc, char** argv) {
 
   saltatlas::dhnsw dist_index(voronoi_rank_vec.back(), num_seeds, &l2_space,
                               &world, l2_partitioner);
+
+  saltatlas::dhnsw_detail::hnsw_params_t hnsw_params;
+  hnsw_params.M               = hnsw_m;
+  hnsw_params.ef_construction = hnsw_ef_construction;
+  dist_index.set_hnsw_params(hnsw_params);
 
   world.barrier();
   ygm::timer t{};
