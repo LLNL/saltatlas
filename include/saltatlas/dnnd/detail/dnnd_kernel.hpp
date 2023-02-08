@@ -85,7 +85,8 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
     }
-    priv_construct_with_random_init();
+    priv_init_knn_heap_with_random_values();
+    priv_construct_kernel();
     priv_convert(knn_index);
   }
 
@@ -101,7 +102,8 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
     }
-    priv_construct_with_initial_index(init_knn_index);
+    priv_init_knn_heap_with_index(init_knn_index);
+    priv_construct_kernel();
     priv_convert(knn_index);
   }
 
@@ -115,7 +117,8 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
     }
-    priv_construct_with_initial_index(init_knn_index);
+    priv_init_knn_heap_with_index(init_knn_index);
+    priv_construct_kernel();
     priv_convert(knn_index);
   }
 
@@ -132,25 +135,27 @@ class dnnd_kernel {
   using neighbor_type = neighbor<id_type, distance_type>;
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
 
-  void priv_construct_with_random_init() {
+  void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
       m_comm.cout0() << "Initializing the k-NN index with random neighbors."
                      << std::endl;
     }
-    priv_init_knn_heap_random();
-    priv_construct_kernel();
+    priv_allocate_knn_heap();
+    priv_fill_knn_heap_with_random_value();
   }
 
   template <typename init_index_store_type>
-  void priv_construct_with_initial_index(
+  void priv_init_knn_heap_with_index(
       const init_index_store_type& init_knn_index) {
     if (m_option.verbose) {
       m_comm.cout0()
           << "Initializing the k-NN index using the given initial neighbors."
           << std::endl;
     }
+    priv_allocate_knn_heap();
     priv_init_knn_heap_with_initial_index(init_knn_index);
-    priv_construct_kernel();
+    // Fill the remaining uninitialized space with random values
+    priv_fill_knn_heap_with_random_value();
   }
 
   void priv_construct_kernel() {
@@ -210,9 +215,9 @@ class dnnd_kernel {
     }
   }
 
-  void priv_init_knn_heap_random() {
-    priv_init_knn_heap();
-
+  /// \brief Fill k-NN heap with random values.
+  /// This function can accept already partially filled heap.
+  void priv_fill_knn_heap_with_random_value() {
     std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
     assert(m_option.k < m_global_max_id);
 
@@ -223,6 +228,15 @@ class dnnd_kernel {
                                                           feature.end());
 
       std::unordered_set<id_type> unique_table;
+      if (m_knn_heap_table.count(sid) > 0) {
+        for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
+                  nend = m_knn_heap_table.at(sid).ids_end();
+             nitr != nend; ++nitr) {
+          const auto& nid = nitr->first;
+          unique_table.insert(nid);
+        }
+      }
+
       while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?
         id_type nid;
         while (true) {
@@ -237,11 +251,10 @@ class dnnd_kernel {
     m_comm.barrier();
   }
 
+  /// \brief Fills k-NN heap with a given index.
   template <typename alloc>
   void priv_init_knn_heap_with_initial_index(
       const nn_index<id_type, distance_type, alloc>& init_knn_index) {
-    priv_init_knn_heap();
-
     for (auto pitr = init_knn_index.points_begin();
          pitr != init_knn_index.points_end(); ++pitr) {
       const auto& sid = pitr->first;
@@ -258,10 +271,9 @@ class dnnd_kernel {
     m_comm.barrier();
   }
 
+  /// \brief Fills k-NN heap with a given index.
   void priv_init_knn_heap_with_initial_index(
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index) {
-    priv_init_knn_heap();
-
     for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.begin();
          ++pitr) {
       const auto& sid = pitr->first;
@@ -278,7 +290,7 @@ class dnnd_kernel {
     m_comm.barrier();
   }
 
-  void priv_init_knn_heap() {
+  void priv_allocate_knn_heap() {
     m_knn_heap_table.clear();
 
     m_knn_heap_table.reserve(m_point_store.size());
