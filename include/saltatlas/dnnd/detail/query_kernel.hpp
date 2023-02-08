@@ -53,6 +53,7 @@ class dknn_batch_query_kernel {
 
   struct option {
     int         k{4};
+    double      epsilon{0.1};
     std::size_t batch_size{0};
     uint64_t    rnd_seed{128};
     bool        verbose{false};
@@ -136,9 +137,11 @@ class dknn_batch_query_kernel {
 
       // Initialize the variable used during the query.
       m_knn_heap_table.clear();
+      m_visited.clear();
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
         m_knn_heap_table.emplace(query_no, m_option.k);
+        m_visited[query_no].clear();
       }
       m_comm.cf_barrier();
 
@@ -250,15 +253,33 @@ class dknn_batch_query_kernel {
     void operator()(const self_pointer_type& local_this,
                     const std::size_t query_no, const id_type nid,
                     const distance_type d) {
-      knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
-      if (!heap.push_unique(nid, d)) {
-        return;
+      assert(local_this->m_visited.count(query_no));
+      if (local_this->m_visited[query_no].count(nid)) {
+        return; // Already visited
       }
+      local_this->m_visited[query_no].insert(nid);
+
+      knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
+      // m_visited does the same work
+//      if (heap.contains(nid)) {
+//        return;  // Already one the nearest neighbors
+//      }
+
+      auto max_distance = heap.size() < local_this->m_option.k
+                              ? std::numeric_limits<distance_type>::max()
+                              : heap.top().distance;
+      if (d / (1.0 + local_this->m_option.epsilon) > max_distance) {
+        return ; // Too far neighbor.
+      }
+
+      // Note: push_unique() does nothing if d > max_distance and
+      // returns true only when the heap is updated
+      if (heap.push_unique(nid, d) && heap.size() < local_this->m_option.k) {
+        max_distance = heap.top().distance;
+      }
+
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
-      const auto max_distance = heap.size() < local_this->m_option.k
-                                    ? std::numeric_limits<distance_type>::max()
-                                    : heap.top().distance;
       local_this->comm().async(partitioner(nid), neighbor_visitor_launcher{},
                                local_this, local_this->comm().rank(), query_no,
                                nid, max_distance);
@@ -276,6 +297,7 @@ class dknn_batch_query_kernel {
   id_type                   m_global_max_id{0};
   internal_query_store_type m_query_store;
   std::mt19937              m_rnd_generator;
+  std::unordered_map<std::size_t, std::unordered_set<id_type>> m_visited;
 };
 
 }  // namespace saltatlas::dndetail
