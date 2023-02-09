@@ -22,9 +22,8 @@ class voronoi_partitioner {
   voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<dist_t> &space)
       : m_comm(c), m_space(space) {}
 
-  template <template <typename, typename> class Container>
-  void initialize(Container<index_t, point_t> &data,
-                  const uint32_t               num_partitions) {
+  template <typename Container>
+  void initialize(Container &data, const uint32_t num_partitions) {
     size_t num_points = data.size();
 
     std::vector<index_t> seed_ids(num_partitions);

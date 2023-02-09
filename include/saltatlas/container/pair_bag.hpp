@@ -22,7 +22,7 @@ class pair_bag {
 
   template <typename Function>
   void for_all(Function fn) {
-    m_impl.for_all_pairs(fn);
+    m_impl.for_all(fn);
   }
 
   void clear() { m_impl.clear(); }
@@ -33,7 +33,7 @@ class pair_bag {
 
   template <typename Function>
   void local_for_all(Function fn) {
-    m_impl.local_for_all_pairs(fn);
+    m_impl.local_for_all(fn);
   }
 
   ygm::comm &comm() { return m_impl.comm(); }
