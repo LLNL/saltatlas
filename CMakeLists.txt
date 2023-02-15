@@ -50,9 +50,15 @@ if (EXISTS "${LOC_PATH}")
     )
 endif ()
 
+#  Option to use Metall
+option(SALTATLAS_USE_METALL "Use Metall" OFF)
+
 include(FetchContent)
 
-option(SALTATLAS_USE_METALL "Use Metall" OFF)
+#
+#  OpenMP
+#
+find_package(OpenMP)
 
 #
 # Boost
@@ -378,5 +384,6 @@ endif ()
 
 if (SALTATLAS_MAIN_PROJECT)
     add_subdirectory(examples)
+    add_subdirectory(utility)
     add_subdirectory(test)
 endif ()

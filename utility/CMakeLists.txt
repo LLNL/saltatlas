@@ -1,0 +1,11 @@
+configure_file(convert_ann_bench_dataset.py convert_ann_bench_dataset.py COPYONLY)
+configure_file(convert_big_ann_bench_dataset.py convert_big_ann_bench_dataset.py COPYONLY)
+
+add_executable(convert_wsv_to_wsv_id convert_wsv_to_wsv_id.cpp)
+target_link_libraries(convert_wsv_to_wsv_id PUBLIC saltatlas)
+if (Threads_FOUND)
+    target_link_libraries(convert_wsv_to_wsv_id PRIVATE Threads::Threads)
+    if (OpenMP_CXX_FOUND)
+        target_link_libraries(convert_wsv_to_wsv_id PRIVATE OpenMP::OpenMP_CXX)
+    endif ()
+endif()

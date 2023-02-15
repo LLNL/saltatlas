@@ -8,17 +8,14 @@
 #include <string>
 #include <vector>
 
-#include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
-
-#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 bool parse_options(int argc, char **argv, int &index_k, double &r,
                    double &delta, bool &exchange_reverse_neighbors,
                    std::size_t &batch_size, std::string &distance_metric_name,
                    std::vector<std::string> &point_file_names,
-                   std::string &point_file_format, std::string &datastore_path,
+                   std::string &point_file_format, std::string &init_index_path,
+                   std::string &datastore_path,
                    std::string &datastore_transfer_path, bool &verbose,
                    bool &help);
 
@@ -36,6 +33,7 @@ int main(int argc, char **argv) {
   std::string              distance_metric_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
+  std::string              init_index_path;
   std::string              datastore_path;
   std::string              datastore_transfer_path;
   bool                     help{false};
@@ -43,8 +41,8 @@ int main(int argc, char **argv) {
 
   if (!parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
                      batch_size, distance_metric_name, point_file_names,
-                     point_file_format, datastore_path, datastore_transfer_path,
-                     verbose, help)) {
+                     point_file_format, init_index_path, datastore_path,
+                     datastore_transfer_path, verbose, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -62,18 +60,27 @@ int main(int argc, char **argv) {
     comm.cout0() << "\n<<Read Points>>" << std::endl;
     ygm::timer point_read_timer;
     saltatlas::read_points(point_file_names, point_file_format, verbose,
-                           dnnd.get_point_store(), dnnd.get_point_partitioner(),
+                           dnnd.get_point_partitioner(), dnnd.get_point_store(),
                            comm);
     comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
                  << std::endl;
 
     comm.cout0() << "\n<<Index Construction>>" << std::endl;
     ygm::timer const_timer;
-    dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
-                         batch_size);
+    if (init_index_path.empty()) {
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size);
+    } else {
+      dnnd_pm_type init_dnnd(dnnd_pm_type::open_read_only, init_index_path,
+                             comm, verbose);
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size, init_dnnd.get_knn_index());
+    }
     comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
   }
+  comm.cf_barrier();
+  comm.cout0() << "\nClosed Metall." << std::endl;
 
   if (!datastore_transfer_path.empty()) {
     comm.cout0() << "\nTransferring index data store " << datastore_path
@@ -82,26 +89,23 @@ int main(int argc, char **argv) {
       comm.cerr0() << "\nFailed to transfer index." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
+    comm.cout0() << "Finished transfer." << std::endl;
   }
-
-  comm.cout0() << "\nThe index is ready for query." << std::endl;
-  comm.cf_barrier();
 
   return 0;
 }
 
-inline bool parse_options(int argc, char **argv, int &index_k, double &r,
-                          double &delta, bool &exchange_reverse_neighbors,
-                          std::size_t              &batch_size,
-                          std::string              &distance_metric_name,
-                          std::vector<std::string> &point_file_names,
-                          std::string              &point_file_format,
-                          std::string              &datastore_path,
-                          std::string &datastore_transfer_path, bool &verbose,
-                          bool &help) {
+inline bool parse_options(
+    int argc, char **argv, int &index_k, double &r, double &delta,
+    bool &exchange_reverse_neighbors, std::size_t &batch_size,
+    std::string              &distance_metric_name,
+    std::vector<std::string> &point_file_names, std::string &point_file_format,
+    std::string &init_index_path, std::string &datastore_path,
+    std::string &datastore_transfer_path, bool &verbose, bool &help) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
+  init_index_path.clear();
   datastore_path.clear();
   datastore_transfer_path.clear();
   exchange_reverse_neighbors = false;
@@ -109,7 +113,7 @@ inline bool parse_options(int argc, char **argv, int &index_k, double &r,
   help                       = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:eb:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:i:eb:vh")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -141,6 +145,10 @@ inline bool parse_options(int argc, char **argv, int &index_k, double &r,
 
       case 'p':
         point_file_format = optarg;
+        break;
+
+      case 'i':
+        init_index_path = optarg;
         break;
 
       case 'b':
@@ -182,8 +190,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "Options:"
       << "\n\t-z [string, required] Path to store constructed index."
       << "\n\t-f [string, required] Distance metric name:"
-      << "\n\t\t'l2' (L2), 'cosine' (cosine similarity), or 'jaccard'"
-         "(Jaccard index)."
+      << "\n\t\t'l2' (L2), sql2' (squared L2), 'cosine' (cosine similarity), "
+         "or 'jaccard' (Jaccard index)."
       << "\n\t-p [string, required] Format of input point files:"
       << "\n\t\t'wsv' (whitespace-separated values),"
       << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
@@ -194,6 +202,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-e If specified, generate reverse neighbors globally during the "
          "index construction."
       << "\n"
+      << "\n\t-i [string] Path to data used for initializing the index."
       << "\n\t-x [string] If specified, transfer index to this path at the end."
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."

@@ -5,9 +5,9 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstdlib>
 #include <memory>
-#include <cassert>
 
 #if __has_include(<metall/container/unordered_map.hpp>) \
   && __has_include(<metall/container/queue.hpp>)
@@ -38,20 +38,34 @@ namespace container =
 #endif
 }  // namespace
 
-template <typename Id = uint64_t, typename Distance = double>
+template <typename Id, typename Distance>
 struct neighbor {
   using id_type       = Id;
   using distance_type = Distance;
 
+  neighbor() = default;
+
+  neighbor(const id_type& _id, const distance_type& _distance)
+      : id(_id), distance(_distance) {}
+
   friend bool operator<(const neighbor& lhd, const neighbor& rhd) {
-    if (!nearly_equal(lhd.distance, rhd.distance))
+    if (lhd.distance != rhd.distance)
       return lhd.distance < rhd.distance;
     return lhd.id < rhd.id;
   }
 
+  template <typename T1, typename T2>
+  friend std::ostream& operator<<(std::ostream& os, const neighbor<T1, T2>& ng);
+
   id_type       id;
   distance_type distance;
 };
+
+template <typename T1, typename T2>
+std::ostream& operator<<(std::ostream& os, const neighbor<T1, T2>& ng) {
+  os << "id = " << ng.id << ", distance = " << ng.distance;
+  return os;
+}
 
 template <typename Id, typename Distance>
 inline bool operator==(const neighbor<Id, Distance>& lhs,
@@ -66,8 +80,7 @@ inline bool operator!=(const neighbor<Id, Distance>& lhs,
 }
 
 // TODO: make a version that deos not take value?
-template <typename Id = uint64_t, typename Distance = double,
-          typename Value = std::byte,
+template <typename Id, typename Distance, typename Value = std::byte,
           typename Alloc = std::allocator<std::byte>>
 class unique_knn_heap {
  public:
@@ -145,7 +158,7 @@ class unique_knn_heap {
  private:
   void priv_push_nocheck(const id_type& id, const distance_type& d,
                          value_type v) {
-    m_knn_heap.emplace(nenghbor_type{.id = id, .distance = d});
+    m_knn_heap.emplace(id, d);
     m_map.emplace(id, std::move(v));
   }
 
