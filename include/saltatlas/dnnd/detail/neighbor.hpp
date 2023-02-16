@@ -155,6 +155,10 @@ class unique_knn_heap {
 
   bool empty() const { return m_knn_heap.empty(); }
 
+  std::size_t k() const {
+    return m_k;
+  }
+
  private:
   void priv_push_nocheck(const id_type& id, const distance_type& d,
                          value_type v) {

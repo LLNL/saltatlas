@@ -208,8 +208,11 @@ class base_dnnd {
   /// \return Query results.
   neighbor_store_type query_batch(
       const std::vector<std::vector<feature_element_type>>& queries,
-      const int k, const std::size_t batch_size) {
+      const int k, const double epsilon, const double mu,
+      const std::size_t batch_size) {
     typename query_kernel_type::option option{.k          = k,
+                                              .epsilon    = epsilon,
+                                              .mu         = mu,
                                               .batch_size = batch_size,
                                               .rnd_seed = m_data_core->rnd_seed,
                                               .verbose  = m_verbose};

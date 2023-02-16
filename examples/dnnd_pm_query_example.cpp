@@ -12,7 +12,8 @@
 
 bool parse_options(int argc, char **argv, std::string &datastore_path,
                    std::string &original_datastore_path, int &query_k,
-                   std::size_t &batch_size, std::string &query_file_path,
+                   double &epsilon, double &mu, std::size_t &batch_size,
+                   std::string &query_file_path,
                    std::string &ground_truth_file_path,
                    std::string &query_result_file_path, bool &verbose,
                    bool &help);
@@ -26,6 +27,8 @@ int main(int argc, char **argv) {
   std::string datastore_path;
   std::string original_datastore_path;
   int         query_k{4};
+  double      epsilon{0.1};
+  double      mu{0.2};
   std::size_t batch_size{0};
   std::string query_file_path;
   std::string ground_truth_file_path;
@@ -34,7 +37,7 @@ int main(int argc, char **argv) {
   bool        help{false};
 
   if (!parse_options(argc, argv, datastore_path, original_datastore_path,
-                     query_k, batch_size, query_file_path,
+                     query_k, epsilon, mu, batch_size, query_file_path,
                      ground_truth_file_path, query_result_file_path, verbose,
                      help)) {
     comm.cerr0() << "Invalid option" << std::endl;
@@ -65,7 +68,8 @@ int main(int argc, char **argv) {
 
     comm.cout0() << "Executing queries" << std::endl;
     ygm::timer step_timer;
-    const auto query_results = dnnd.query_batch(queries, query_k, batch_size);
+    const auto query_results =
+        dnnd.query_batch(queries, query_k, epsilon, mu, batch_size);
     comm.cf_barrier();
     comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
                  << std::endl;
@@ -93,7 +97,8 @@ END_BLOCK:
 
 inline bool parse_options(int argc, char **argv, std::string &datastore_path,
                           std::string &original_datastore_path, int &query_k,
-                          std::size_t &batch_size, std::string &query_file_path,
+                          double &epsilon, double &mu, std::size_t &batch_size,
+                          std::string &query_file_path,
                           std::string &ground_truth_file_path,
                           std::string &query_result_file_path, bool &verbose,
                           bool &help) {
@@ -104,7 +109,7 @@ inline bool parse_options(int argc, char **argv, std::string &datastore_path,
   query_result_file_path.clear();
 
   int n;
-  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:e:m:vh")) != -1) {
     switch (n) {
       case 'b':
         batch_size = std::stoul(optarg);
@@ -136,6 +141,14 @@ inline bool parse_options(int argc, char **argv, std::string &datastore_path,
 
       case 'v':
         verbose = true;
+        break;
+
+      case 'e':
+        epsilon = std::stold(optarg);
+        break;
+
+      case 'm':
+        mu = std::stold(optarg);
         break;
 
       case 'h':
