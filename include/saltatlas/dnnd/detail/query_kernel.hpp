@@ -278,11 +278,11 @@ class dknn_batch_query_kernel {
         return;  // Too far neighbor.
       }
 
-      // Note: push_unique() does nothing if d > acceptable_distance and
-      // returns true only when the heap is updated
-      if (heap.push_unique(nid, d) && heap.size() < heap.k()) {
+      if (heap.push_unique(nid, d)) {
         acceptable_distance =
-            heap.top().distance * (1.0 + local_this->m_option.epsilon);
+            heap.size() < heap.k()
+                ? std::numeric_limits<distance_type>::max()
+                : heap.top().distance * (1.0 + local_this->m_option.epsilon);
       }
 
       const auto& partitioner = local_this->m_point_partitioner;
