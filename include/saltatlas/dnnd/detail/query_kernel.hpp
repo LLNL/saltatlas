@@ -141,7 +141,7 @@ class dknn_batch_query_kernel {
       m_visited.clear();
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto        query_no  = query_no_offset + i;
-        const std::size_t heap_size = m_option.k * m_option.mu;
+        const std::size_t heap_size = m_option.k * (1.0 + m_option.mu);
         m_knn_heap_table.emplace(query_no, heap_size);
         m_visited[query_no].clear();
       }
