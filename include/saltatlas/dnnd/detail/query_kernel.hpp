@@ -168,11 +168,13 @@ class dknn_batch_query_kernel {
 
         query_results.resize(query_results.size() + 1);
         auto& result_knn = query_results.back();
-        while (!heap.empty() && result_knn.size() < m_option.k) {
+        while (!heap.empty()) {
           result_knn.push_back(heap.top());
           heap.pop();
         }
-        std::sort(result_knn.begin(), result_knn.end());
+        std::partial_sort(result_knn.begin(), result_knn.begin() + m_option.k,
+                          result_knn.end());
+        result_knn.resize(m_option.k);  // Need only nearest k neighbors
       }
       query_no_offset += local_batch_size;
       m_comm.cf_barrier();
@@ -216,8 +218,7 @@ class dknn_batch_query_kernel {
   struct neighbor_visitor_launcher {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
-                    const id_type       src_id,
-                    const distance_type max_distance) {
+                    const id_type src_id, const distance_type max_distance) {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
@@ -239,8 +240,7 @@ class dknn_batch_query_kernel {
   struct distance_calculator {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
-                    const id_type        trg_id,
-                    const distance_type& max_distance) {
+                    const id_type trg_id, const distance_type& max_distance) {
       const auto& query_feature =
           local_this->m_query_store.feature_vector(query_no);
       assert(local_this->m_point_store.contains(trg_id));
