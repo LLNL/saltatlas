@@ -96,6 +96,7 @@ class dknn_batch_query_kernel {
     const std::size_t max_num_queries = m_comm.all_reduce_max(queries.size());
     const id_type     offset          = max_num_queries * m_comm.rank();
 
+    // Allgather
     for (int r = 0; r < m_comm.size(); ++r) {
       for (std::size_t i = 0; i < queries.size(); ++i) {
         m_comm.async(
@@ -117,7 +118,7 @@ class dknn_batch_query_kernel {
 
   void priv_query_batch(const query_store_type& queries,
                         neighbor_store_type&    query_results) {
-    const auto local_id_offset = priv_all_gather_query(queries);
+    const auto local_query_no_offset = priv_all_gather_query(queries);
 
     const std::size_t num_global_queries = m_query_store.size();
     if (m_option.verbose) {
@@ -125,7 +126,7 @@ class dknn_batch_query_kernel {
       m_comm.cout0() << "Batch Size\t" << m_option.batch_size << std::endl;
     }
 
-    std::size_t query_no_offset   = local_id_offset;
+    std::size_t query_no_offset   = local_query_no_offset;
     std::size_t num_local_remains = queries.size();
     for (std::size_t batch_no = 0;; ++batch_no) {
       if (m_option.verbose) {
@@ -216,7 +217,7 @@ class dknn_batch_query_kernel {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
                     const id_type       src_id,
-                    const distance_type acceptable_distance) {
+                    const distance_type max_distance) {
       const auto& nn_index    = local_this->m_nn_index;
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
@@ -230,7 +231,7 @@ class dknn_batch_query_kernel {
         const auto& nid = nitr->id;
         local_this->comm().async(partitioner(nid), distance_calculator{},
                                  local_this, query_owner_rank, query_no, nid,
-                                 acceptable_distance);
+                                 max_distance);
       }
     }
   };
@@ -239,7 +240,7 @@ class dknn_batch_query_kernel {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
                     const id_type        trg_id,
-                    const distance_type& acceptable_distance) {
+                    const distance_type& max_distance) {
       const auto& query_feature =
           local_this->m_query_store.feature_vector(query_no);
       assert(local_this->m_point_store.contains(trg_id));
@@ -247,7 +248,7 @@ class dknn_batch_query_kernel {
           local_this->m_point_store.feature_vector(trg_id);
       const auto d = local_this->m_distance_metric(
           query_feature.size(), query_feature.data(), trg_feature.data());
-      if (d >= acceptable_distance) return;
+      if (d >= max_distance) return;
 
       local_this->comm().async(query_owner_rank, neighbor_updator{}, local_this,
                                query_no, trg_id, d);
@@ -270,16 +271,16 @@ class dknn_batch_query_kernel {
       //        return;  // Already one the nearest neighbors
       //      }
 
-      auto acceptable_distance =
+      auto max_distance =
           heap.size() < heap.k()
               ? std::numeric_limits<distance_type>::max()
               : heap.top().distance * (1.0 + local_this->m_option.epsilon);
-      if (d > acceptable_distance) {
+      if (d >= max_distance) {
         return;  // Too far neighbor.
       }
 
       if (heap.push_unique(nid, d)) {
-        acceptable_distance =
+        max_distance =
             heap.size() < heap.k()
                 ? std::numeric_limits<distance_type>::max()
                 : heap.top().distance * (1.0 + local_this->m_option.epsilon);
@@ -289,7 +290,7 @@ class dknn_batch_query_kernel {
       assert(partitioner);
       local_this->comm().async(partitioner(nid), neighbor_visitor_launcher{},
                                local_this, local_this->comm().rank(), query_no,
-                               nid, acceptable_distance);
+                               nid, max_distance);
     }
   };
 
