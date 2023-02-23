@@ -35,7 +35,11 @@ void parse_options(int argc, char **argv, int &index_k, int &query_k, double &r,
                    bool &verbose);
 
 int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv, k_ygm_buff_size);
+  char k_ygm_buff_size_str[25];
+  sprintf(k_ygm_buff_size_str, "%d", k_ygm_buff_size);
+  setenv("YGM_COMM_BUFFER_SIZE_KB", k_ygm_buff_size_str, 0);
+
+  ygm::comm comm(&argc, &argv);
   {
     int                      index_k{0};
     int                      query_k{0};
