@@ -50,39 +50,51 @@ if (EXISTS "${LOC_PATH}")
     )
 endif ()
 
+#  Option to use Metall
+option(SALTATLAS_USE_METALL "Use Metall" OFF)
+
 include(FetchContent)
 
-option(SALTATLAS_USE_METALL "Use Metall" OFF)
+#
+#  OpenMP
+#
+find_package(OpenMP)
 
 #
 # Boost
 #
 # Disable the boost-cmake feature (BoostConfig.cmake or boost-config.cmake)
-# because there is a tricky behavior/issue.
-# We use FetchContent to download Boost and find_package to find the location of Boost.
-# As find_package natively supports Boost, we do not need to use the boost-cmake feature.
+# because there is a tricky behavior/issue. We use FetchContent to download
+# Boost and find_package to find the location of Boost. As find_package natively
+# supports Boost, we do not need to use the boost-cmake feature.
 set(Boost_NO_BOOST_CMAKE ON)
 
 find_package(Boost 1.64 QUIET)
 if (NOT Boost_FOUND)
-    FetchContent_Declare(Boost
-            URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2)
+    FetchContent_Declare(
+        Boost
+        URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2
+    )
     FetchContent_GetProperties(Boost)
     if (Boost_POPULATED)
         message(STATUS ${PROJECT_NAME}
-                " found already populated Boost dependency: "
-                ${boost_SOURCE_DIR})
+                       " found already populated Boost dependency: "
+                       ${boost_SOURCE_DIR}
+        )
     else ()
         if (SALTATLAS_USE_METALL) # Only Metall requires Boost
             FetchContent_Populate(Boost)
             message(STATUS ${PROJECT_NAME} " cloned Boost dependency: "
-                    ${boost_SOURCE_DIR})
+                           ${boost_SOURCE_DIR}
+            )
         endif ()
     endif ()
     set(BOOST_ROOT ${boost_SOURCE_DIR})
     find_package(Boost 1.64)
-else()
-    message(STATUS ${PROJECT_NAME} " found Boost dependency: " ${Boost_INCLUDE_DIR})
+else ()
+    message(STATUS ${PROJECT_NAME} " found Boost dependency: "
+                   ${Boost_INCLUDE_DIR}
+    )
 endif ()
 
 #
@@ -176,13 +188,13 @@ endif ()
 #
 # YGM
 #
-set(SALTATLAS_YGM_VERSION 0.4)
+set(SALTATLAS_YGM_VERSION 0.5)
 find_package(ygm ${SALTATLAS_YGM_VERSION} QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
         GIT_REPOSITORY https://github.com/LLNL/ygm
-        GIT_TAG v${SALTATLAS_YGM_VERSION}
+        GIT_TAG develop # v${SALTATLAS_YGM_VERSION}
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
@@ -220,6 +232,11 @@ target_include_directories(
 target_link_libraries(
     saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm hnswlib::hnswlib
 )
+option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
+if (SALTATLAS_DETERMINISM)
+    message(STATUS ${PROJECT_NAME} " setting determinism")
+    target_compile_definitions(saltatlas INTERFACE SALTATLAS_DETERMINISM)
+endif ()
 
 #
 # saltatlas_h5_io (needs findable HDF5 >= v1.10.7)
@@ -277,33 +294,39 @@ endif ()
 if (SALTATLAS_USE_METALL)
     find_package(Metall QUIET CONFIG)
     if (NOT Metall_FOUND)
-        FetchContent_Declare(Metall
-                GIT_REPOSITORY https://github.com/LLNL/metall.git
-                GIT_TAG master
-                )
+        FetchContent_Declare(
+            Metall
+            GIT_REPOSITORY https://github.com/LLNL/metall.git
+            GIT_TAG master
+        )
         FetchContent_GetProperties(Metall)
         if (Metall_POPULATED)
             message(STATUS ${PROJECT_NAME}
-                    " found already populated Metall dependency: "
-                    ${metall_SOURCE_DIR}
-                    )
+                           " found already populated Metall dependency: "
+                           ${metall_SOURCE_DIR}
+            )
         else ()
             # Do not compile anything in Metall
             set(JUST_INSTALL_METALL_HEADER ON)
             FetchContent_MakeAvailable(Metall)
             message(STATUS ${PROJECT_NAME} " cloned Metall dependency "
-                    ${metall_SOURCE_DIR}
-                    )
+                           ${metall_SOURCE_DIR}
+            )
         endif ()
     else ()
-        message(STATUS ${PROJECT_NAME} " found Metall dependency: " ${Metall_INCLUDE_DIRS})
+        message(STATUS ${PROJECT_NAME} " found Metall dependency: "
+                       ${Metall_INCLUDE_DIRS}
+        )
     endif ()
 
     find_package(Threads REQUIRED)
-    target_include_directories(saltatlas INTERFACE
-            $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
-            $<INSTALL_INTERFACE:include/boost>)
-    target_link_libraries(saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall)
+    target_include_directories(
+        saltatlas INTERFACE $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+                            $<INSTALL_INTERFACE:include/boost>
+    )
+    target_link_libraries(
+        saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall
+    )
 endif ()
 
 option(TEST_WITH_SLURM "Run tests with Slurm" OFF)
@@ -361,5 +384,6 @@ endif ()
 
 if (SALTATLAS_MAIN_PROJECT)
     add_subdirectory(examples)
+    add_subdirectory(utility)
     add_subdirectory(test)
 endif ()

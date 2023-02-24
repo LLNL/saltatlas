@@ -8,108 +8,110 @@
 #include <string>
 #include <vector>
 
-#include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
-
-#include <saltatlas/dnnd/dnnd_pm.hpp>
 #include "dnnd_example_common.hpp"
 
-using id_type              = uint32_t;
-using feature_element_type = float;
-using distance_type        = float;
-using dnnd_type =
-    saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
-using neighbor_type = typename dnnd_type::neighbor_type;
-
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
-
-void parse_options(int argc, char **argv, std::string &datastore_path,
+bool parse_options(int argc, char **argv, std::string &datastore_path,
                    std::string &original_datastore_path, int &query_k,
-                   std::size_t &batch_size, std::string &query_file_name,
-                   std::string &ground_truth_neighbor_ids_file_name,
-                   std::string &query_result_file_path);
+                   std::size_t &batch_size, std::string &query_file_path,
+                   std::string &ground_truth_file_path,
+                   std::string &query_result_file_path, bool &verbose,
+                   bool &help);
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv, k_ygm_buff_size);
-  {
-    std::string datastore_path;
-    std::string original_datastore_path;
-    int         query_k{0};
-    std::size_t batch_size{0};
-    std::string query_file_name;
-    std::string ground_truth_neighbor_ids_file_name;
-    std::string query_result_file_name;
+  ygm::comm comm(&argc, &argv);
 
-    parse_options(argc, argv, datastore_path, original_datastore_path, query_k,
-                  batch_size, query_file_name,
-                  ground_truth_neighbor_ids_file_name, query_result_file_name);
+  std::string datastore_path;
+  std::string original_datastore_path;
+  int         query_k{4};
+  std::size_t batch_size{0};
+  std::string query_file_path;
+  std::string ground_truth_file_path;
+  std::string query_result_file_path;
+  bool        verbose{false};
+  bool        help{false};
 
-    if (!original_datastore_path.empty()) {
-      if (dnnd_type::copy(original_datastore_path, datastore_path)) {
-        comm.cout0() << "\nTransferred index." << std::endl;
-      } else {
-        comm.cerr0() << "Failed to transfer index." << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-      }
-    }
+  if (!parse_options(argc, argv, datastore_path, original_datastore_path,
+                     query_k, batch_size, query_file_path,
+                     ground_truth_file_path, query_result_file_path, verbose,
+                     help)) {
+    comm.cerr0() << "Invalid option" << std::endl;
+    usage(argv[0], comm.cerr0());
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+  if (help) {
+    usage(argv[0], comm.cout0());
+    return 0;
+  }
 
-    {
-      dnnd_type dnnd(dnnd_type::open, datastore_path, comm);
-      comm.cout0() << "<<Query>>" << std::endl;
-
-      comm.cout0() << "Reading queries" << std::endl;
-      dnnd_type::query_point_store_type query_points;
-      read_query<dnnd_type>(query_file_name, query_points);
-      comm.cf_barrier();
-
-      comm.cout0() << "Executing queries" << std::endl;
-      ygm::timer step_timer;
-      const auto query_result =
-          dnnd.query_batch(query_points, query_k, batch_size);
-      comm.cf_barrier();
-      comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
-                   << std::endl;
-
-      if (!ground_truth_neighbor_ids_file_name.empty() ||
-          !query_result_file_name.empty()) {
-        const auto all_query_result =
-            gather_query_result<neighbor_type>(query_result, comm);
-        if (!ground_truth_neighbor_ids_file_name.empty() && comm.rank0()) {
-          const auto ground_truth_neighbors =
-              read_neighbor_ids<id_type>(ground_truth_neighbor_ids_file_name);
-          show_accuracy(ground_truth_neighbors, all_query_result);
-        }
-
-        if (!query_result_file_name.empty()) {
-          comm.cout0() << "\nDumping query results" << std::endl;
-          dump_query_result(all_query_result, query_result_file_name, comm);
-        }
-      }
+  if (!original_datastore_path.empty()) {
+    if (dnnd_pm_type::copy(original_datastore_path, datastore_path)) {
+      comm.cout0() << "\nTransferred index." << std::endl;
+    } else {
+      comm.cerr0() << "Failed to transfer index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
   }
+
+  {
+    comm.cout0() << "<<Query>>" << std::endl;
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, datastore_path, comm,
+                      verbose);
+
+    dnnd_pm_type::query_store_type queries;
+    saltatlas::read_query(query_file_path, queries, comm);
+
+    comm.cout0() << "Executing queries" << std::endl;
+    ygm::timer step_timer;
+    const auto query_results = dnnd.query_batch(queries, query_k, batch_size);
+    comm.cf_barrier();
+    comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
+                 << std::endl;
+
+    if (!ground_truth_file_path.empty()) {
+      show_query_recall_score(query_results, ground_truth_file_path, comm);
+      comm.cout0() << std::endl;
+      show_query_recall_score_with_only_distance(query_results,
+                                                 ground_truth_file_path, comm);
+      comm.cout0() << std::endl;
+      show_query_recall_score_with_distance_ties(query_results,
+                                                 ground_truth_file_path, comm);
+    }
+
+    if (!query_result_file_path.empty()) {
+      saltatlas::utility::gather_and_dump_neighbors(
+          query_results, query_result_file_path, comm);
+    }
+  }
+END_BLOCK:
+  comm.cf_barrier();
+
   return 0;
 }
 
-inline void parse_options(int argc, char **argv, std::string &datastore_path,
+inline bool parse_options(int argc, char **argv, std::string &datastore_path,
                           std::string &original_datastore_path, int &query_k,
-                          std::size_t &batch_size, std::string &query_file_name,
-                          std::string &ground_truth_neighbor_ids_file_name,
-                          std::string &query_result_file_path) {
+                          std::size_t &batch_size, std::string &query_file_path,
+                          std::string &ground_truth_file_path,
+                          std::string &query_result_file_path, bool &verbose,
+                          bool &help) {
   datastore_path.clear();
   original_datastore_path.clear();
-  query_file_name.clear();
-  ground_truth_neighbor_ids_file_name.clear();
+  query_file_path.clear();
+  ground_truth_file_path.clear();
   query_result_file_path.clear();
 
   int n;
-  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:")) != -1) {
+  while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:vh")) != -1) {
     switch (n) {
       case 'b':
         batch_size = std::stoul(optarg);
         break;
 
       case 'q':
-        query_file_name = optarg;
+        query_file_path = optarg;
         break;
 
       case 'n':
@@ -117,7 +119,7 @@ inline void parse_options(int argc, char **argv, std::string &datastore_path,
         break;
 
       case 'g':
-        ground_truth_neighbor_ids_file_name = optarg;
+        ground_truth_file_path = optarg;
         break;
 
       case 'z':
@@ -132,9 +134,42 @@ inline void parse_options(int argc, char **argv, std::string &datastore_path,
         query_result_file_path = optarg;
         break;
 
+      case 'v':
+        verbose = true;
+        break;
+
+      case 'h':
+        help = true;
+        return true;
+
       default:
         std::cerr << "Invalid option" << std::endl;
         std::abort();
     }
   }
+
+  if (datastore_path.empty() || query_file_path.empty()) {
+    return false;
+  }
+
+  return true;
+}
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout) {
+  cout << "Usage: mpirun -n [#of processes] " << exe_name
+       << " [options (see below)]" << std::endl;
+
+  cout << "Options:"
+       << "\n\t-z [string, required] Path to an index."
+       << "\n\t-q [string, required] Path to a query file."
+       << "\n\t-n [int] Number of nearest neighbors to find for each query "
+          "point."
+       << "\n\t-o [string] Path to store query results."
+       << "\n\t-g [string] Path to a query ground truth file."
+       << "\n\t-x [string] If specified, transfer an already constructed index "
+          "from this path to path 'z' at the beginning."
+       << "\n\t-b [long int] Batch size for query (0 is the full batch mode)."
+       << "\n\t-v If specified, turn on the verbose mode."
+       << "\n\t-h Show this menu." << std::endl;
 }

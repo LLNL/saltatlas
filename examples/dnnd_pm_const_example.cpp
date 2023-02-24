@@ -8,112 +8,112 @@
 #include <string>
 #include <vector>
 
-#include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
-
-#include <saltatlas/dnnd/dnnd_pm.hpp>
-#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
-using id_type              = uint32_t;
-using feature_element_type = float;
-using distance_type        = float;
-using dnnd_type =
-    saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
-
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
-
-void parse_options(int argc, char **argv, int &index_k, double &r,
+bool parse_options(int argc, char **argv, int &index_k, double &r,
                    double &delta, bool &exchange_reverse_neighbors,
                    std::size_t &batch_size, std::string &distance_metric_name,
                    std::vector<std::string> &point_file_names,
-                   std::string &point_file_format, std::string &datastore_path,
-                   std::string &datastore_transfer_path,
-                   bool        &make_index_undirected,
-                   double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose);
+                   std::string &point_file_format, std::string &init_index_path,
+                   std::string &datastore_path,
+                   std::string &datastore_transfer_path, bool &verbose,
+                   bool &help);
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv, k_ygm_buff_size);
+  ygm::comm comm(&argc, &argv);
+
+  int                      index_k{0};
+  double                   r{0.8};
+  double                   delta{0.001};
+  bool                     exchange_reverse_neighbors{false};
+  std::size_t              batch_size{0};
+  std::string              distance_metric_name;
+  std::vector<std::string> point_file_names;
+  std::string              point_file_format;
+  std::string              init_index_path;
+  std::string              datastore_path;
+  std::string              datastore_transfer_path;
+  bool                     help{false};
+  bool                     verbose{false};
+
+  if (!parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
+                     batch_size, distance_metric_name, point_file_names,
+                     point_file_format, init_index_path, datastore_path,
+                     datastore_transfer_path, verbose, help)) {
+    comm.cerr0() << "Invalid option" << std::endl;
+    usage(argv[0], comm.cerr0());
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+  if (help) {
+    usage(argv[0], comm.cout0());
+    return 0;
+  }
+
   {
-    int                      index_k{0};
-    double                   r{0.8};
-    double                   delta{0.001};
-    bool                     exchange_reverse_neighbors{false};
-    std::size_t              batch_size{0};
-    std::string              distance_metric_name;
-    std::vector<std::string> point_file_names;
-    std::string              point_file_format;
-    std::string              datastore_path;
-    std::string              datastore_transfer_path;
-    bool                     make_index_undirected{false};
-    double                   pruning_degree_multiplier{1.5};
-    bool                     remove_long_paths{false};
-    bool                     verbose{false};
+    dnnd_pm_type dnnd(dnnd_pm_type::create, datastore_path,
+                      distance_metric_name, comm, std::random_device{}(),
+                      verbose);
 
-    parse_options(argc, argv, index_k, r, delta, exchange_reverse_neighbors,
-                  batch_size, distance_metric_name, point_file_names,
-                  point_file_format, datastore_path, datastore_transfer_path,
-                  make_index_undirected, pruning_degree_multiplier,
-                  remove_long_paths, verbose);
+    comm.cout0() << "\n<<Read Points>>" << std::endl;
+    ygm::timer point_read_timer;
+    saltatlas::read_points(point_file_names, point_file_format, verbose,
+                           dnnd.get_point_partitioner(), dnnd.get_point_store(),
+                           comm);
+    comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
+                 << std::endl;
 
-    {
-      dnnd_type dnnd(dnnd_type::create, datastore_path, distance_metric_name,
-                     comm, std::random_device{}(), verbose);
-
-      comm.cout0() << "\n<<Read Points>>" << std::endl;
-      ygm::timer point_read_timer;
-      saltatlas::read_points(point_file_names, point_file_format, verbose,
-                             dnnd.get_point_store(), comm);
-      comm.cout0() << "\nReading points took (s)\t"
-                   << point_read_timer.elapsed() << std::endl;
-
-      comm.cout0() << "\n<<Index Construction>>" << std::endl;
-      ygm::timer const_timer;
+    comm.cout0() << "\n<<Index Construction>>" << std::endl;
+    ygm::timer const_timer;
+    if (init_index_path.empty()) {
       dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
                            batch_size);
-      comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
-                   << std::endl;
-
-      comm.cout0() << "\n<<Index Optimization>>" << std::endl;
-      ygm::timer optimization_timer;
-      dnnd.optimize_index(make_index_undirected, pruning_degree_multiplier,
-                          remove_long_paths);
-      comm.cout0() << "\nIndex optimization took (s)\t"
-                   << optimization_timer.elapsed() << std::endl;
+    } else {
+      dnnd_pm_type init_dnnd(dnnd_pm_type::open_read_only, init_index_path,
+                             comm, verbose);
+      dnnd.construct_index(index_k, r, delta, exchange_reverse_neighbors,
+                           batch_size, init_dnnd.get_knn_index());
     }
-    comm.cout0() << "\nThe index is ready for query." << std::endl;
+    comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
+                 << std::endl;
+  }
+  comm.cf_barrier();
+  comm.cout0() << "\nClosed Metall." << std::endl;
 
-    if (!datastore_transfer_path.empty()) {
-      if (dnnd_type::copy(datastore_path, datastore_transfer_path)) {
-        comm.cout0() << "\nTransferred index data store." << std::endl;
-      } else {
-        comm.cerr0() << "\nFailed to transfer index." << std::endl;
-      }
+  if (!datastore_transfer_path.empty()) {
+    comm.cout0() << "\nTransferring index data store " << datastore_path
+                 << " to " << datastore_transfer_path << std::endl;
+    if (!dnnd_pm_type::copy(datastore_path, datastore_transfer_path)) {
+      comm.cerr0() << "\nFailed to transfer index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
+    comm.cout0() << "Finished transfer." << std::endl;
   }
 
   return 0;
 }
 
-inline void parse_options(
+inline bool parse_options(
     int argc, char **argv, int &index_k, double &r, double &delta,
     bool &exchange_reverse_neighbors, std::size_t &batch_size,
     std::string              &distance_metric_name,
     std::vector<std::string> &point_file_names, std::string &point_file_format,
-    std::string &datastore_path, std::string &datastore_transfer_path,
-    bool &make_index_undirected, double &pruning_degree_multiplier,
-    bool &remove_long_paths, bool &verbose) {
+    std::string &init_index_path, std::string &datastore_path,
+    std::string &datastore_transfer_path, bool &verbose, bool &help) {
   distance_metric_name.clear();
   point_file_names.clear();
   point_file_format.clear();
+  init_index_path.clear();
   datastore_path.clear();
   datastore_transfer_path.clear();
   exchange_reverse_neighbors = false;
   verbose                    = false;
+  help                       = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:eb:um:lv")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:i:eb:vh")) != -1) {
     switch (n) {
       case 'k':
         index_k = std::stoi(optarg);
@@ -147,33 +147,65 @@ inline void parse_options(
         point_file_format = optarg;
         break;
 
+      case 'i':
+        init_index_path = optarg;
+        break;
+
       case 'b':
         batch_size = std::stoul(optarg);
-        break;
-
-      case 'u':
-        make_index_undirected = true;
-        break;
-
-      case 'm':
-        pruning_degree_multiplier = std::stod(optarg);
-        break;
-
-      case 'l':
-        remove_long_paths = true;
         break;
 
       case 'v':
         verbose = true;
         break;
 
+      case 'h':
+        help = true;
+        return true;
+
       default:
-        std::cerr << "Invalid option" << std::endl;
-        std::abort();
+        return false;
     }
   }
 
   for (int index = optind; index < argc; index++) {
     point_file_names.emplace_back(argv[index]);
   }
+
+  if (datastore_path.empty() || distance_metric_name.empty() ||
+      point_file_format.empty() || point_file_names.empty()) {
+    return false;
+  }
+
+  return true;
+}
+
+template <typename cout_type>
+void usage(std::string_view exe_name, cout_type &cout) {
+  cout << "Usage: mpirun -n [#of processes] " << exe_name
+       << " [options (see below)] [list of input point files (required)]"
+       << std::endl;
+
+  cout
+      << "Options:"
+      << "\n\t-z [string, required] Path to store constructed index."
+      << "\n\t-f [string, required] Distance metric name:"
+      << "\n\t\t'l2' (L2), sql2' (squared L2), 'cosine' (cosine similarity), "
+         "or 'jaccard' (Jaccard index)."
+      << "\n\t-p [string, required] Format of input point files:"
+      << "\n\t\t'wsv' (whitespace-separated values),"
+      << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
+      << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
+      << "\n\t-k [int] Number of neighbors to have for each point in the index."
+      << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
+      << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
+      << "\n\t-e If specified, generate reverse neighbors globally during the "
+         "index construction."
+      << "\n"
+      << "\n\t-i [string] Path to data used for initializing the index."
+      << "\n\t-x [string] If specified, transfer index to this path at the end."
+      << "\n\t-b [long int] Batch size for the index construction (0 is the "
+         "full batch mode)."
+      << "\n\t-v If specified, turn on the verbose mode."
+      << "\n\t-h Show this menu." << std::endl;
 }
