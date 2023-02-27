@@ -358,7 +358,8 @@ void benchmark_query_trial_ground_truth(
          const std::multimap<dist_t, index_t> &nearest_neighbors, auto dhnsw,
          uint64_t data_index, auto ground_truth_ptr) {
         // Lambda to check ANN against ground truth
-        auto check_nearest_neighbors_lambda = [](auto &index_gt, auto ann) {
+        auto check_nearest_neighbors_lambda = [](const auto &query_ID, auto &gt,
+                                                 auto ann) {
           auto intersection_lambda = [](auto &vec1, auto &vec2) {
             int to_return{0};
 
@@ -382,7 +383,7 @@ void benchmark_query_trial_ground_truth(
             return to_return;
           };
 
-          true_positives += intersection_lambda(index_gt.second, ann);
+          true_positives += intersection_lambda(gt, ann);
           total_neighbors += ann.size();
         };
 

@@ -168,9 +168,7 @@ read_ground_truth(const std::string& filename, ygm::comm& world) {
   world.barrier();
 
   // Sanity check on ground-truth
-  nn_dist_truth.for_all([](const auto& id_nn_vec_pair) {
-    const auto& [id, nn_vec] = id_nn_vec_pair;
-
+  nn_dist_truth.for_all([](const auto& id, const auto& nn_vec) {
     for (const auto& nn_dist : nn_vec) {
       ASSERT_RELEASE(nn_dist.second >= 0.0);
     }
@@ -486,10 +484,8 @@ int main(int argc, char** argv) {
           world.cout0("Checking results");
 
           auto calculate_recall_lambda =
-              [](auto& id_truth_vec_pair,
+              [](const auto& id, const auto& truth_vec,
                  const std::vector<std::pair<index_t, dist_t>>& results) {
-                const auto& [id, truth_vec] = id_truth_vec_pair;
-
                 std::set<index_t> truth_set;
 
                 for (int i = 0; i < results.size(); ++i) {
