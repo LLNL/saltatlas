@@ -30,3 +30,5 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_pm_optimize_example)
     add_saltatlas_example(dnnd_pm_query_example)
 endif ()
+
+add_subdirectory(datasets)

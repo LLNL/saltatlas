@@ -5,17 +5,15 @@
 
 #pragma once
 
-#include <limits>
 #include <cmath>
+#include <limits>
 
 namespace saltatlas::dndetail {
 
-template<typename T>
-static constexpr double k_epsilon = std::numeric_limits<T>::epsilon();
-
-template<typename T>
-bool nearly_equal(const T a, const T b) {
-  return (std::fabs(a - b) < k_epsilon<T>);
+template <typename T>
+bool nearly_equal(const T a, const T b,
+                  const double eps = std::numeric_limits<T>::epsilon()) {
+  return (std::fabs(a - b) < eps);
 }
 
 }  // namespace saltatlas::dndetail

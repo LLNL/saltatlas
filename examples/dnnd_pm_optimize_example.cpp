@@ -11,7 +11,6 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/point_reader.hpp>
 #include "dnnd_example_common.hpp"
 
 bool parse_options(int argc, char **argv, std::string &original_datastore_path,
@@ -99,9 +98,9 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
   help                  = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "x:z:o:um:lvh")) != -1) {
+  while ((n = ::getopt(argc, argv, "i:z:x:um:lvh")) != -1) {
     switch (n) {
-      case 'x':
+      case 'i':
         original_datastore_path = optarg;
         break;
 
@@ -109,7 +108,7 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
         datastore_path = optarg;
         break;
 
-      case 'o':
+      case 'x':
         datastore_transfer_path = optarg;
         break;
 
@@ -158,9 +157,9 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << "\n\t\tCut every points' neighbors more than 'k' x 'm' before the "
           "query."
        << "\n\t-l If specified, remove long paths."
-       << "\n\t-x [string] If specified, transfer an already constructed index "
+       << "\n\t-i [string] If specified, transfer an already constructed index "
           "from this path to path 'z' at the beginning."
-       << "\n\t-o [string] If specified, transfer the index to this path at "
+       << "\n\t-x [string] If specified, transfer the index to this path at "
           "the end."
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;

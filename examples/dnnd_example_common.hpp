@@ -10,13 +10,16 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/dnnd/data_reader.hpp>
 #include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/dnnd_pm.hpp>
+#include <saltatlas/dnnd/utility.hpp>
 
 using id_type              = uint32_t;
 using feature_element_type = float;
@@ -29,233 +32,91 @@ using dnnd_pm_type =
     saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
 using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
-template <typename cout_type>
-inline void option_common(cout_type &cout) {
-  cout << "\n\t-f [string, required] Distance metric name:"
-       << "\n\t\t'l2' (L2), 'cosine' (cosine similarity), or 'jaccard'"
-          "(Jaccard index)."
-       << "\n\t-b [long int] Batch size for the index construction and the "
-          "query (0 is full batch mode)."
-       << "\n\t-v If specified, turn on the verbose mode."
-       << "\n\t-h Show this menu." << std::endl;
-}
+static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
 
-template <typename cout_type>
-inline void option_index_const(cout_type &cout) {
-  cout
-      << "\n\t-p [string, required] Format of input point files:"
-      << "\n\t\t'wsv' (whitespace-separated values),"
-      << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
-      << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
-      << "\n\t-k [int] Number of neighbors to have for each point in the index."
-      << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
-      << "\n\t-d [double] Precision parameter (δ) in NN-Descent."
-      << "\n\t-e If specified, generate reverse neighbors globally during the "
-         "index construction."
-      << std::endl;
-}
+template <typename neighbor_store_type>
+inline void show_query_recall_score(
+    const neighbor_store_type& test_result,
+    const std::string_view& ground_truth_file_path, ygm::comm& comm) {
+  neighbor_store_type ground_truth;
+  saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-template <typename cout_type>
-inline void option_optimization(cout_type &cout) {
-  cout << "\n\t-u  If specified, make the index undirected before the query."
-       << "\n\t-m [double] Pruning degree multiplier (m) in PyNNDescent."
-       << "\n\t\tCut every points' neighbors more than 'k' x 'm' before the "
-          "query."
-       << "\n\t-l If specified, remove long paths before the query."
-       << std::endl;
-}
+  const auto local_sores = saltatlas::utility::get_recall_scores(
+      test_result, ground_truth, test_result[0].size());
 
-template <typename cout_type>
-inline void option_query(cout_type &cout) {
-  cout << "\n\t-q [string] Path to a query file."
-       << "\n\t-n [int] Number of nearest neighbors to find for each query "
-          "point."
-       << "\n\t-g [string] Path to a query ground truth file." << std::endl;
-}
+  const auto local_min =
+      *std::min_element(local_sores.begin(), local_sores.end());
+  const auto local_max =
+      *std::max_element(local_sores.begin(), local_sores.end());
+  const auto local_sum =
+      std::accumulate(local_sores.begin(), local_sores.end(), 0.0);
 
-template <typename cout_type>
-inline void option_pm_reattach(cout_type &cout) {
-  cout << "\nIndex reattaching options:"
-       << "\n\t-z [string, required] Path to an already constructed index."
-       << "\n\t-x [string] If specified, transfer an already constructed index "
-          "from this path to path 'z' at the beginning."
-       << std::endl;
-}
+  const auto global_sum = comm.all_reduce_sum(local_sum);
+  const auto num_scores = comm.all_reduce_sum(local_sores.size());
 
-/// \brief Reads a file that contain queries.
-/// Each line is the feature vector of a query point.
-/// Can read the white space separated format (without ID).
-template <typename dnnd_type>
-inline void read_query(
-    const std::string                          &query_file,
-    typename dnnd_type::query_point_store_type &query_points) {
-  if (query_file.empty()) return;
-
-  std::ifstream ifs(query_file);
-  if (!ifs.is_open()) {
-    std::cerr << "Failed to open " << query_file << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-  }
-
-  typename dnnd_type::id_type id = 0;
-  std::string                 buf;
-  while (std::getline(ifs, buf)) {
-    std::stringstream                                     ss(buf);
-    typename dnnd_type::feature_element_type              p;
-    std::vector<typename dnnd_type::feature_element_type> feature;
-    while (ss >> p) {
-      feature.push_back(p);
-    }
-    query_points.feature_vector(id).insert(
-        query_points.feature_vector(id).begin(), feature.begin(),
-        feature.end());
-    ++id;
-  }
-}
-
-/// \brief Gather query results to the root rank.
-template <typename neighbor_type, typename query_result_store_type>
-inline std::vector<std::vector<neighbor_type>> gather_query_result(
-    const query_result_store_type &local_result, ygm::comm &comm) {
-  const std::size_t num_total_queries =
-      comm.all_reduce_sum(local_result.size());
-
-  static std::vector<std::vector<neighbor_type>> global_result;
-  if (comm.rank0()) {
-    global_result.resize(num_total_queries);
-  }
+  comm.cout0() << "Min exact recall score\t" << comm.all_reduce_min(local_min)
+               << "\nMean exact recall score\t" << global_sum / num_scores
+               << "\nMax exact recall score\t" << comm.all_reduce_max(local_max)
+               << std::endl;
   comm.cf_barrier();
-
-  for (const auto &item : local_result) {
-    const auto                 query_no = item.first;
-    std::vector<neighbor_type> neighbors(item.second.begin(),
-                                         item.second.end());
-    if (neighbors.empty()) {
-      std::cerr << query_no << "-th query result is empty (before sending)."
-                << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    }
-
-    comm.async(
-        0,
-        [](const std::size_t                 query_no,
-           const std::vector<neighbor_type> &neighbors) {
-          global_result[query_no] = neighbors;
-        },
-        query_no, neighbors);
-  }
-  comm.barrier();
-
-  // Sanity check
-  if (comm.rank0()) {
-    for (std::size_t i = 0; i < global_result.size(); ++i) {
-      if (global_result[i].empty()) {
-        std::cerr << i << "-th query result is empty (after gather)."
-                  << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-      }
-    }
-  }
-
-  return global_result;
 }
 
-/// \brief Read a file that contain a list of nearest neighbor IDs.
-/// Each line is the nearest neighbor IDs of a point.
-/// Can read the white space separated format (no source point IDs).
-template <typename id_type>
-inline std::vector<std::vector<id_type>> read_neighbor_ids(
-    const std::string &neighbors_file) {
-  std::ifstream ifs(neighbors_file);
-  if (!ifs.is_open()) {
-    std::cerr << "Failed to open " << neighbors_file << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-  }
+template <typename neighbor_store_type>
+inline void show_query_recall_score_with_only_distance(
+    const neighbor_store_type& test_result,
+    const std::string_view& ground_truth_file_path, ygm::comm& comm) {
+  neighbor_store_type ground_truth;
+  saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-  std::vector<std::vector<id_type>> neighbor_ids;
-  std::string                       buf;
-  while (std::getline(ifs, buf)) {
-    std::stringstream    ss(buf);
-    id_type              id;
-    std::vector<id_type> list;
-    while (ss >> id) {
-      list.push_back(id);
-    }
-    neighbor_ids.push_back(list);
-  }
+  const auto local_sores =
+      saltatlas::utility::get_recall_scores_with_only_distance(
+          test_result, ground_truth, test_result[0].size());
 
-  return neighbor_ids;
+  const auto local_min =
+      *std::min_element(local_sores.begin(), local_sores.end());
+  const auto local_max =
+      *std::max_element(local_sores.begin(), local_sores.end());
+  const auto local_sum =
+      std::accumulate(local_sores.begin(), local_sores.end(), 0.0);
+
+  const auto global_sum = comm.all_reduce_sum(local_sum);
+  const auto num_scores = comm.all_reduce_sum(local_sores.size());
+
+  comm.cout0() << "Min distance-only recall score\t"
+               << comm.all_reduce_min(local_min)
+               << "\nMean distance-only recall score\t"
+               << global_sum / num_scores
+               << "\nMax distance-only recall score\t"
+               << comm.all_reduce_max(local_max) << std::endl;
+  comm.cf_barrier();
 }
 
-/// \brief Calculate and show accuracy
-template <typename id_type, typename neighbor_type>
-inline void show_accuracy(
-    const std::vector<std::vector<id_type>>       &ground_truth,
-    const std::vector<std::vector<neighbor_type>> &test_result) {
-  if (ground_truth.size() != test_result.size()) {
-    std::cerr
-        << "#of numbers of ground truth and test result neighbors are different"
-        << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-  }
+template <typename neighbor_store_type>
+inline void show_query_recall_score_with_distance_ties(
+    const neighbor_store_type& test_result,
+    const std::string_view& ground_truth_file_path, ygm::comm& comm) {
+  neighbor_store_type ground_truth;
+  saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
-  std::vector<double> accuracies;
-  for (std::size_t i = 0; i < test_result.size(); ++i) {
-    if (test_result[i].empty()) {
-      std::cerr << "The " << i << "-th query result is empty" << std::endl;
-      return;
-    }
+  const auto local_sores =
+      saltatlas::utility::get_recall_scores_with_distance_ties(
+          test_result, ground_truth, test_result[0].size());
 
-    if (ground_truth[i].empty()) {
-      std::cerr << "The " << i << "-th ground truth is empty" << std::endl;
-      return;
-    }
+  const auto local_min =
+      *std::min_element(local_sores.begin(), local_sores.end());
+  const auto local_max =
+      *std::max_element(local_sores.begin(), local_sores.end());
+  const auto local_sum =
+      std::accumulate(local_sores.begin(), local_sores.end(), 0.0);
 
-    std::unordered_set<id_type> true_set;
-    for (const auto &n : ground_truth[i]) true_set.insert(n);
+  const auto global_sum = comm.all_reduce_sum(local_sum);
+  const auto num_scores = comm.all_reduce_sum(local_sores.size());
 
-    std::size_t num_corrects = 0;
-    for (const auto &n : test_result[i]) {
-      num_corrects += true_set.count(n.id);
-    }
-
-    accuracies.push_back((double)num_corrects / (double)test_result[i].size() *
-                         100.0);
-  }
-
-  std::sort(accuracies.begin(), accuracies.end());
-
-  std::cout << "Min accuracy\t" << accuracies.front() << std::endl;
-  std::cout << "Mean accuracy\t"
-            << std::accumulate(accuracies.begin(), accuracies.end(), 0.0) /
-                   accuracies.size()
-            << std::endl;
-  std::cout << "Max accuracy\t" << accuracies.back() << std::endl;
-}
-
-/// \brief The root process dumps query results.
-template <typename neighbor_type>
-inline void dump_query_result(
-    const std::vector<std::vector<neighbor_type>> &result,
-    const std::string &out_file_name, ygm::comm &comm) {
-  if (comm.rank0() && !out_file_name.empty()) {
-    comm.cout0() << "Dump result to files with prefix " << out_file_name
-                 << std::endl;
-    std::ofstream ofs_neighbors;
-    std::ofstream ofs_distances;
-    ofs_neighbors.open(out_file_name + "-neighbors.txt");
-    ofs_distances.open(out_file_name + "-distances.txt");
-    if (!ofs_distances.is_open() || !ofs_neighbors.is_open()) {
-      comm.cerr0() << "Failed to create search result file(s)" << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    }
-    for (const auto &neighbors : result) {
-      for (const auto &n : neighbors) {
-        ofs_neighbors << n.id << "\t";
-        ofs_distances << n.distance << "\t";
-      }
-      ofs_neighbors << "\n";
-      ofs_distances << "\n";
-    }
-  }
+  comm.cout0() << "Min tied-distance recall score\t"
+               << comm.all_reduce_min(local_min)
+               << "\nMean tied-distance recall score\t"
+               << global_sum / num_scores
+               << "\nMax tied-distance recall score\t"
+               << comm.all_reduce_max(local_max) << std::endl;
+  comm.cf_barrier();
 }

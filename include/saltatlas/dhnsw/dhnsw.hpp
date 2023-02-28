@@ -42,6 +42,10 @@ class dhnsw {
 
   ~dhnsw() { m_comm->barrier(); }
 
+  void set_hnsw_params(const dhnsw_detail::hnsw_params_t &p) {
+    m_index_impl.set_hnsw_params(p);
+  }
+
   void queue_data_point_insertion(const index_t pt_idx, const point_t &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
   }

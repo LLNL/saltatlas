@@ -23,6 +23,8 @@
 #include <mutex>
 #include <random>
 #include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
@@ -47,7 +49,8 @@ class dnnd_kernel {
                                        typename PointStore::allocator_type>;
   using featur_vector_type = typename point_store_type::feature_vector_type;
   using point_partitioner  = std::function<int(const id_type& id)>;
-  using distance_metric    = distance::metric_type<feature_element_type>;
+  using distance_metric =
+      distance::metric_type<feature_element_type, distance_type>;
 
   struct option {
     int         k{4};
@@ -74,12 +77,48 @@ class dnnd_kernel {
     m_this.check(m_comm);
   }
 
-  template <typename allocator>
-  void construct(nn_index<id_type, distance_type, allocator>& knn_index) {
+  /// \brief Construct a knn-index.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename index_alloc_type>
+  void construct(
+      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
     }
-    priv_construct();
+    priv_init_knn_heap_with_random_values();
+    priv_construct_kernel();
+    priv_convert(knn_index);
+  }
+
+  /// \brief Construct a knn-index, starting from a given initial neighbors.
+  /// \param init_knn_index Initial neighbors. The distance values will not
+  /// be used.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename init_index_alloc_type, typename index_alloc_type>
+  void construct(
+      const nn_index<id_type, distance_type, init_index_alloc_type>&
+                                                          init_knn_index,
+      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+    }
+    priv_init_knn_heap_with_index(init_knn_index);
+    priv_construct_kernel();
+    priv_convert(knn_index);
+  }
+
+  /// \brief Construct a knn-index, starting from a given initial neighbors.
+  /// \param init_knn_index Initial neighbors.
+  /// \param knn_index k-nn index instance to store the constructed one.
+  template <typename alloc_type>
+  void construct(
+      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
+      nn_index<id_type, distance_type, alloc_type>&            knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+    }
+    priv_init_knn_heap_with_index(init_knn_index);
+    priv_construct_kernel();
     priv_convert(knn_index);
   }
 
@@ -96,12 +135,30 @@ class dnnd_kernel {
   using neighbor_type = neighbor<id_type, distance_type>;
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
 
-  void priv_construct() {
+  void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
-      m_comm.cout0() << "Initializing the k-NN index." << std::endl;
+      m_comm.cout0() << "Initializing the k-NN index with random neighbors."
+                     << std::endl;
     }
-    priv_init_knn_heap_random();
+    priv_allocate_knn_heap();
+    priv_fill_knn_heap_with_random_value();
+  }
 
+  template <typename init_index_store_type>
+  void priv_init_knn_heap_with_index(
+      const init_index_store_type& init_knn_index) {
+    if (m_option.verbose) {
+      m_comm.cout0()
+          << "Initializing the k-NN index using the given initial neighbors."
+          << std::endl;
+    }
+    priv_allocate_knn_heap();
+    priv_init_knn_heap_with_initial_index(init_knn_index);
+    // Fill the remaining uninitialized space with random values
+    priv_fill_knn_heap_with_random_value();
+  }
+
+  void priv_construct_kernel() {
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
     m_num_neighbor_suggestion_msgs = 0;
     m_num_feature_msgs             = 0;
@@ -125,7 +182,7 @@ class dnnd_kernel {
       m_comm.cf_barrier();
 
       if (m_option.verbose) {
-        m_comm.cout0() << "\nepoch took (s)\t" << epoch_timer.elapsed()
+        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_timer.elapsed()
                        << std::endl;
       }
       // Test the terminal condition
@@ -158,16 +215,9 @@ class dnnd_kernel {
     }
   }
 
-  void priv_init_knn_heap_random() {
-    m_knn_heap_table.clear();
-    // Allocate memory first
-    m_knn_heap_table.reserve(m_point_store.size());
-    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
-      const auto sid = itr->first;
-      m_knn_heap_table.emplace(sid, m_option.k);
-    }
-    m_comm.cf_barrier();
-
+  /// \brief Fill k-NN heap with random values.
+  /// This function can accept already partially filled heap.
+  void priv_fill_knn_heap_with_random_value() {
     std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
     assert(m_option.k < m_global_max_id);
 
@@ -178,6 +228,15 @@ class dnnd_kernel {
                                                           feature.end());
 
       std::unordered_set<id_type> unique_table;
+      if (m_knn_heap_table.count(sid) > 0) {
+        for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
+                  nend = m_knn_heap_table.at(sid).ids_end();
+             nitr != nend; ++nitr) {
+          const auto& nid = nitr->first;
+          unique_table.insert(nid);
+        }
+      }
+
       while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?
         id_type nid;
         while (true) {
@@ -192,11 +251,62 @@ class dnnd_kernel {
     m_comm.barrier();
   }
 
+  /// \brief Fills k-NN heap with a given index.
+  template <typename alloc>
+  void priv_init_knn_heap_with_initial_index(
+      const nn_index<id_type, distance_type, alloc>& init_knn_index) {
+    for (auto pitr = init_knn_index.points_begin();
+         pitr != init_knn_index.points_end(); ++pitr) {
+      const auto& sid = pitr->first;
+      for (auto nitr = init_knn_index.neighbors_begin(sid);
+           nitr != init_knn_index.neighbors_end(sid); ++nitr) {
+        const auto& nid     = nitr->id;
+        const auto& feature = m_point_store.feature_vector(sid);
+        const std::vector<feature_element_type> tmp_feature(feature.begin(),
+                                                            feature.end());
+        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
+                     sid, nid, tmp_feature);
+      }
+    }
+    m_comm.barrier();
+  }
+
+  /// \brief Fills k-NN heap with a given index.
+  void priv_init_knn_heap_with_initial_index(
+      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index) {
+    for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.begin();
+         ++pitr) {
+      const auto& sid = pitr->first;
+      for (auto nitr = pitr->second.begin(); nitr != pitr->second.end();
+           ++nitr) {
+        const auto& nid     = *nitr;
+        const auto& feature = m_point_store.feature_vector(sid);
+        const std::vector<feature_element_type> tmp_feature(feature.begin(),
+                                                            feature.end());
+        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
+                     sid, nid, tmp_feature);
+      }
+    }
+    m_comm.barrier();
+  }
+
+  void priv_allocate_knn_heap() {
+    m_knn_heap_table.clear();
+
+    m_knn_heap_table.reserve(m_point_store.size());
+    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
+      const auto sid = itr->first;
+      m_knn_heap_table.emplace(sid, m_option.k);
+    }
+
+    m_comm.cf_barrier();
+  }
+
   struct distance_calculator {
     // Calculate the distance between sid and nid on the rank nid is assigned.
     // Then, send back the calculated distance value to sid.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type sid,
-                    const id_type                            nid,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this,
+                    const id_type sid, const id_type nid,
                     const std::vector<feature_element_type>& src_feature_vec) {
       const auto& nbr_feature_vec =
           local_this->m_point_store.feature_vector(nid);
@@ -333,7 +443,7 @@ class dnnd_kernel {
       const auto& neighbors = table.at(source);
       m_comm.async(
           m_point_partitioner(source),
-          [](auto, const id_type vid,
+          [](const id_type                              vid,
              const typename adj_lsit_type::mapped_type& neighbors) {
             ref_received[vid].insert(ref_received[vid].end(), neighbors.begin(),
                                      neighbors.end());
@@ -453,7 +563,7 @@ class dnnd_kernel {
   struct neighbor_updater {
     // Called first.
     // sends u1's feature vector to u2.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type u2) {
       const auto heap = local_this->m_knn_heap_table.at(u1);
       // If the candidate is in the heap,
@@ -481,7 +591,7 @@ class dnnd_kernel {
 
     // 2nd call.
     // Update u2's knn heap and sends the computed distance to u1, if needed.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type                            u2,
                     const std::vector<feature_element_type>& u1_feature,
                     const distance_type&                     u1_max_distance =
@@ -496,7 +606,7 @@ class dnnd_kernel {
       // current neighbors.
       const auto& u2_feature = local_this->m_point_store.feature_vector(u2);
       const auto  d          = local_this->m_distance_function(
-                    u1_feature.size(), u1_feature.data(), u2_feature.data());
+          u1_feature.size(), u1_feature.data(), u2_feature.data());
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
 
       if (d < u1_max_distance) {
@@ -514,7 +624,7 @@ class dnnd_kernel {
 
     // Third call,
     // Update the nearest neighbors of u1.
-    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type u1,
+    void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type u2, const distance_type& d) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u1);
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u2, d, true);
@@ -526,7 +636,7 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "\nMini-batch No. " << m_mini_batch_no << std::endl;
     }
-    ++m_mini_batch_no;
+    ygm::timer mini_batch_timer;
 
     const auto local_mini_batch_size =
         mpi::assign_tasks(targets.size(), m_option.mini_batch_size,
@@ -554,6 +664,11 @@ class dnnd_kernel {
     priv_show_msg_dst_count_statistics(msg_dst_count);
 #endif
     m_comm.barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "Mini-batch took (s)\t" << mini_batch_timer.elapsed()
+                     << std::endl;
+    }
+    ++m_mini_batch_no;
   }
 
   template <typename allocator>
