@@ -10,6 +10,7 @@
 #include <saltatlas/dhnsw/detail/query_engine.hpp>
 
 #include <ygm/container/array.hpp>
+#include <ygm/container/bag.hpp>
 
 namespace saltatlas {
 
@@ -37,6 +38,11 @@ class dhnsw {
 
   void partition_data(ygm::container::array<point_t, index_t> &data,
                       const uint32_t                           num_partitions) {
+    m_index_impl.partition_data(data, num_partitions);
+  }
+
+  void partition_data(ygm::container::bag<std::pair<index_t, point_t>> &data,
+                      const uint32_t num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 

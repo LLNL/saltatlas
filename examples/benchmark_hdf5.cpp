@@ -13,7 +13,6 @@
 #include <ygm/container/map.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -21,6 +20,9 @@
 
 #include <saltatlas_h5_io/h5_reader.hpp>
 #include <saltatlas_h5_io/h5_writer.hpp>
+
+template <typename FirstType, typename SecondType>
+using pair_bag = ygm::container::bag<std::pair<FirstType, SecondType>>;
 
 void usage(ygm::comm &comm) {
   if (comm.rank0()) {
@@ -178,10 +180,10 @@ float my_l2(const std::vector<float> &x, const std::vector<float> &y) {
 }
 
 template <typename IndexType, typename Point>
-ygm::container::pair_bag<IndexType, Point> read_data(
+pair_bag<IndexType, Point> read_data(
     ygm::container::bag<std::string> &bag_filenames,
     const std::vector<std::string>   &data_col_names) {
-  ygm::container::pair_bag<IndexType, Point> to_return(bag_filenames.comm());
+  pair_bag<IndexType, Point> to_return(bag_filenames.comm());
 
   auto read_file_lambda = [&to_return, &data_col_names](const auto &fname) {
     saltatlas::h5_io::h5_reader reader(fname);
@@ -225,8 +227,7 @@ void build_index(
 
   dist_index.comm().cout0("Distributing data across ranks");
 
-  auto add_point_lambda = [&dist_index, &bag_data](const auto &index,
-                                                   const auto &point) {
+  auto add_point_lambda = [&dist_index](const auto &index, const auto &point) {
     dist_index.queue_data_point_insertion(index, point);
   };
 

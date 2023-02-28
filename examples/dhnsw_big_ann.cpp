@@ -1,12 +1,4 @@
 
-#include <unistd.h>
-#include <algorithm>
-#include <iostream>
-#include <numeric>
-#include <string>
-#include <vector>
-
-#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -18,6 +10,13 @@
 #include <ygm/io/line_parser.hpp>
 #include <ygm/utility.hpp>
 
+#include <unistd.h>
+#include <algorithm>
+#include <iostream>
+#include <numeric>
+#include <string>
+#include <vector>
+
 #define DEFAULT_VORONOI_RANK 3
 #define DEFAULT_NUM_HOPS 3
 #define DEFAULT_NUM_INITIAL_QUERIES 1
@@ -28,6 +27,9 @@ using feature_t = uint16_t;
 using point_t   = std::vector<feature_t>;
 using dist_t    = float;
 using index_t   = uint32_t;
+
+template <typename FirstType, typename SecondType>
+using pair_bag = ygm::container::bag<std::pair<FirstType, SecondType>>;
 
 dist_t l2_sqr(const point_t& v1, const point_t& v2) {
   if (v1.size() != v2.size()) {
@@ -44,9 +46,9 @@ dist_t l2_sqr(const point_t& v1, const point_t& v2) {
   return d;
 }
 
-ygm::container::pair_bag<index_t, point_t> read_points(
+pair_bag<index_t, point_t> read_points(
     const std::vector<std::string>& filenames, ygm::comm& world) {
-  ygm::container::pair_bag<index_t, point_t> to_return(world);
+  pair_bag<index_t, point_t> to_return(world);
 
   ygm::io::line_parser linep(world, filenames);
 
@@ -73,9 +75,9 @@ ygm::container::pair_bag<index_t, point_t> read_points(
   return to_return;
 }
 
-ygm::container::pair_bag<index_t, point_t> read_query_points(
-    const std::string& filename, ygm::comm& world) {
-  ygm::container::pair_bag<index_t, point_t> to_return(world);
+pair_bag<index_t, point_t> read_query_points(const std::string& filename,
+                                             ygm::comm&         world) {
+  pair_bag<index_t, point_t> to_return(world);
 
   if (world.rank0()) {
     size_t curr_line{0};

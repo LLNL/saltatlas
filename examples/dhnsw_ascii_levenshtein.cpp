@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include <saltatlas/container/pair_bag.hpp>
 #include <saltatlas/dhnsw/detail/utility.hpp>
 #include <saltatlas/dhnsw/dhnsw.hpp>
 #include <saltatlas/partitioner/metric_hyperplane_partitioner.hpp>
@@ -265,8 +264,8 @@ int main(int argc, char** argv) {
   // saltatlas::voronoi_partitioner<dist_t, index_t, point_t> fuzzy_partitioner(
   // world, fuzzy_leven_space);
 
-  ygm::container::pair_bag<index_t, point_t> bag_data(world);
-  size_t                                     local_counter;
+  ygm::container::bag<std::pair<index_t, point_t>> bag_data(world);
+  size_t                                           local_counter;
   ascii_lines.for_all(
       [&bag_data, &local_counter, world](const auto& ascii_line) {
         bag_data.async_insert(std::make_pair(
