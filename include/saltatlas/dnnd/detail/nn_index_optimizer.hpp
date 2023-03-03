@@ -30,7 +30,7 @@ class nn_index_optimizer {
   struct option {
     std::size_t index_k{0};
     bool        undirected{false};
-    double      pruning_degree_multiplier{-1};  // if < 0, no pruning.
+    double      pruning_degree_multiplier{-1};  // if <= 0, no pruning.
     bool        remove_long_paths{false};
     bool        verbose{false};
   };

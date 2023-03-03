@@ -172,12 +172,22 @@ mpirun -n 2 ./examples/dnnd_example
 
 ## Running DNND PM (persistent memory) Examples
 
-### Required CMake Option
+### Build
 
-The DNND PM examples require Metall and Boost C++ Libraries.
+The DNND PM examples require [Metall](https://github.com/LLNL/metall) and [Boost C++ Libraries](https://www.boost.org/) in addition to saltatlas's basic components.
 Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
-
 Those libraries are automatically downloaded and set up properly.
+
+HDF5 is not used by DNND.
+
+An example build step is:
+
+```shell
+git clone https://github.com/LLNL/saltatlas.git
+cd saltatlas
+mkdir build && cd build
+cmake ../ -DSALTATLAS_USE_METALL=ON -DSALTATLAS_USE_HDF5=OFF -DCMAKE_BUILD_TYPE=RELEASE
+```
 
 ### Executables
 
@@ -225,7 +235,7 @@ mpirun -n 2 ./examples/dnnd_pm_optimize_example -z ./pindex -u -m 1.5
 
 # Open the k-NN index created above, query nearest neighbors, and show the accuracy.
 mpirun -n 2 ./examples/dnnd_pm_query_example -z ./pindex \
-  -n 4 -q ../examples/datasets/query_5-4.dat -g ../examples/datasets/neighbor_5-4.dat
+  -n 4 -q ../examples/datasets/query_5-4.txt -g ../examples/datasets/ground-truth_5-4.txt
 ```
 
 # License

@@ -53,6 +53,8 @@ class dknn_batch_query_kernel {
 
   struct option {
     int         k{4};
+    double      epsilon{0.1};
+    double      mu{0.2};
     std::size_t batch_size{0};
     uint64_t    rnd_seed{128};
     bool        verbose{false};
@@ -94,6 +96,7 @@ class dknn_batch_query_kernel {
     const std::size_t max_num_queries = m_comm.all_reduce_max(queries.size());
     const id_type     offset          = max_num_queries * m_comm.rank();
 
+    // Allgather
     for (int r = 0; r < m_comm.size(); ++r) {
       for (std::size_t i = 0; i < queries.size(); ++i) {
         m_comm.async(
@@ -115,7 +118,7 @@ class dknn_batch_query_kernel {
 
   void priv_query_batch(const query_store_type& queries,
                         neighbor_store_type&    query_results) {
-    const auto local_id_offset = priv_all_gather_query(queries);
+    const auto local_query_no_offset = priv_all_gather_query(queries);
 
     const std::size_t num_global_queries = m_query_store.size();
     if (m_option.verbose) {
@@ -123,7 +126,7 @@ class dknn_batch_query_kernel {
       m_comm.cout0() << "Batch Size\t" << m_option.batch_size << std::endl;
     }
 
-    std::size_t query_no_offset   = local_id_offset;
+    std::size_t query_no_offset   = local_query_no_offset;
     std::size_t num_local_remains = queries.size();
     for (std::size_t batch_no = 0;; ++batch_no) {
       if (m_option.verbose) {
@@ -136,9 +139,12 @@ class dknn_batch_query_kernel {
 
       // Initialize the variable used during the query.
       m_knn_heap_table.clear();
+      m_visited.clear();
       for (std::size_t i = 0; i < local_batch_size; ++i) {
-        const auto query_no = query_no_offset + i;
-        m_knn_heap_table.emplace(query_no, m_option.k);
+        const auto        query_no  = query_no_offset + i;
+        const std::size_t heap_size = m_option.k * (1.0 + m_option.mu);
+        m_knn_heap_table.emplace(query_no, heap_size);
+        m_visited[query_no].clear();
       }
       m_comm.cf_barrier();
 
@@ -166,7 +172,9 @@ class dknn_batch_query_kernel {
           result_knn.push_back(heap.top());
           heap.pop();
         }
-        std::sort(result_knn.begin(), result_knn.end());
+        std::partial_sort(result_knn.begin(), result_knn.begin() + m_option.k,
+                          result_knn.end());
+        result_knn.resize(m_option.k);  // Need only nearest k neighbors
       }
       query_no_offset += local_batch_size;
       m_comm.cf_barrier();
@@ -192,7 +200,8 @@ class dknn_batch_query_kernel {
                                        random_generator_type& rnd_gen) {
     std::unordered_set<id_type>            set;
     std::uniform_int_distribution<id_type> dis(0, m_global_max_id);
-    for (std::size_t k = 0; k < m_option.k; ++k) {  // sqrt(k) is enough?
+    for (std::size_t k = 0; k < m_knn_heap_table.at(query_no).k();
+         ++k) {  // sqrt(k) is enough?
       while (true) {
         const id_type id = dis(rnd_gen);
         if (set.count(id)) continue;
@@ -250,15 +259,35 @@ class dknn_batch_query_kernel {
     void operator()(const self_pointer_type& local_this,
                     const std::size_t query_no, const id_type nid,
                     const distance_type d) {
-      knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
-      if (!heap.push_unique(nid, d)) {
-        return;
+      assert(local_this->m_visited.count(query_no));
+      if (local_this->m_visited[query_no].count(nid)) {
+        return;  // Already visited
       }
+      local_this->m_visited[query_no].insert(nid);
+
+      knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
+      // m_visited does the same work
+      //      if (heap.contains(nid)) {
+      //        return;  // Already one the nearest neighbors
+      //      }
+
+      auto max_distance =
+          heap.size() < heap.k()
+              ? std::numeric_limits<distance_type>::max()
+              : heap.top().distance * (1.0 + local_this->m_option.epsilon);
+      if (d >= max_distance) {
+        return;  // Too far neighbor.
+      }
+
+      if (heap.push_unique(nid, d)) {
+        max_distance =
+            heap.size() < heap.k()
+                ? std::numeric_limits<distance_type>::max()
+                : heap.top().distance * (1.0 + local_this->m_option.epsilon);
+      }
+
       const auto& partitioner = local_this->m_point_partitioner;
       assert(partitioner);
-      const auto max_distance = heap.size() < local_this->m_option.k
-                                    ? std::numeric_limits<distance_type>::max()
-                                    : heap.top().distance;
       local_this->comm().async(partitioner(nid), neighbor_visitor_launcher{},
                                local_this, local_this->comm().rank(), query_no,
                                nid, max_distance);
@@ -276,6 +305,7 @@ class dknn_batch_query_kernel {
   id_type                   m_global_max_id{0};
   internal_query_store_type m_query_store;
   std::mt19937              m_rnd_generator;
+  std::unordered_map<std::size_t, std::unordered_set<id_type>> m_visited;
 };
 
 }  // namespace saltatlas::dndetail

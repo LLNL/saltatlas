@@ -20,6 +20,8 @@ int main(int argc, char **argv) {
   int                      query_k{4};
   double                   r{0.8};
   double                   delta{0.001};
+  double                   epsilon{0.1};
+  double                   mu{0.2};
   bool                     exchange_reverse_neighbors{true};
   bool                     make_index_undirected{true};
   double                   pruning_degree_multiplier{1.5};
@@ -56,7 +58,8 @@ int main(int argc, char **argv) {
   saltatlas::read_query(query_file_path, queries, comm);
 
   comm.cout0() << "Executing queries" << std::endl;
-  const auto query_results = dnnd.query_batch(queries, query_k, batch_size);
+  const auto query_results =
+      dnnd.query_batch(queries, query_k, epsilon, mu, batch_size);
 
   show_query_recall_score(query_results, ground_truth_file_path, comm);
 
