@@ -20,6 +20,7 @@
 #include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/utility.hpp>
+#include <saltatlas/dnnd/dhnsw_index_reader.hpp>
 
 using id_type              = uint32_t;
 using feature_element_type = float;
