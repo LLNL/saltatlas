@@ -33,6 +33,7 @@ void usage(std::string_view exe_name, cout_type &cout);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
+  show_config(comm);
 
   option_t opt;
   bool     help{false};
@@ -69,9 +70,14 @@ int main(int argc, char **argv) {
                            init_dnnd.get_knn_index());
     } else if (!opt.dhnsw_init_index_path.empty()) {
       std::unordered_map<id_type, std::vector<id_type>> init_neighbors;
+      comm.cout0() << "Read DHNS index" << std::endl;
+      ygm::timer read_timer;
       saltatlas::read_dhnsw_index(
           std::vector<std::string>{opt.dhnsw_init_index_path}, opt.verbose,
           dnnd.get_point_partitioner(), init_neighbors, comm);
+      comm.cout0() << "\nReading index took (s)\t" << read_timer.elapsed()
+                   << std::endl;
+
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size,
                            init_neighbors);

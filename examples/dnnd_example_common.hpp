@@ -17,10 +17,10 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/data_reader.hpp>
+#include <saltatlas/dnnd/dhnsw_index_reader.hpp>
 #include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/utility.hpp>
-#include <saltatlas/dnnd/dhnsw_index_reader.hpp>
 
 using id_type              = uint32_t;
 using feature_element_type = float;
@@ -33,7 +33,14 @@ using dnnd_pm_type =
     saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
 using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
-static constexpr std::size_t k_ygm_buff_size = 256 * 1024 * 1024;
+void show_config(ygm::comm& comm) {
+  comm.cout0() << "ID type: " << typeid(id_type).name() << std::endl;
+  comm.cout0() << "Feature element type: "
+               << typeid(feature_element_type).name() << std::endl;
+  comm.cout0() << "Distance type: " << typeid(distance_type).name()
+               << std::endl;
+  comm.welcome();
+}
 
 template <typename neighbor_store_type>
 inline void show_query_recall_score(

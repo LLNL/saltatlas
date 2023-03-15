@@ -62,7 +62,7 @@ inline void read_dhnsw_index(
   jsonp.for_all(process_base_json);
   comm.barrier();
 
-  comm.cout0() << "#of invalid line\t" << comm.all_reduce_sum(num_invalid_lines)
+  comm.cout0() << "#of invalid lines\t" << comm.all_reduce_sum(num_invalid_lines)
                << std::endl;
 }
 
