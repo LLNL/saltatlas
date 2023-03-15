@@ -29,8 +29,8 @@ inline void read_dhnsw_index(
   ygm::ygm_ptr<std::unordered_map<id_type, std::vector<id_type>>> ptr_store(
       &local_store);
 
-  auto process_base_json = [&verbose, &point_partitioner, &num_invalid_lines,
-                            &comm, &ptr_store](auto line) {
+  auto reader = [&verbose, &point_partitioner, &num_invalid_lines, &comm,
+                 &ptr_store](auto line) {
     if (!line.contains("ID")) {
       ++num_invalid_lines;
       return;
@@ -58,12 +58,32 @@ inline void read_dhnsw_index(
     comm.async(point_partitioner(id), receiver, ptr_store, id, neighbors);
   };
 
-  ygm::io::ndjson_parser jsonp(comm, index_file_names, false, false);
-  jsonp.for_all(process_base_json);
+  ygm::io::ndjson_parser jsonp(comm, index_file_names, false, true);
+  jsonp.for_all(reader);
   comm.barrier();
 
-  comm.cout0() << "#of invalid lines\t" << comm.all_reduce_sum(num_invalid_lines)
-               << std::endl;
+  if (verbose) {
+    comm.cout0() << "#of read points\t"
+                 << comm.all_reduce_sum(local_store.size()) << std::endl;
+    comm.cout0() << "#of invalid lines\t"
+                 << comm.all_reduce_sum(num_invalid_lines) << std::endl;
+  }
+
+  if (verbose) {
+    id_type     max_id = 0;
+    std::size_t max_k  = 0;
+    std::size_t min_k  = 0;
+    for (const auto &item : local_store) {
+      max_id         = std::max(item.first, max_id);
+      const auto &nn = item.second;
+      max_k          = std::max(nn.size(), max_k);
+      min_k          = std::min(nn.size(), min_k);
+    }
+    comm.cf_barrier();
+    comm.cout0() << "Max ID\t" << comm.all_reduce_max(max_id) << std::endl;
+    comm.cout0() << "Max k\t" << comm.all_reduce_max(max_k) << std::endl;
+    comm.cout0() << "Min k\t" << comm.all_reduce_min(max_k) << std::endl;
+  }
 }
 
 }  // namespace saltatlas
