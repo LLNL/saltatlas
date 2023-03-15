@@ -8,7 +8,6 @@
 #include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 
 #include <ygm/comm.hpp>
-#include <ygm/container/bag.hpp>
 #include <ygm/detail/ygm_ptr.hpp>
 
 #include <hnswlib/hnswalg.h>
@@ -72,9 +71,8 @@ class dhnsw_impl {
     }
   }
 
-  template <template <typename, typename> class Container>
-  void partition_data(Container<index_t, point_t> &data,
-                      const uint32_t               num_partitions) {
+  template <typename Container>
+  void partition_data(Container &data, const uint32_t num_partitions) {
     m_partitioner.initialize(data, num_partitions);
   }
 
