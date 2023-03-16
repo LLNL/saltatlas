@@ -270,6 +270,26 @@ void read_points(const std::vector<std::string>           &file_names,
                      comm, verbose);
 }
 
+/// \brief Read points that are strings using multiple processes.
+/// The input files do not contain ID and each row contains a single string
+template <typename id_t, typename pstore_alloc>
+void read_points(const std::vector<std::string>           &file_names,
+                 point_store<id_t, char, pstore_alloc>    &local_point_store,
+                 const std::function<int(const id_t &id)> &point_partitioner,
+                 ygm::comm &comm, const bool verbose) {
+  const auto parser = [](const std::string &input, std::vector<char> &feature) {
+    for (char c : input) {
+      feature.push_back(c);
+    }
+    feature.push_back('\0');  // Need to add null character for proper
+                              // termination when treating as char *
+    return true;
+  };
+
+  read_points_helper(file_names, parser, local_point_store, point_partitioner,
+                     comm, verbose);
+}
+
 }  // namespace saltatlas::dndetail
 
 namespace saltatlas {
@@ -303,6 +323,10 @@ inline void read_points(
     if (verbose) comm.cout0() << "Read CSV-ID format files" << std::endl;
     dndetail::read_points_with_id(point_file_names, ',', local_point_store,
                                   point_partitioner, comm, verbose);
+  } else if (format == "str") {
+    if (verbose) comm.cout0() << "Read string format files" << std::endl;
+    dndetail::read_points(point_file_names, local_point_store,
+                          point_partitioner, comm, verbose);
   } else {
     comm.cerr0() << "Invalid reader mode" << std::endl;
   }
@@ -403,8 +427,7 @@ inline void read_neighbors(const std::string_view                &file_path,
     }
     ++i;
   }
-  if (i != num_entries ||
-      (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
+  if (i != num_entries || (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
     std::cerr << "Failed reading data from " << file_path << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
@@ -452,6 +475,32 @@ inline void read_query(
     while (ss >> v) {
       queries.back().push_back(v);
     }
+  }
+}
+
+/// \brief Reads a file that contain queries.
+/// Each line is a single string containing a query
+/// \param query_file_path Path to a query file.
+/// \param queries Buffer to store read queries.
+template <>
+inline void read_query(const std::string_view         &query_file_path,
+                       std::vector<std::vector<char>> &queries) {
+  if (query_file_path.empty()) return;
+
+  std::ifstream ifs(query_file_path.data());
+  if (!ifs.is_open()) {
+    std::cerr << "Failed to open " << query_file_path << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+
+  std::string buf;
+  while (std::getline(ifs, buf)) {
+    std::vector<char> query;
+    for (char c : buf) {
+      query.push_back(c);
+    }
+    query.push_back('\0');
+    queries.push_back(query);
   }
 }
 

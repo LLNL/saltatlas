@@ -1,0 +1,9 @@
+flag
+tag
+bag
+cell
+call
+sell
+start
+stars
+tart

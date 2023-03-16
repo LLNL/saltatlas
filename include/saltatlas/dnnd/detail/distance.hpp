@@ -100,7 +100,56 @@ inline distance_type jaccard_index(const std::size_t                 len,
            static_cast<distance_type>(num_non_zero);
 }
 
-enum class metric_id : uint8_t { invalid, l1, l2, sql2, cosine, jaccard };
+template <typename feature_element_type, typename distance_type>
+inline distance_type levenshtein(const std::size_t                 len,
+                                 const feature_element_type *const v0,
+                                 const feature_element_type *const v1) {
+  std::string s0(v0);
+  std::string s1(v1);
+
+  const size_t m = s0.size();
+  const size_t n = s1.size();
+
+  if (m == 0) {
+    return n;
+  }
+  if (n == 0) {
+    return m;
+  }
+
+  // Row of matrix for dynamic programming approach
+  std::vector<size_t> dist_row(m + 1);
+  for (size_t i = 0; i < m + 1; ++i) {
+    dist_row[i] = i;
+  }
+
+  for (size_t i = 1; i < n + 1; ++i) {
+    size_t diag = i - 1;
+    size_t next_diag;
+    dist_row[0] = i;
+    for (size_t j = 1; j < m + 1; ++j) {
+      next_diag              = dist_row[j];
+      bool substitution_cost = (s0[j - 1] != s1[i - 1]);
+
+      dist_row[j] =
+          std::min(1 + dist_row[j],
+                   std::min(1 + dist_row[j - 1], substitution_cost + diag));
+      diag = next_diag;
+    }
+  }
+
+  return static_cast<distance_type>(dist_row[m]);
+}
+
+enum class metric_id : uint8_t {
+  invalid,
+  l1,
+  l2,
+  sql2,
+  cosine,
+  jaccard,
+  levenshtein
+};
 
 inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
   if (metric_name == "l1") {
@@ -113,6 +162,8 @@ inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
     return metric_id::cosine;
   } else if (metric_name == "jaccard") {
     return metric_id::jaccard;
+  } else if (metric_name == "levenshtein") {
+    return metric_id::levenshtein;
   }
   return metric_id::invalid;
 }
@@ -130,6 +181,8 @@ inline metric_type<feature_element_type, distance_type> &metric(
     return cosine<feature_element_type, distance_type>;
   } else if (id == metric_id::jaccard) {
     return jaccard_index<feature_element_type, distance_type>;
+  } else if (id == metric_id::levenshtein) {
+    return levenshtein<feature_element_type, distance_type>;
   }
   return invalid<feature_element_type, distance_type>;
 }

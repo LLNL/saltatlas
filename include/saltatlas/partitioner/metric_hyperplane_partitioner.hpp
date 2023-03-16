@@ -37,9 +37,8 @@ class metric_hyperplane_partitioner {
     m_comm.barrier();
   }
 
-  template <template <typename, typename> class Container>
-  void initialize(Container<index_t, point_t> &data,
-                  const uint32_t               num_partitions) {
+  template <class Container>
+  void initialize(Container &data, const uint32_t num_partitions) {
     m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
         &m_space, num_partitions, 16, 200, 3149);
 
@@ -55,12 +54,11 @@ class metric_hyperplane_partitioner {
 
     ygm::timer t{};
 
-    data.for_all(
-        [&current_level_points, &point_assignments](const auto &id_point) {
-          const auto &[id, point] = id_point;
-          current_level_points[0].push_back(point);
-          point_assignments[id] = 0;
-        });
+    data.for_all([&current_level_points, &point_assignments](
+                     const auto &id, const auto &point) {
+      current_level_points[0].push_back(point);
+      point_assignments[id] = 0;
+    });
 
     m_tree.resize((1 << m_num_levels - 1) - 1);
 
@@ -155,14 +153,11 @@ class metric_hyperplane_partitioner {
     std::vector<index_t> children;
   };
 
-  template <template <typename, typename> class Container>
-  std::vector<node_statistics> find_tree_statistics(
-      Container<index_t, point_t> &data) {
+  template <typename Container>
+  std::vector<node_statistics> find_tree_statistics(Container &data) {
     ygm::container::map<index_t, node_statistics> stats_map;
 
-    data.for_all([&stats_map, this](const auto &index_pt_pair) {
-      const auto &[index, point] = index_pt_pair;
-
+    data.for_all([&stats_map, this](const auto &index, const auto &point) {
       auto leaf_index = search_tree(point);
 
       auto search_path = reconstruct_search_path(leaf_index);
@@ -364,32 +359,30 @@ class metric_hyperplane_partitioner {
   }
 
   // TODO: make point_assignments const
-  template <template <typename, typename> class Container>
+  template <typename Container>
   std::vector<std::vector<dist_t>> calculate_thetas(
       uint32_t                              num_nodes,
       std::unordered_map<index_t, index_t> &point_assignments,
-      Container<index_t, point_t>          &data) {
+      Container                            &data) {
     std::vector<std::vector<dist_t>> thetas(num_nodes);
 
-    data.for_all(
-        [&point_assignments, &thetas, this](const auto index_point_pair) {
-          const auto &[index, point] = index_point_pair;
+    data.for_all([&point_assignments, &thetas, this](const auto &index,
+                                                     const auto &point) {
+      const auto tree_index = point_assignments[index];
+      auto      &node       = this->m_tree[tree_index];
 
-          const auto tree_index = point_assignments[index];
-          auto      &node       = this->m_tree[tree_index];
+      dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
+                                             m_space.get_dist_func_param());
+      dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
+                                             m_space.get_dist_func_param());
 
-          dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                                 m_space.get_dist_func_param());
-          dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                                 m_space.get_dist_func_param());
+      dist_t theta = pow(dist2, 2) - pow(dist1, 2);
 
-          dist_t theta = pow(dist2, 2) - pow(dist1, 2);
+      ASSERT_RELEASE(index_to_ln(point_assignments[index]).second <
+                     thetas.size());
 
-          ASSERT_RELEASE(index_to_ln(point_assignments[index]).second <
-                         thetas.size());
-
-          thetas[index_to_ln(point_assignments[index]).second].push_back(theta);
-        });
+      thetas[index_to_ln(point_assignments[index]).second].push_back(theta);
+    });
 
     return thetas;
   }
@@ -409,14 +402,12 @@ class metric_hyperplane_partitioner {
     }
   }
 
-  template <template <typename, typename> class Container>
+  template <typename Container>
   void assign_points(std::unordered_map<index_t, index_t> &point_assignments,
                      std::vector<std::vector<point_t>>    &next_level_points,
-                     Container<index_t, point_t>          &data) {
-    data.for_all([&point_assignments, &next_level_points,
-                  this](const auto &index_point_pair) {
-      const auto &[index, point] = index_point_pair;
-
+                     Container                            &data) {
+    data.for_all([&point_assignments, &next_level_points, this](
+                     const auto &index, const auto &point) {
       const auto tree_index = point_assignments[index];
       auto      &node       = this->m_tree[tree_index];
 
