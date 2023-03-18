@@ -310,9 +310,9 @@ class dnnd_kernel {
                     const std::vector<feature_element_type>& src_feature_vec) {
       const auto& nbr_feature_vec =
           local_this->m_point_store.feature_vector(nid);
-      const auto d = local_this->m_distance_function(src_feature_vec.size(),
-                                                     src_feature_vec.data(),
-                                                     nbr_feature_vec.data());
+      const auto d = local_this->m_distance_function(
+          src_feature_vec.data(), src_feature_vec.size(),
+          nbr_feature_vec.data(), nbr_feature_vec.size());
       local_this->comm().async(local_this->m_point_partitioner(sid),
                                distance_calculator{}, local_this, sid, nid, d);
     }
@@ -605,8 +605,9 @@ class dnnd_kernel {
       // Update u2's heap (nearest neighbors list) if 'u1' is closer than the
       // current neighbors.
       const auto& u2_feature = local_this->m_point_store.feature_vector(u2);
-      const auto  d          = local_this->m_distance_function(
-          u1_feature.size(), u1_feature.data(), u2_feature.data());
+      const auto  d =
+          local_this->m_distance_function(u1_feature.data(), u1_feature.size(),
+                                          u2_feature.data(), u2_feature.size());
       local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
 
       if (d < u1_max_distance) {
