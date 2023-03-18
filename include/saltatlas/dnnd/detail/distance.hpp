@@ -13,24 +13,28 @@
 
 namespace saltatlas::dndetail::distance {
 template <typename feature_element_type, typename distance_type>
-using metric_type = distance_type(const std::size_t,
+using metric_type = distance_type(const feature_element_type *const,
+                                  const std::size_t,
                                   const feature_element_type *const,
-                                  const feature_element_type *const);
+                                  const std::size_t);
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type invalid(const std::size_t,
+inline distance_type invalid(const feature_element_type *const,
+                             const std::size_t,
                              const feature_element_type *const,
-                             const feature_element_type *const) {
+                             const std::size_t) {
   assert(false);
   return distance_type{};
 }
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type l1(const std::size_t                 len,
-                        const feature_element_type *const f0,
-                        const feature_element_type *const f1) {
+inline distance_type l1(const feature_element_type *const f0,
+                        const std::size_t                 len0,
+                        const feature_element_type *const f1,
+                        const std::size_t                 len1) {
+  assert(len0 == len1);
   distance_type d = 0;
-  for (std::size_t i = 0; i < len; ++i) {
+  for (std::size_t i = 0; i < len0; ++i) {
     const auto x = std::abs(f0[i] - f1[i]);
     d += x;
   }
@@ -38,11 +42,13 @@ inline distance_type l1(const std::size_t                 len,
 }
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type l2(const std::size_t                 len,
-                        const feature_element_type *const f0,
-                        const feature_element_type *const f1) {
+inline distance_type l2(const feature_element_type *const f0,
+                        const std::size_t                 len0,
+                        const feature_element_type *const f1,
+                        const std::size_t                 len1) {
+  assert(len0 == len1);
   distance_type d = 0;
-  for (std::size_t i = 0; i < len; ++i) {
+  for (std::size_t i = 0; i < len0; ++i) {
     const auto x = (f0[i] - f1[i]);
     d += x * x;
   }
@@ -52,11 +58,13 @@ inline distance_type l2(const std::size_t                 len,
 /// \brief Squared Euclidean distance, which omits the final square root in the
 /// calculation of l2 norm.
 template <typename feature_element_type, typename distance_type>
-inline distance_type sql2(const std::size_t                 len,
-                          const feature_element_type *const f0,
-                          const feature_element_type *const f1) {
+inline distance_type sql2(const feature_element_type *const f0,
+                          const std::size_t                 len0,
+                          const feature_element_type *const f1,
+                          const std::size_t                 len1) {
+  assert(len0 == len1);
   distance_type d = 0;
-  for (std::size_t i = 0; i < len; ++i) {
+  for (std::size_t i = 0; i < len0; ++i) {
     const auto x = (f0[i] - f1[i]);
     d += x * x;
   }
@@ -64,29 +72,33 @@ inline distance_type sql2(const std::size_t                 len,
 }
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type cosine(const std::size_t                 len,
-                            const feature_element_type *const f0,
-                            const feature_element_type *const f1) {
+inline distance_type cosine(const feature_element_type *const f0,
+                            const std::size_t                 len0,
+                            const feature_element_type *const f1,
+                            const std::size_t                 len1) {
+  assert(len0 == len1);
   const distance_type n0 =
-      std::sqrt(dndetail::blas::inner_product(len, f0, f0));
+      std::sqrt(dndetail::blas::inner_product(len0, f0, f0));
   const distance_type n1 =
-      std::sqrt(dndetail::blas::inner_product(len, f1, f1));
+      std::sqrt(dndetail::blas::inner_product(len1, f1, f1));
   if (n0 == 0 && n1 == 0)
     return static_cast<distance_type>(0);
   else if (n0 == 0 || n1 == 0)
     return static_cast<distance_type>(1);
 
-  const distance_type x = dndetail::blas::inner_product(len, f0, f1);
+  const distance_type x = dndetail::blas::inner_product(len0, f0, f1);
   return static_cast<distance_type>(1.0 - x / (n0 * n1));
 }
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type jaccard_index(const std::size_t                 len,
-                                   const feature_element_type *const f0,
-                                   const feature_element_type *const f1) {
+inline distance_type jaccard_index(const feature_element_type *const f0,
+                                   const std::size_t                 len0,
+                                   const feature_element_type *const f1,
+                                   const std::size_t                 len1) {
+  assert(len0 == len1);
   std::size_t num_non_zero = 0;
   std::size_t num_equal    = 0;
-  for (std::size_t i = 0; i < len; ++i) {
+  for (std::size_t i = 0; i < len0; ++i) {
     const bool x_true = !!f0[i];
     const bool y_true = !!f1[i];
     num_non_zero += x_true | y_true;
@@ -101,15 +113,10 @@ inline distance_type jaccard_index(const std::size_t                 len,
 }
 
 template <typename feature_element_type, typename distance_type>
-inline distance_type levenshtein(const std::size_t                 len,
-                                 const feature_element_type *const v0,
-                                 const feature_element_type *const v1) {
-  std::string s0(v0);
-  std::string s1(v1);
-
-  const size_t m = s0.size();
-  const size_t n = s1.size();
-
+inline distance_type levenshtein(const feature_element_type *const s0,
+                                 const std::size_t                 m,
+                                 const feature_element_type *const s1,
+                                 const std::size_t                 n) {
   if (m == 0) {
     return n;
   }

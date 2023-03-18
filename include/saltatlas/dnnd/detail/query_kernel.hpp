@@ -247,7 +247,8 @@ class dknn_batch_query_kernel {
       const auto& trg_feature =
           local_this->m_point_store.feature_vector(trg_id);
       const auto d = local_this->m_distance_metric(
-          query_feature.size(), query_feature.data(), trg_feature.data());
+          query_feature.data(), query_feature.size(), trg_feature.data(),
+          trg_feature.size());
       if (d >= max_distance) return;
 
       local_this->comm().async(query_owner_rank, neighbor_updator{}, local_this,

@@ -263,8 +263,9 @@ class nn_index_optimizer {
           const auto& rt_feature = m_remote_point_store.feature_vector(rn.id);
           const auto& n_feature =
               m_remote_point_store.feature_vector(neighbor.id);
-          const auto distance_to_retained_neighbor = m_distance_metric(
-              rt_feature.size(), rt_feature.data(), n_feature.data());
+          const auto distance_to_retained_neighbor =
+              m_distance_metric(rt_feature.data(), rt_feature.size(),
+                                n_feature.data(), n_feature.size());
           if (distance_to_src > distance_to_retained_neighbor) {
             remove = true;
             break;
