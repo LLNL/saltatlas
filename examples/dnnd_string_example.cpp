@@ -19,7 +19,7 @@
 #include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
-//#include "dnnd_example_common.hpp"
+// #include "dnnd_example_common.hpp"
 
 using id_type              = uint32_t;
 using feature_element_type = char;
@@ -43,6 +43,8 @@ int main(int argc, char **argv) {
   bool                     make_index_undirected{true};
   double                   pruning_degree_multiplier{1.5};
   bool                     remove_long_paths{false};
+  double                   epsilon{0.1};
+  double                   mu{0.2};
   std::size_t              batch_size{0};
   std::string              distance_metric_name{"levenshtein"};
   std::vector<std::string> point_file_paths{
@@ -75,7 +77,8 @@ int main(int argc, char **argv) {
   saltatlas::read_query(query_file_path, queries, comm);
 
   comm.cout0() << "Executing queries" << std::endl;
-  const auto query_results = dnnd.query_batch(queries, query_k, batch_size);
+  const auto query_results =
+      dnnd.query_batch(queries, query_k, epsilon, mu, batch_size);
 
   comm.cout0() << "Dump query results" << std::endl;
   saltatlas::utility::gather_and_dump_neighbors(query_results,
