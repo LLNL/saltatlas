@@ -29,10 +29,10 @@ int main(int argc, char **argv) {
   std::string original_datastore_path;
   std::string datastore_path;
   std::string datastore_transfer_path;
-  bool        make_index_undirected{false};
-  double      pruning_degree_multiplier{1.5};
+  bool        make_index_undirected{true};
+  double      pruning_degree_multiplier{0.0}; // no pruning by default
   bool        remove_long_paths{false};
-  bool        verbose{false};
+  bool        verbose{true};
   bool        help{true};
 
   if (!parse_options(argc, argv, original_datastore_path, datastore_path,
@@ -92,10 +92,7 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
   original_datastore_path.clear();
   datastore_path.clear();
   datastore_transfer_path.clear();
-  make_index_undirected = false;
-  remove_long_paths     = false;
-  verbose               = false;
-  help                  = false;
+  help = false;
 
   int n;
   while ((n = ::getopt(argc, argv, "i:z:x:um:lvh")) != -1) {

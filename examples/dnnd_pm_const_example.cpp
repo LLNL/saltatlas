@@ -14,8 +14,8 @@ struct option_t {
   int                      index_k{0};
   double                   r{0.8};
   double                   delta{0.001};
-  bool                     exchange_reverse_neighbors{false};
-  std::size_t              batch_size{0};
+  bool                     exchange_reverse_neighbors{true};
+  std::size_t              batch_size{1ULL << 31};
   std::string              distance_metric_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
@@ -112,9 +112,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   option.dhnsw_init_index_path.clear();
   option.datastore_path.clear();
   option.datastore_transfer_path.clear();
-  option.exchange_reverse_neighbors = false;
-  option.verbose                    = false;
-  help                              = false;
+  help = false;
 
   int n;
   while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:vh")) != -1) {
@@ -206,8 +204,9 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t\t'l2' (L2), sql2' (squared L2), 'cosine' (cosine similarity), "
          "or 'jaccard' (Jaccard index)."
       << "\n\t-p [string, required] Format of input point files:"
-      << "\n\t\t'wsv' (whitespace-separated values),"
+      << "\n\t\t'wsv' (whitespace-separated values w/o ID),"
       << "\n\t\t'wsv-id' (WSV format and the first column is point ID),"
+      << "\n\t\t'csv' (comma-separated values w/o ID),"
       << "\n\t\tor 'csv-id' (CSV format and the first column is point ID)."
       << "\n\t-k [int] Number of neighbors to have for each point in the index."
       << "\n\t-r [double] Sample rate parameter (ρ) in NN-Descent."
