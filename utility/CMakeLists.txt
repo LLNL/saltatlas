@@ -10,4 +10,7 @@ if (SALTATLAS_USE_METALL)
         	target_link_libraries(convert_wsv_to_wsv_id PRIVATE OpenMP::OpenMP_CXX)
     	endif ()
 	endif()
+
+	add_executable(dnnd_transfer_index dnnd_transfer_pm_datastore.cpp)
+	target_link_libraries(dnnd_transfer_index PUBLIC saltatlas)
 endif()
