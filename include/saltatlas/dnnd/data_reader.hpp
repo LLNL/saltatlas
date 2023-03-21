@@ -281,8 +281,6 @@ void read_points(const std::vector<std::string>           &file_names,
     for (char c : input) {
       feature.push_back(c);
     }
-    feature.push_back('\0');  // Need to add null character for proper
-                              // termination when treating as char *
     return true;
   };
 
