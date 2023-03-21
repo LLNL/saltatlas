@@ -11,6 +11,6 @@ if (SALTATLAS_USE_METALL)
     	endif ()
 	endif()
 
-	add_executable(dnnd_transfer_index dnnd_transfer_pm_datastore.cpp)
-	target_link_libraries(dnnd_transfer_index PUBLIC saltatlas)
+	add_executable(dnnd_transfer_pm_datastore dnnd_transfer_pm_datastore.cpp)
+	target_link_libraries(dnnd_transfer_pm_datastore PUBLIC saltatlas)
 endif()
