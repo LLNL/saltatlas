@@ -21,12 +21,12 @@ int main(int argc, char **argv) {
   double                   r{0.8};
   double                   delta{0.001};
   double                   epsilon{0.1};
-  double                   mu{0.2};
+  double                   mu{0.0};
   bool                     exchange_reverse_neighbors{true};
   bool                     make_index_undirected{true};
-  double                   pruning_degree_multiplier{1.5};
+  double                   pruning_degree_multiplier{0.0}; // No pruning
   bool                     remove_long_paths{false};
-  std::size_t              batch_size{0};
+  std::size_t              batch_size{1ULL << 31};
   std::string              distance_metric_name{"l2"};
   std::vector<std::string> point_file_paths{
       "./examples/datasets/point_5-4.txt"};

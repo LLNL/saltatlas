@@ -28,12 +28,12 @@ int main(int argc, char **argv) {
   std::string original_datastore_path;
   int         query_k{4};
   double      epsilon{0.1};
-  double      mu{0.2};
+  double      mu{0.0};
   std::size_t batch_size{0};
   std::string query_file_path;
   std::string ground_truth_file_path;
   std::string query_result_file_path;
-  bool        verbose{false};
+  bool        verbose{true};
   bool        help{false};
 
   if (!parse_options(argc, argv, datastore_path, original_datastore_path,

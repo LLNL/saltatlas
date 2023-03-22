@@ -133,24 +133,26 @@ class base_dnnd {
   }
 
   /// \brief Construct an k-NN index.
+  /// Take a neighbor data for initialization.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
   /// \param delta Precision parameter in NN-Descent.
   /// \param exchange_reverse_neighbors If true is specified, exchange reverse
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
-  /// \param init_index k-NN index for initialization.
+  /// \param init_neighbors Neighbor data for initialization.
   void construct_index(
       const int k, const double r, const double delta,
       const bool exchange_reverse_neighbors, const std::size_t mini_batch_size,
-      const std::unordered_map<id_type, std::vector<id_type>>& init_index) {
+      const std::unordered_map<id_type, std::vector<id_type>>& init_neighbors) {
     auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
                                    mini_batch_size);
-    kernel.construct(init_index, m_data_core->knn_index);
+    kernel.construct(init_neighbors, m_data_core->knn_index);
     m_data_core->index_k = k;
   }
 
   /// \brief Construct an k-NN index.
+  /// Take an existing k-NN index for initialization.
   /// \tparam init_index_alloc_type Allocator type for init_index.
   /// \param k The number of nearest neighbors each point in the index has.
   /// \param r Sample rate parameter in NN-Descent.
