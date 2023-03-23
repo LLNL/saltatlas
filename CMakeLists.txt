@@ -22,6 +22,11 @@ option(SALTATLAS_INSTALL "Generate the install target"
        ${SALTATLAS_MAIN_PROJECT}
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+# Option for building Documentation (Doxygen)
+option(SALTATLAS_DOXYGEN "Build API documentation using Doxygen" OFF)
+
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
 if (SALTATLAS_MAIN_PROJECT)
@@ -36,6 +41,12 @@ if (SALTATLAS_MAIN_PROJECT)
     # in the main CMakeLists since it calls enable_testing, which must be in the
     # main CMakeLists.
     include(CTest)
+
+    # Doxygen
+    if (SALTATLAS_DOXYGEN)
+        include(saltatlasDoxygen)
+        saltatlasDoxygen()
+    endif()
 endif ()
 
 # Require out-of-source builds
