@@ -237,11 +237,7 @@ void read_points(const std::vector<std::string>              &file_names,
                  ygm::comm &comm, const bool verbose) {
   const auto parser = [delimiter](const std::string &input,
                                   std::vector<T>    &feature) {
-    std::string buf;
-    feature.clear();
-    for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
-      feature.push_back(str_cast<T>(buf));
-    }
+    feature = str_split<T>(input, delimiter);
     return true;
   };
 
@@ -258,36 +254,13 @@ void read_points(const std::vector<std::string>           &file_names,
                  const std::function<int(const id_t &id)> &point_partitioner,
                  ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, std::vector<T> &feature) {
-    std::string buf;
-    feature.clear();
-    for (std::stringstream ss(input); ss >> buf;) {
-      feature.push_back(str_cast<T>(buf));
-    }
+    feature = str_split<T>(input);
     return true;
   };
 
   read_points_helper(file_names, parser, local_point_store, point_partitioner,
                      comm, verbose);
 }
-
-/// \brief Read points that are strings using multiple processes.
-/// The input files do not contain ID and each row contains a single string
-template <typename id_t, typename pstore_alloc>
-void read_points(const std::vector<std::string>           &file_names,
-                 point_store<id_t, char, pstore_alloc>    &local_point_store,
-                 const std::function<int(const id_t &id)> &point_partitioner,
-                 ygm::comm &comm, const bool verbose) {
-  const auto parser = [](const std::string &input, std::vector<char> &feature) {
-    for (char c : input) {
-      feature.push_back(c);
-    }
-    return true;
-  };
-
-  read_points_helper(file_names, parser, local_point_store, point_partitioner,
-                     comm, verbose);
-}
-
 }  // namespace saltatlas::dndetail
 
 namespace saltatlas {
@@ -373,29 +346,26 @@ inline void read_neighbors(const std::string_view                &file_path,
   }
   store.reserve(num_entries);
 
+  // Count #of neighbors per entry (line) by reading the first line.
   std::size_t num_neighbors_per_entry = 0;
   {
     std::string buf;
     std::getline(ifs, buf);
-    std::stringstream ss(buf);
-    id_type           id;
-    while (ss >> id) {
-      ++num_neighbors_per_entry;
-    }
     if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
       std::cerr << "Failed reading data from " << file_path << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
     ifs.clear();
     ifs.seekg(0);
+
+    num_neighbors_per_entry = dndetail::str_split<id_type>(buf).size();
   }
 
   // Reads neighbor IDs.
   for (std::string buf; std::getline(ifs, buf);) {
+    const auto ids = dndetail::str_split<id_type>(buf);
     std::vector<dndetail::neighbor<id_type, distance_type>> neighbors;
-    std::stringstream                                       ss(buf);
-    id_type                                                 id;
-    while (ss >> id) {
+    for (const auto id : ids) {
       neighbors.emplace_back(id, distance_type{});
     }
     if (neighbors.size() != num_neighbors_per_entry) {
@@ -411,21 +381,22 @@ inline void read_neighbors(const std::string_view                &file_path,
   }
 
   // Reads distances.
-  std::size_t i = 0;
+  std::size_t line_no = 0;
   for (std::string buf; std::getline(ifs, buf);) {
-    std::stringstream ss(buf);
-    distance_type     d;
-    std::size_t       k = 0;
-    while (ss >> d) {
-      store[i][k++].distance = d;
-    }
-    if (k != num_neighbors_per_entry) {
+    const auto distances = dndetail::str_split<id_type>(buf);
+    if (distances.size() != num_neighbors_per_entry) {
       std::cerr << "#of neighbors per line are not the same" << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
-    ++i;
+
+    std::size_t k = 0;
+    for (const auto d : distances) {
+      store[line_no][k++].distance = d;
+    }
+
+    ++line_no;
   }
-  if (i != num_entries || (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
+  if (line_no != num_entries || (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
     std::cerr << "Failed reading data from " << file_path << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
@@ -465,39 +436,8 @@ inline void read_query(
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
 
-  std::string buf;
-  while (std::getline(ifs, buf)) {
-    std::stringstream    ss(buf);
-    feature_element_type v;
-    queries.resize(queries.size() + 1);
-    while (ss >> v) {
-      queries.back().push_back(v);
-    }
-  }
-}
-
-/// \brief Reads a file that contain queries.
-/// Each line is a single string containing a query
-/// \param query_file_path Path to a query file.
-/// \param queries Buffer to store read queries.
-template <>
-inline void read_query(const std::string_view         &query_file_path,
-                       std::vector<std::vector<char>> &queries) {
-  if (query_file_path.empty()) return;
-
-  std::ifstream ifs(query_file_path.data());
-  if (!ifs.is_open()) {
-    std::cerr << "Failed to open " << query_file_path << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-  }
-
-  std::string buf;
-  while (std::getline(ifs, buf)) {
-    std::vector<char> query;
-    for (char c : buf) {
-      query.push_back(c);
-    }
-    queries.push_back(query);
+  for (std::string line; std::getline(ifs, line);) {
+    queries.push_back(dndetail::str_split<feature_element_type>(line));
   }
 }
 
