@@ -50,11 +50,6 @@ inline uint64_t str_cast<uint64_t>(const std::string &input) {
 }
 
 template <>
-inline std::size_t str_cast<std::size_t>(const std::string &input) {
-  return std::stoul(input.data());
-}
-
-template <>
 inline float str_cast<float>(const std::string &input) {
   return std::stof(input.data());
 }
