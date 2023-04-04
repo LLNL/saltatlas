@@ -170,7 +170,7 @@ mpirun -n 2 ./examples/dnnd_example
 ```
 
 
-## Running DNND PM (persistent memory) Examples
+## Running DNND PM (**persistent memory**) Examples
 
 ### Build
 

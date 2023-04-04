@@ -9,3 +9,9 @@ scripts/*
 .autosave
 .DS_Store
 .idea
+.vscode/
+
+# Sphinx build output
+_build/
+_static/
+_templates/

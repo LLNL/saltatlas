@@ -12,6 +12,13 @@ project(
     LANGUAGES C CXX
 )
 
+
+#
+# CMake Modules
+#
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
+
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set(SALTATLAS_MAIN_PROJECT ON)
 endif ()
@@ -21,6 +28,22 @@ endif ()
 option(SALTATLAS_INSTALL "Generate the install target"
        ${SALTATLAS_MAIN_PROJECT}
 )
+
+
+#
+# Doxygen/Read the Docs (RTD) Documentation
+#
+option(SALTATLAS_DOXYGEN "Add targets for generating documentations" OFF)
+# Generate documentation for Read the Docs
+option(SALTATLAS_RTD_ONLY
+        "Run CMake for only generating documentations for Read the Docs" OFF)
+if (SALTATLAS_DOXYGEN OR SALTATLAS_RTD_ONLY)
+    add_subdirectory(docs)
+    if (SALTATLAS_RTD_ONLY)
+        return()
+    endif ()
+endif()
+
 
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
