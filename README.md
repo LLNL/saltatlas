@@ -15,7 +15,7 @@ each method will be provided.
 These steps are executed regardless of whether or not Spack is used.
 ``` bash
 # Load an appropriate version of gcc (on LC systems)
-module load gcc/8.3.1
+module load gcc/9.3.1
 git clone https://github.com/LLNL/saltatlas.git
 cd saltatlas
 mkdir build && cd build
