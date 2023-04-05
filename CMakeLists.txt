@@ -78,11 +78,11 @@ find_package(OpenMP)
 # supports Boost, we do not need to use the boost-cmake feature.
 set(Boost_NO_BOOST_CMAKE ON)
 
-find_package(Boost 1.64 QUIET)
+find_package(Boost 1.80 QUIET)
 if (NOT Boost_FOUND)
     FetchContent_Declare(
         Boost
-        URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2
+        URL https://boostorg.jfrog.io/artifactory/main/release/1.81.0/source/boost_1_81_0.tar.bz2
     )
     FetchContent_GetProperties(Boost)
     if (Boost_POPULATED)
@@ -99,7 +99,7 @@ if (NOT Boost_FOUND)
         endif ()
     endif ()
     set(BOOST_ROOT ${boost_SOURCE_DIR})
-    find_package(Boost 1.64)
+    find_package(Boost 1.80)
 else ()
     message(STATUS ${PROJECT_NAME} " found Boost dependency: "
                    ${Boost_INCLUDE_DIR}
