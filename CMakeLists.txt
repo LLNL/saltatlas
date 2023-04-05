@@ -50,6 +50,15 @@ if (EXISTS "${LOC_PATH}")
     )
 endif ()
 
+# Check if the compiler is GCC
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.1")
+        message(WARNING "Your GCC version may be too old. Please consider using GCC version 9.3.1 or higher.")
+    endif()
+else()
+    message(WARNING "You are not using GCC. This project has only been tested with GCC. Please consider using GCC version 9.3.1 or higher.")
+endif()
+
 #  Option to use Metall
 option(SALTATLAS_USE_METALL "Use Metall" OFF)
 
