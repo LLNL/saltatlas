@@ -11,15 +11,15 @@ Here is how to build RTD document using Sphinx on your machine.
 .. code-block:: shell
   :caption: How to build RTD docs locally
 
-  # Install Sphinx, Breathe, and Read the Docs Theme
+  # Install required software
+  brew install doxygen graphviz
   pip install sphinx breathe sphinx_rtd_theme
 
   git clone https://github.com/LLNL/saltatlas.git
   cd saltatlas
   mkdir build && cd build
 
-  # Run CMake with SALTATLAS_DOXYGEN=ON
-  # Need to rerun this command if any CMake or RTD related files are updated
+  # Run CMake
   cmake ../ -DSALTATLAS_RTD_ONLY=ON
 
   # Generate Read the Docs documents using Sphinx
@@ -33,3 +33,18 @@ Here is how to build RTD document using Sphinx on your machine.
   make doxygen
   # open the following file using a web browser
   open docs/html/index.html
+
+Rerunning Build Command
+^^^^^
+
+Depending on what files are modified, one may need to rerun the CMake command and/or :code:`make sphinx`.
+For instance:
+
+* Require running the CMake command and :code:`make sphinx`:
+
+  * Adding new RTD-related files, including configuration and .rst files
+  * Modifying CMake files
+
+* Require running only :code:`make sphinx`
+
+  * **Existing** files (except CMake) are modified

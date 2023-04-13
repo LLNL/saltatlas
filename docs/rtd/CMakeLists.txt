@@ -7,18 +7,11 @@ if (Sphinx_FOUND)
     set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/sphinx)
     set(SPHINX_INDEX_FILE ${SPHINX_BUILD}/index.html)
 
-    # Get a list of all files in the directory
-    file(GLOB_RECURSE SPHINX_DEPENDS_FILES
+    # Get a list of all .rst files
+    file(GLOB_RECURSE RST_FILES
             LIST_DIRECTORIES false
-            "${SPHINX_SOURCE}/*.rst"
-            "${DOXYGEN_XML_OUTPUT}/*")
+            "${SPHINX_SOURCE}/*.rst")
 
-    #message(STATUS ${SPHINX_DEPENDS_FILES})
-
-    # Only regenerate Sphinx when:
-    # - Our doc files have been updated
-    # - Doxygen has rerun
-    # - The Sphinx config has been updated
     add_custom_command(OUTPUT ${SPHINX_INDEX_FILE}
             COMMAND
             ${SPHINX_EXECUTABLE} -b html
@@ -28,7 +21,7 @@ if (Sphinx_FOUND)
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             DEPENDS
             doxygen
-            ${SPHINX_DEPENDS_FILES}
+            ${RST_FILES}
             MAIN_DEPENDENCY ${SPHINX_SOURCE}/conf.py
             COMMENT "Generating documentation using Sphinx")
 
