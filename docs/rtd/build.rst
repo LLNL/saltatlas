@@ -13,7 +13,7 @@ Required
 * MPI
 
 .. WARNING::
-  Which version is required for YGM?
+  Which MPI version is required for YGM?
 
 
 Option
