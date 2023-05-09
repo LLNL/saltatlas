@@ -77,7 +77,6 @@ class dknn_batch_query_kernel {
     m_self.check(m_comm);
   }
 
-  /// Assumes that all processes have the same query_points data.
   void query_batch(const query_store_type& queries,
                    neighbor_store_type&    query_results) {
     priv_query_batch(queries, query_results);
@@ -116,6 +115,7 @@ class dknn_batch_query_kernel {
     return offset;
   }
 
+  /// Assumes that queries are already partitioned.
   void priv_query_batch(const query_store_type& queries,
                         neighbor_store_type&    query_results) {
     const auto local_query_no_offset = priv_all_gather_query(queries);
@@ -185,11 +185,14 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "#of remaining queries\t" << num_global_remains
                        << std::endl;
       }
-    }
+    } // end of all queries
     if (m_comm.all_reduce_sum(num_local_remains) > 0) {
       m_comm.cout0() << "Logic error!! Not all queries have been processed"
                      << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    if (m_option.verbose) {
+      m_comm.cout0() << "Finished all queries" << std::endl;
     }
   }
 
@@ -200,12 +203,15 @@ class dknn_batch_query_kernel {
                                        random_generator_type& rnd_gen) {
     std::unordered_set<id_type>            set;
     std::uniform_int_distribution<id_type> dis(0, m_global_max_id);
+
+    // Visit randomly selected points as search starting points.
     for (std::size_t k = 0; k < m_knn_heap_table.at(query_no).k();
          ++k) {  // sqrt(k) is enough?
       while (true) {
         const id_type id = dis(rnd_gen);
         if (set.count(id)) continue;
         set.insert(id);
+
         assert(m_point_partitioner);
         m_comm.async(m_point_partitioner(id), neighbor_visitor_launcher{},
                      m_self, m_comm.rank(), query_no, id,
