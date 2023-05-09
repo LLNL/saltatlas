@@ -61,9 +61,10 @@ int main(int argc, char **argv) {
   const auto query_results =
       dnnd.query_batch(queries, query_k, epsilon, mu, batch_size);
 
+  comm.cout0() << "\nRecall scores" << std::endl;
   show_query_recall_score(query_results, ground_truth_file_path, comm);
 
-  comm.cout0() << "Dump query results" << std::endl;
+  comm.cout0() << "\nDump query results" << std::endl;
   saltatlas::utility::gather_and_dump_neighbors(query_results,
                                                 query_result_file_path, comm);
 
