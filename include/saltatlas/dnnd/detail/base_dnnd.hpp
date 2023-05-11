@@ -204,10 +204,15 @@ class base_dnnd {
   }
 
   /// \brief Query nearest neighbors of given points.
-  /// \param queries Query points.
-  /// \param k The number of neighbors to search for each point.
-  /// \param batch_size The number of queries to process at a time.
-  /// \return Query results.
+  /// \param queries Queries (a list of the feature vectors of query points).
+  /// Assume that queries are already partitioned.
+  /// \param k The number of nearest neighbors to search for each point.
+  /// \param batch_size The number of queries to process at a time globally.
+  /// \return Computed k nearest neighbors of the given points.
+  /// Returned as an adjacency list (vector of vectors).
+  /// Specifically, k nearest neighbor data of the i-th query is stored in the
+  /// i-th inner vector. Each inner vector contains pairs of a neighbor ID and a
+  /// distance to the neighbor from the query point.
   neighbor_store_type query_batch(
       const std::vector<std::vector<feature_element_type>>& queries,
       const int k, const double epsilon, const double mu,
