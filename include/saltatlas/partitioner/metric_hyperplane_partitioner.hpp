@@ -42,8 +42,9 @@ class metric_hyperplane_partitioner {
     m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
         &m_space, num_partitions, 16, 200, 3149);
 
-    m_num_partitions = num_partitions;
-    m_num_levels     = log2(num_partitions) + 1;
+    m_num_partitions   = num_partitions;
+    m_num_levels       = log2(num_partitions) + 1;
+    m_first_leaf_index = (((uint32_t)1) << (m_num_levels - 1)) - 1;
 
     std::vector<std::vector<point_t>> current_level_points(1);
     std::vector<std::vector<point_t>> next_level_points;
@@ -99,8 +100,8 @@ class metric_hyperplane_partitioner {
     m_comm.cout0("Partitioner initialization time: ", t.elapsed());
   }
 
-  std::vector<index_t> find_point_partitions(const point_t &features,
-                                             const uint32_t num_partitions) {
+  std::vector<index_t> find_point_partitions(
+      const point_t &features, const uint32_t num_partitions) const {
     std::vector<index_t> to_return;
     to_return.reserve(num_partitions);
 
@@ -126,9 +127,27 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint32_t num_partitions() { return m_num_partitions; }
+  std::vector<point_t> find_point_partition_representatives(
+      const point_t &features, const uint32_t num_partitions) const {
+    auto partition_index_vec = find_point_partitions(features, num_partitions);
+    std::vector<point_t> to_return;
+    to_return.reserve(num_partitions);
 
-  std::vector<dist_t> get_thetas() {
+    for (const auto partition_index : partition_index_vec) {
+      to_return.push_back(get_partition_representative(partition_index));
+    }
+
+    return to_return;
+  }
+
+  point_t find_point_partition_representative(const point_t &features) const {
+    auto partition_rep_vec = find_point_partition_representatives(features, 1);
+    return partition_rep_vec[0];
+  }
+
+  uint32_t num_partitions() const { return m_num_partitions; }
+
+  std::vector<dist_t> get_thetas() const {
     std::vector<dist_t> to_return;
 
     for (const auto &node : m_tree) {
@@ -177,8 +196,46 @@ class metric_hyperplane_partitioner {
     });
   }
 
+  const point_t &get_partition_representative(const index_t idx) const {
+    // Get global tree index for idx in lowest level of tree
+    auto leaf_index = ln_to_index(m_num_levels - 1, idx);
+
+    if (leaf_index % 2 == 1) {
+      return m_tree[(leaf_index - 1) / 2].selectors.first;
+    } else {
+      return m_tree[(leaf_index - 1) / 2].selectors.second;
+    }
+  }
+
+  void print_tree() const {
+    std::stringstream ss;
+
+    for (int i = 0; i < m_first_leaf_index; ++i) {
+      auto &current_node = m_tree[i];
+      if (i > 0) {
+        auto &parent_node = m_tree[(i - 1) / 2];
+        ss << "Rep: ";
+        if (i % 2 == 1) {
+          ss << parent_node.selectors.first << "\t";
+        } else {
+          ss << parent_node.selectors.second << "\t";
+        }
+      } else {
+        ss << "ROOT\t";
+      }
+
+      ss << "Children: " << current_node.selectors.first << ", "
+         << current_node.selectors.second << "\t";
+      ss << "theta: " << current_node.theta;
+
+      ss << std::endl;
+    }
+
+    m_comm.cout0(ss.str());
+  }
+
  private:
-  uint32_t log2(const uint32_t a) {
+  uint32_t log2(const uint32_t a) const {
     ASSERT_RELEASE(a > 0);
     uint32_t tmp       = a;
     uint32_t to_return = 0;
@@ -189,11 +246,11 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint32_t ln_to_index(const uint32_t level, const uint32_t node) {
+  uint32_t ln_to_index(const uint32_t level, const uint32_t node) const {
     return (((uint32_t)1) << level) - 1 + node;
   }
 
-  std::pair<uint32_t, uint32_t> index_to_ln(const uint32_t index) {
+  std::pair<uint32_t, uint32_t> index_to_ln(const uint32_t index) const {
     uint32_t level = log2(index + 1);
     uint32_t node  = index - (((uint32_t)1) << level) + 1;
 
@@ -236,7 +293,7 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint64_t search_tree(const point_t &point) {
+  uint64_t search_tree(const point_t &point) const {
     uint64_t tree_index = 0;
     while (tree_index < m_tree.size()) {
       const auto &node = m_tree[tree_index];
@@ -442,7 +499,7 @@ class metric_hyperplane_partitioner {
 
   uint32_t m_num_partitions;
   uint32_t m_num_levels;
-  uint32_t m_max_nonleaf;
+  uint32_t m_first_leaf_index;
 
   std::unique_ptr<hnswlib::HierarchicalNSW<dist_t>> m_hnsw_ptr;
 

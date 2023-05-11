@@ -261,8 +261,6 @@ int main(int argc, char** argv) {
 
   saltatlas::metric_hyperplane_partitioner<dist_t, index_t, point_t>
       fuzzy_partitioner(world, fuzzy_leven_space);
-  // saltatlas::voronoi_partitioner<dist_t, index_t, point_t> fuzzy_partitioner(
-  // world, fuzzy_leven_space);
 
   ygm::container::bag<std::pair<index_t, point_t>> bag_data(world);
   size_t                                           local_counter;
@@ -286,6 +284,8 @@ int main(int argc, char** argv) {
   dist_index.partition_data(bag_data, num_seeds);
 
   world.barrier();
+
+  fuzzy_partitioner.print_tree();
 
   world.cout0("Distributing data to local HNSWs");
   bag_data.for_all([&dist_index, &world](const auto& id, const auto& line) {
@@ -313,16 +313,23 @@ int main(int argc, char** argv) {
   t.reset();
 
   auto write_output_lambda =
-      [](const point_t& query_string,
+      [](const auto& controller, const point_t& query_string,
          const std::multimap<dist_t, std::pair<index_t, point_t>>&
               nearest_neighbors,
          auto ofs_ptr) {
-        (*ofs_ptr) << query_string << " : [ ";
+        (*ofs_ptr) << query_string << " : Nearest Neighbors [ ";
         for (const auto& result_pair : nearest_neighbors) {
           (*ofs_ptr) << "(" << result_pair.second.second << " : "
                      << result_pair.first << "),";
         }
-        (*ofs_ptr) << " ]\n";
+        (*ofs_ptr) << " ]\tQueried cells {";
+
+        auto reps = controller.get_queried_representatives();
+        for (const auto& rep : reps) {
+          (*ofs_ptr) << rep << ", ";
+        }
+        (*ofs_ptr) << "}\tQuery partition rep: "
+                   << controller.find_query_partition_representative() << "\n";
       };
 
   query_lines.for_all([&p_ofs, &dist_index, k, num_hops, num_initial_queries,
