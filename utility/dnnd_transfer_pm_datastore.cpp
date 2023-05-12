@@ -1,3 +1,8 @@
+// Copyright 2020-2023 Lawrence Livermore National Security, LLC and other
+// saltatlas Project Developers. See the top-level COPYRIGHT file for details.
+//
+// SPDX-License-Identifier: MIT
+
 #include <iostream>
 #include <string>
 
