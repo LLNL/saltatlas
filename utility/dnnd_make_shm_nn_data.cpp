@@ -41,6 +41,27 @@ int main(int argc, char** argv) {
   std::string out_datastore_path;
   bool        verbose{true};
 
+  {
+    int c;
+    while ((c = getopt(argc, argv, "i:o:v")) != -1) {
+      switch (c) {
+        case 'i':
+          datastore_path = optarg;
+          break;
+        case 'o':
+          out_datastore_path = optarg;
+          break;
+        case 'v':
+          verbose = false;
+          break;
+        default:
+          comm.cerr0() << "Usage: " << argv[0]
+                       << " -i <datastore path> -o <output datastore path> [-v]"
+                       << std::endl;
+          MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+      }
+    }
+  }
   comm.cout0() << "Input datastore path: " << datastore_path << std::endl;
   comm.cout0() << "Output datastore path: " << out_datastore_path << std::endl;
 
