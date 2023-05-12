@@ -37,8 +37,8 @@ using knn_index_type   = matrix_type<id_type>;
 int main(int argc, char** argv) {
   ygm::comm comm(&argc, &argv);
 
-  std::string datastore_path;
-  std::string out_datastore_path;
+  std::string input_path;
+  std::string out_path;
   bool        verbose{true};
 
   {
@@ -46,39 +46,40 @@ int main(int argc, char** argv) {
     while ((c = getopt(argc, argv, "i:o:v")) != -1) {
       switch (c) {
         case 'i':
-          datastore_path = optarg;
+          input_path = optarg;
           break;
         case 'o':
-          out_datastore_path = optarg;
+          out_path = optarg;
           break;
         case 'v':
           verbose = false;
           break;
         default:
-          comm.cerr0() << "Usage: " << argv[0]
-                       << " -i <datastore path> -o <output datastore path> [-v]"
-                       << std::endl;
+          comm.cerr0()
+              << "Usage: " << argv[0]
+              << " -i <input datastore path> -o <output datastore path> [-v]"
+              << std::endl;
           MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
       }
     }
   }
-  comm.cout0() << "Input datastore path: " << datastore_path << std::endl;
-  comm.cout0() << "Output datastore path: " << out_datastore_path << std::endl;
+  comm.cout0() << "Input datastore path: " << input_path << std::endl;
+  comm.cout0() << "Output datastore path: " << out_path << std::endl;
 
-  metall::manager manager(metall::create_only, out_datastore_path.c_str());
-  static point_store_type* main_point_store;
-  static knn_index_type*   main_knn_index;
+  std::unique_ptr<metall::manager> manager;
+  static point_store_type*         main_point_store;
+  static knn_index_type*           main_knn_index;
   if (comm.rank0()) {
-    main_point_store = manager.construct<point_store_type>(
-        metall::unique_instance)(manager.get_allocator());
-    main_knn_index = manager.construct<knn_index_type>(metall::unique_instance)(
-        manager.get_allocator());
+    manager.reset(new metall::manager(metall::create_only, out_path.c_str()));
+    main_point_store = manager->construct<point_store_type>(
+        metall::unique_instance)(manager->get_allocator());
+    main_knn_index = manager->construct<knn_index_type>(
+        metall::unique_instance)(manager->get_allocator());
   }
   comm.cf_barrier();
 
   {
-    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, datastore_path, comm,
-                      verbose);
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, input_path, comm, verbose);
     const auto&  pstore = dnnd.get_point_store();
     const auto   max_id = comm.all_reduce_max(pstore.max_id());
     comm.cout0() << "Max ID: " << max_id << std::endl;
