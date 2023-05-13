@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
   comm.cout0() << "\nRecall scores" << std::endl;
   show_query_recall_score(query_results, ground_truth_file_path, comm);
 
-  comm.cout0() << "\nDump query results" << std::endl;
+  comm.cout0() << "\nDump query results to " << query_result_file_path << std::endl;
   saltatlas::utility::gather_and_dump_neighbors(query_results,
                                                 query_result_file_path, comm);
 

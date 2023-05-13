@@ -76,6 +76,7 @@ class nn_index {
     m_index[source].erase(
         std::unique(m_index[source].begin(), m_index[source].end()),
         m_index[source].end());
+    m_index[source].shrink_to_fit();
   }
 
   /// \warning The neighbor list must be sorted beforehand.
@@ -84,6 +85,7 @@ class nn_index {
     if (m_index.at(source).size() > num_max_neighbors) {
       m_index[source].resize(num_max_neighbors);
     }
+    m_index[source].shrink_to_fit();
   }
 
   auto points_begin() { return m_index.begin(); }
@@ -117,9 +119,23 @@ class nn_index {
     return m_index.at(source).size();
   }
 
-  void clear() { m_index.clear(); }
+  /// \brief Clear contents and reduce the storage usage.
+  void reset() {
+    m_index.clear();
+    m_index.rehash(0);
+  }
 
-  void clear_neighbors(const id_type &source) { m_index[source].clear(); }
+  /// \brief Clear contents and reduce the storage usage.
+  void reset_neighbors(const id_type &source) {
+    m_index[source].clear();
+    m_index[source].shrink_to_fit();
+  }
+
+  void reserve(const std::size_t size) { m_index.reserve(size); }
+
+  void reserve_neighbors(const id_type &source, const std::size_t size) {
+    m_index[source].reserve(size);
+  }
 
   allocator_type get_allocator() const { return m_index.get_allocator(); }
 

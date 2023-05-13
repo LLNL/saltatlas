@@ -674,11 +674,12 @@ class dnnd_kernel {
 
   template <typename allocator>
   void priv_convert(nn_index<id_type, distance_type, allocator>& knn_index) {
-    knn_index.clear();
+    knn_index.reset();
+    knn_index.reserve(m_knn_heap_table.size());
     for (auto& item : m_knn_heap_table) {
-      const auto&                src  = item.first;
-      auto&                      heap = item.second;
-      std::vector<neighbor_type> wk;
+      const auto& src  = item.first;
+      auto&       heap = item.second;
+      knn_index.reserve_neighbors(src, heap.size());
       while (!heap.empty()) {
         knn_index.insert(src, heap.top());
         heap.pop();
