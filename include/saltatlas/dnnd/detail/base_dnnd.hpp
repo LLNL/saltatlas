@@ -243,7 +243,7 @@ class base_dnnd {
   }
 
   /// \brief Returns the distance metric name.
-  std::string get_metric_name() const {
+  std::string get_distance_metric_name() const {
     return dndetail::distance::convert_to_metric_name(m_data_core->metric_id);
   }
 

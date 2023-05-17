@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include <metall/container/string.hpp>
 #include <metall/metall.hpp>
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
@@ -66,22 +67,24 @@ int main(int argc, char** argv) {
   comm.cout0() << "Input datastore path: " << input_path << std::endl;
   comm.cout0() << "Output datastore path: " << out_path << std::endl;
 
-  std::unique_ptr<metall::manager> manager;
-  static point_store_type*         main_point_store;
-  static knn_index_type*           main_knn_index;
-  if (comm.rank0()) {
-    manager.reset(new metall::manager(metall::create_only, out_path.c_str()));
-    main_point_store = manager->construct<point_store_type>(
-        metall::unique_instance)(manager->get_allocator());
-    main_knn_index = manager->construct<knn_index_type>(
-        metall::unique_instance)(manager->get_allocator());
-  }
-  comm.cf_barrier();
-
   {
+    std::unique_ptr<metall::manager> manager;
+    static point_store_type*         main_point_store;
+    static knn_index_type*           main_knn_index;
+    if (comm.rank0()) {
+      manager          = std::make_unique<metall::manager>(metall::create_only,
+                                                  out_path.c_str());
+      main_point_store = manager->construct<point_store_type>(
+          metall::unique_instance)(manager->get_allocator());
+      main_knn_index = manager->construct<knn_index_type>(
+          metall::unique_instance)(manager->get_allocator());
+    }
+    comm.cf_barrier();
+
     dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, input_path, comm, verbose);
-    const auto&  pstore = dnnd.get_point_store();
-    const auto   max_id = comm.all_reduce_max(pstore.max_id());
+
+    const auto& pstore = dnnd.get_point_store();
+    const auto  max_id = comm.all_reduce_max(pstore.max_id());
     comm.cout0() << "Max ID: " << max_id << std::endl;
     if (comm.rank0()) {
       main_point_store->resize(max_id + 1);
@@ -121,20 +124,29 @@ int main(int argc, char** argv) {
           id, knn);
     }
     comm.barrier();
+
+    if (comm.rank0()) {
+      if (main_point_store->size() != max_id + 1) {
+        comm.cerr0() << "Wrong #of points in point store: "
+                     << main_point_store->size() << std::endl;
+        MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+      }
+      if (main_knn_index->size() != max_id + 1) {
+        comm.cerr0() << "Wrong #of points in vertices in k-NN: "
+                     << main_knn_index->size() << std::endl;
+        MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+      }
+    }
     comm.cout0() << "Constructed k-NN index" << std::endl;
 
-    if (main_point_store->size() != max_id + 1) {
-      comm.cerr0() << "Wrong #of points in point store: "
-                   << main_point_store->size() << std::endl;
-      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    if (comm.rank0()) {
+      manager->construct<metall::container::string>("distance-metric")(
+          dnnd.get_distance_metric_name().c_str(), manager->get_allocator());
     }
-    if (main_knn_index->size() != max_id + 1) {
-      comm.cerr0() << "Wrong #of points in vertices in k-NN: "
-                   << main_knn_index->size() << std::endl;
-      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
-    }
-  }
-  comm.cout0() << "Closed Metall datastore" << std::endl;
+    comm.cf_barrier();
+  }  // Close Metall
+  comm.cf_barrier();
+  comm.cout0() << "Shared-memory NN data is ready to use." << std::endl;
 
   return EXIT_SUCCESS;
 }
