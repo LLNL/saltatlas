@@ -49,14 +49,12 @@ class dnnd : public dndetail::base_dnnd<Id, FeatureElement, Distance> {
       : base_type(verbose, comm),
         m_data_core(
             dndetail::distance::convert_to_metric_id(distance_metric_name),
-            rnd_seed),
-        m_comm(comm) {
+            rnd_seed) {
     base_type::init_data_core(m_data_core);
   }
 
  private:
   data_core_type m_data_core;
-  ygm::comm&     m_comm;
 };
 
 }  // namespace saltatlas

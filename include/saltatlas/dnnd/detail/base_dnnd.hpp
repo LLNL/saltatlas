@@ -242,6 +242,14 @@ class base_dnnd {
     priv_dump_index_distributed_file(out_file_prefix);
   }
 
+  /// \brief Returns the distance metric name.
+  std::string get_metric_name() const {
+    return dndetail::distance::convert_to_metric_name(m_data_core->metric_id);
+  }
+
+  /// \brief Returns YGM communicator.
+  ygm::comm& get_comm() const { return m_comm; }
+
  protected:
   /// \brief Initialize the internal data core instance.
   /// The internal data core instance must be uninitialized when this function

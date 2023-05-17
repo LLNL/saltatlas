@@ -175,6 +175,25 @@ inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
   return metric_id::invalid;
 }
 
+inline std::string convert_to_metric_name(const metric_id &id) {
+  switch (id) {
+    case metric_id::l1:
+      return "l1";
+    case metric_id::l2:
+      return "l2";
+    case metric_id::sql2:
+      return "sql2";
+    case metric_id::cosine:
+      return "cosine";
+    case metric_id::jaccard:
+      return "jaccard";
+    case metric_id::levenshtein:
+      return "levenshtein";
+    default:
+      return "invalid";
+  }
+}
+
 template <typename feature_element_type, typename distance_type>
 inline metric_type<feature_element_type, distance_type> &metric(
     const metric_id &id) {
