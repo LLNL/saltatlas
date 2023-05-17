@@ -457,7 +457,6 @@ int main(int argc, char** argv) {
           auto store_results_lambda = [](const point_t& query_point,
                                          const std::multimap<dist_t, index_t>&
                                                  nearest_neighbors,
-                                         auto    dist_knn_index,
                                          index_t query_ID) {
             std::pair<index_t, std::vector<std::pair<index_t, dist_t>>> results;
             results.first = query_ID;
