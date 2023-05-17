@@ -84,9 +84,8 @@ int main(int argc, char **argv) {
 
     // Lambda to execute upon completion of query
     auto report_lambda =
-        [](const point_t                        &query_pt,
-           const std::multimap<dist_t, index_t> &nearest_neighbors,
-           auto                                  dhnsw) {
+        [](const auto &controller, const point_t &query_pt,
+           const std::multimap<dist_t, index_t> &nearest_neighbors) {
           std::cout << "Nearest neighbors for (" << query_pt[0] << ", "
                     << query_pt[1] << "): ";
           for (const auto &[dist, nearest_neighbor_index] : nearest_neighbors) {
@@ -119,10 +118,9 @@ int main(int argc, char **argv) {
 
     // Now query to get features of neighbors
     auto report_features_lambda =
-        [](const point_t &query_pt,
+        [](const auto &controller, const point_t &query_pt,
            const std::multimap<dist_t, std::pair<index_t, point_t>>
-               &nearest_neighbors,
-           auto dhnsw) {
+               &nearest_neighbors) {
           std::cout << "Nearest neighbors for (" << query_pt[0] << ", "
                     << query_pt[1] << "): ";
           for (const auto &[dist, index_point] : nearest_neighbors) {
