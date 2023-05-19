@@ -258,8 +258,8 @@ class nn_index_optimizer {
         // Check if I connect to the candidate.
         bool          connect_to_candidate = false;
         distance_type me_to_candidate_distance;
-        for (auto nitr = nn_index.neighbors_begin(candidate.id),
-                  nend = nn_index.neighbors_end(candidate.id);
+        for (auto nitr = nn_index.neighbors_begin(my_id),
+                  nend = nn_index.neighbors_end(my_id);
              nitr != nend; ++nitr) {
           if (nitr->id == candidate.id) {
             connect_to_candidate     = true;
