@@ -10,20 +10,7 @@
 
 #include "dnnd_example_common.hpp"
 
-bool parse_options(int argc, char **argv, std::string &datastore_path,
-                   std::string &original_datastore_path, int &query_k,
-                   double &epsilon, double &mu, std::size_t &batch_size,
-                   std::string &query_file_path,
-                   std::string &ground_truth_file_path,
-                   std::string &query_result_file_path, bool &verbose,
-                   bool &help);
-
-template <typename cout_type>
-void usage(std::string_view exe_name, cout_type &cout);
-
-int main(int argc, char **argv) {
-  ygm::comm comm(&argc, &argv);
-
+struct option_t {
   std::string datastore_path;
   std::string original_datastore_path;
   int         query_k{4};
@@ -34,12 +21,20 @@ int main(int argc, char **argv) {
   std::string ground_truth_file_path;
   std::string query_result_file_path;
   bool        verbose{true};
-  bool        help{false};
+};
 
-  if (!parse_options(argc, argv, datastore_path, original_datastore_path,
-                     query_k, epsilon, mu, batch_size, query_file_path,
-                     ground_truth_file_path, query_result_file_path, verbose,
-                     help)) {
+bool parse_options(int, char **, option_t &, bool &);
+template <typename cout_type>
+void usage(std::string_view, cout_type &);
+void show_options(const option_t &, ygm::comm &);
+
+int main(int argc, char **argv) {
+  ygm::comm comm(&argc, &argv);
+  show_config(comm);
+
+  bool     help{false};
+  option_t opt;
+  if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -48,9 +43,10 @@ int main(int argc, char **argv) {
     usage(argv[0], comm.cout0());
     return 0;
   }
+  show_options(opt, comm);
 
-  if (!original_datastore_path.empty()) {
-    if (dnnd_pm_type::copy(original_datastore_path, datastore_path)) {
+  if (!opt.original_datastore_path.empty()) {
+    if (dnnd_pm_type::copy(opt.original_datastore_path, opt.datastore_path)) {
       comm.cout0() << "\nTransferred index." << std::endl;
     } else {
       comm.cerr0() << "Failed to transfer index." << std::endl;
@@ -59,32 +55,32 @@ int main(int argc, char **argv) {
   }
 
   {
-    comm.cout0() << "<<Query>>" << std::endl;
-    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, datastore_path, comm,
-                      verbose);
+    comm.cout0() << "\n<<Query>>" << std::endl;
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
+                      opt.verbose);
 
     dnnd_pm_type::query_store_type queries;
-    saltatlas::read_query(query_file_path, queries, comm);
+    saltatlas::read_query(opt.query_file_path, queries, comm);
 
     comm.cout0() << "Executing queries" << std::endl;
     ygm::timer step_timer;
-    const auto query_results =
-        dnnd.query_batch(queries, query_k, epsilon, mu, batch_size);
+    const auto query_results = dnnd.query_batch(
+        queries, opt.query_k, opt.epsilon, opt.mu, opt.batch_size);
     comm.cf_barrier();
     comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
                  << std::endl;
 
-    if (!ground_truth_file_path.empty()) {
-      show_query_recall_score(query_results, ground_truth_file_path, comm);
-      show_query_recall_score_with_only_distance(query_results,
-                                                 ground_truth_file_path, comm);
-      show_query_recall_score_with_distance_ties(query_results,
-                                                 ground_truth_file_path, comm);
+    if (!opt.ground_truth_file_path.empty()) {
+      show_query_recall_score(query_results, opt.ground_truth_file_path, comm);
+      show_query_recall_score_with_only_distance(
+          query_results, opt.ground_truth_file_path, comm);
+      show_query_recall_score_with_distance_ties(
+          query_results, opt.ground_truth_file_path, comm);
     }
 
-    if (!query_result_file_path.empty()) {
+    if (!opt.query_result_file_path.empty()) {
       saltatlas::utility::gather_and_dump_neighbors(
-          query_results, query_result_file_path, comm);
+          query_results, opt.query_result_file_path, comm);
     }
   }
 END_BLOCK:
@@ -93,60 +89,54 @@ END_BLOCK:
   return 0;
 }
 
-inline bool parse_options(int argc, char **argv, std::string &datastore_path,
-                          std::string &original_datastore_path, int &query_k,
-                          double &epsilon, double &mu, std::size_t &batch_size,
-                          std::string &query_file_path,
-                          std::string &ground_truth_file_path,
-                          std::string &query_result_file_path, bool &verbose,
-                          bool &help) {
-  datastore_path.clear();
-  original_datastore_path.clear();
-  query_file_path.clear();
-  ground_truth_file_path.clear();
-  query_result_file_path.clear();
+inline bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
+  opt.datastore_path.clear();
+  opt.original_datastore_path.clear();
+  opt.query_file_path.clear();
+  opt.ground_truth_file_path.clear();
+  opt.query_result_file_path.clear();
 
   int n;
   while ((n = ::getopt(argc, argv, "b:q:n:g:o:z:x:e:m:vh")) != -1) {
     switch (n) {
       case 'b':
-        batch_size = std::stoul(optarg);
+        opt.batch_size = std::stoul(optarg);
         break;
 
       case 'q':
-        query_file_path = optarg;
+        opt.query_file_path = optarg;
         break;
 
       case 'n':
-        query_k = std::stoi(optarg);
+        opt.query_k = std::stoi(optarg);
         break;
 
       case 'g':
-        ground_truth_file_path = optarg;
+        opt.ground_truth_file_path = optarg;
         break;
 
       case 'z':
-        datastore_path = optarg;
+        opt.datastore_path = optarg;
         break;
 
       case 'x':
-        original_datastore_path = optarg;
+        opt.original_datastore_path = optarg;
         break;
 
       case 'o':
-        query_result_file_path = optarg;
+        opt.query_result_file_path = optarg;
         break;
 
       case 'v':
-        verbose = true;
+        opt.verbose = true;
         break;
 
       case 'e':
-        epsilon = std::stold(optarg);
+        opt.epsilon = std::stold(optarg);
         break;
 
       case 'm':
-        mu = std::stold(optarg);
+        opt.mu = std::stold(optarg);
         break;
 
       case 'h':
@@ -159,7 +149,7 @@ inline bool parse_options(int argc, char **argv, std::string &datastore_path,
     }
   }
 
-  if (datastore_path.empty() || query_file_path.empty()) {
+  if (opt.datastore_path.empty() || opt.query_file_path.empty()) {
     return false;
   }
 
@@ -184,4 +174,17 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << "\n\t-b [long int] Batch size for query (0 is the full batch mode)."
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;
+}
+
+void show_options(const option_t &opt, ygm::comm &comm) {
+  comm.cout0() << "Options:"
+               << "\nOriginal datastore path\t" << opt.original_datastore_path
+               << "\nDatastore path\t" << opt.datastore_path
+               << "\nQuery file path\t" << opt.query_file_path
+               << "\nQuery n (#of neighbors to search)\t" << opt.query_k
+               << "\nEpsilon\t" << opt.epsilon << "\nMu\t" << opt.mu
+               << "\nBatch size\t" << opt.batch_size
+               << "\nGround truth file path\t" << opt.ground_truth_file_path
+               << "\nQuery result file path\t" << opt.query_result_file_path
+               << "\nVerbose\t" << opt.verbose << std::endl;
 }

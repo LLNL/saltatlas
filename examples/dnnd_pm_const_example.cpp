@@ -15,7 +15,7 @@ struct option_t {
   double                   r{0.8};
   double                   delta{0.001};
   bool                     exchange_reverse_neighbors{true};
-  std::size_t              batch_size{1ULL << 31};
+  std::size_t              batch_size{1ULL << 30};
   std::string              distance_metric_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
@@ -26,10 +26,10 @@ struct option_t {
   bool                     verbose{false};
 };
 
-bool parse_options(int argc, char **argv, option_t &option, bool &help);
-
+bool parse_options(int, char **, option_t &, bool &);
 template <typename cout_type>
-void usage(std::string_view exe_name, cout_type &cout);
+void usage(std::string_view, cout_type &);
+void show_options(const option_t &, ygm::comm &);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
@@ -46,6 +46,7 @@ int main(int argc, char **argv) {
     usage(argv[0], comm.cout0());
     return 0;
   }
+  show_options(opt, comm);
 
   {
     dnnd_pm_type dnnd(dnnd_pm_type::create, opt.datastore_path,
@@ -224,4 +225,19 @@ void usage(std::string_view exe_name, cout_type &cout) {
          "full batch mode)."
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
+}
+
+void show_options(const option_t &option, ygm::comm &comm) {
+  comm.cout0() << "\nOptions:"
+               << "\nDatastore path\t" << option.datastore_path
+               << "\nDistance metric name\t" << option.distance_metric_name
+               << "\nPoint file format\t" << option.point_file_format << "\nk\t"
+               << option.index_k << "\nr\t" << option.r << "\ndelta\t"
+               << option.delta << "\nExchange reverse neighbors\t"
+               << option.exchange_reverse_neighbors << "\nBatch size\t"
+               << option.batch_size << "\nDNND init index path\t"
+               << option.dnnd_init_index_path << "\nDHNSW init index path\t"
+               << option.dhnsw_init_index_path << "\nDatastore transfer path\t"
+               << option.datastore_transfer_path << "\nVerbose\t"
+               << option.verbose << std::endl;
 }

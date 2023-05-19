@@ -34,11 +34,36 @@ using dnnd_pm_type =
     saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
 using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
+/// Returns the name of the given primitive type in string.
+/// Returns the name of the given type in string.
+template <typename T>
+std::string get_type_name() {
+  if (std::is_same_v<T, int8_t>) {
+    return "int8_t";
+  } else if (std::is_same_v<T, uint8_t>) {
+    return "uint8_t";
+  } else if (std::is_same_v<T, int32_t>) {
+    return "int32_t";
+  } else if (std::is_same_v<T, uint32_t>) {
+    return "uint32_t";
+  } else if (std::is_same_v<T, int64_t>) {
+    return "int64_t";
+  } else if (std::is_same_v<T, uint64_t>) {
+    return "uint64_t";
+  } else if (std::is_same_v<T, float>) {
+    return "float";
+  } else if (std::is_same_v<T, double>) {
+    return "double";
+  } else {
+    return "unknown";
+  }
+}
+
 void show_config(ygm::comm& comm) {
-  comm.cout0() << "ID type: " << typeid(id_type).name() << std::endl;
+  comm.cout0() << "ID type: " << get_type_name<id_type>() << std::endl;
   comm.cout0() << "Feature element type: "
-               << typeid(feature_element_type).name() << std::endl;
-  comm.cout0() << "Distance type: " << typeid(distance_type).name()
+               << get_type_name<feature_element_type>() << std::endl;
+  comm.cout0() << "Distance type: " << get_type_name<distance_type>()
                << std::endl;
   comm.welcome();
 }
