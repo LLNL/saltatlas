@@ -84,8 +84,14 @@ class nn_index_optimizer {
     if (m_option.verbose) {
       m_comm.cout0() << "Making the index undirected" << std::endl;
     }
-    auto        reversed_index        = priv_generate_reverse_index();
-    std::size_t max_degree            = 0;
+    if (m_option.verbose) {
+      m_comm.cout0() << "#of original neighbors\t"
+                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
+                     << std::endl;
+    }
+
+    auto        reversed_index = priv_generate_reverse_index();
+    std::size_t max_degree     = 0;
     for (auto pitr = reversed_index.points_begin(),
               pend = reversed_index.points_end();
          pitr != pend; ++pitr) {
