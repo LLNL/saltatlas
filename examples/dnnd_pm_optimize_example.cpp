@@ -18,7 +18,7 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
                    std::string &datastore_transfer_path,
                    bool        &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose, bool &help);
+                   std::size_t &batch_size, bool &verbose, bool &help);
 
 template <typename cout_type>
 void usage(std::string_view exe_name, cout_type &cout);
@@ -30,15 +30,16 @@ int main(int argc, char **argv) {
   std::string datastore_path;
   std::string datastore_transfer_path;
   bool        make_index_undirected{true};
-  double      pruning_degree_multiplier{0.0}; // no pruning by default
+  double      pruning_degree_multiplier{0.0};  // no pruning by default
   bool        remove_long_paths{false};
+  std::size_t batch_size{1ULL << 28};
   bool        verbose{true};
   bool        help{true};
 
   if (!parse_options(argc, argv, original_datastore_path, datastore_path,
                      datastore_transfer_path, make_index_undirected,
-                     pruning_degree_multiplier, remove_long_paths, verbose,
-                     help)) {
+                     pruning_degree_multiplier, remove_long_paths, batch_size,
+                     verbose, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -88,14 +89,14 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
                    std::string &datastore_transfer_path,
                    bool        &make_index_undirected,
                    double &pruning_degree_multiplier, bool &remove_long_paths,
-                   bool &verbose, bool &help) {
+                   std::size_t &batch_size, bool &verbose, bool &help) {
   original_datastore_path.clear();
   datastore_path.clear();
   datastore_transfer_path.clear();
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "i:z:x:um:lvh")) != -1) {
+  while ((n = ::getopt(argc, argv, "i:z:x:um:lb:vh")) != -1) {
     switch (n) {
       case 'i':
         original_datastore_path = optarg;
@@ -119,6 +120,10 @@ bool parse_options(int argc, char **argv, std::string &original_datastore_path,
 
       case 'l':
         remove_long_paths = true;
+        break;
+
+      case 'b':
+        batch_size = std::stoull(optarg);
         break;
 
       case 'v':
@@ -158,6 +163,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
           "from this path to path 'z' at the beginning."
        << "\n\t-x [string] If specified, transfer the index to this path at "
           "the end."
+       << "\n\t-b [long int] Batch size (0 is the full batch mode)."
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;
 }

@@ -119,6 +119,14 @@ class nn_index {
     return m_index.at(source).size();
   }
 
+  std::size_t count_all_neighbors() const {
+    std::size_t num_neighbors = 0;
+    for (const auto &[source, neighbors] : m_index) {
+      num_neighbors += neighbors.size();
+    }
+    return num_neighbors;
+  }
+
   /// \brief Clear contents and reduce the storage usage.
   void reset() {
     m_index.clear();
