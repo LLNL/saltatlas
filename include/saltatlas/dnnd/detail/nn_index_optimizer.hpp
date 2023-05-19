@@ -85,7 +85,6 @@ class nn_index_optimizer {
       m_comm.cout0() << "Making the index undirected" << std::endl;
     }
     auto        reversed_index        = priv_generate_reverse_index();
-    std::size_t total_local_neighbors = 0;
     std::size_t max_degree            = 0;
     for (auto pitr = reversed_index.points_begin(),
               pend = reversed_index.points_end();
@@ -99,13 +98,12 @@ class nn_index_optimizer {
       }
       reversed_index.reset_neighbors(source);  // release memory.
       m_nn_index.sort_and_remove_duplicate_neighbors(source);
-      total_local_neighbors += m_nn_index.num_neighbors(source);
       max_degree = std::max(m_nn_index.num_neighbors(source), max_degree);
     }
     m_comm.cf_barrier();
     if (m_option.verbose) {
       m_comm.cout0() << "#of neighbors\t"
-                     << m_comm.all_reduce_sum(total_local_neighbors)
+                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
                      << std::endl;
       m_comm.cout0() << "Max #of neighbors\t"
                      << m_comm.all_reduce_max(max_degree) << std::endl;
@@ -228,10 +226,10 @@ class nn_index_optimizer {
                      << global_removed_num_neighbors << std::endl;
       m_comm.cout0() << "#of retained neighbors\t"
                      << global_retained_num_neighbors << std::endl;
-      m_comm.cout() << "Removed ratio\t"
-                    << (double(global_removed_num_neighbors) /
-                        global_initial_num_neighbors)
-                    << std::endl;
+      m_comm.cout0() << "Removed ratio\t"
+                     << (double(global_removed_num_neighbors) /
+                         global_initial_num_neighbors)
+                     << std::endl;
     }
   }
 
