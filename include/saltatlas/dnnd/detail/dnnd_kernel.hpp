@@ -444,29 +444,29 @@ class dnnd_kernel {
     m_comm.cf_barrier();
 
     // Send reverse neighbors to the owner source.
-    std::size_t source_i = 0;
-    auto neighbor_sender = [&source_i, &source_ids, &reverse_neighbors,
+    std::size_t source_i        = 0;
+    std::size_t neighbor_i      = 0;
+    auto        neighbor_sender = [&source_i, &source_ids, &reverse_neighbors,
                             this](ygm::comm& comm) {
       const auto& source    = source_ids[source_i];
       const auto& neighbors = reverse_neighbors.at(source);
-      // Send all neighbors to the source at once.
-      comm.async(
-          m_point_partitioner(source),
-          [](const id_type vid, const auto& neighbors) {
-            ref_recv_buf[vid].insert(ref_recv_buf[vid].end(), neighbors.begin(),
-                                     neighbors.end());
-          },
-          source, neighbors);
+      for (const auto& n : neighbors) {
+        comm.async(
+            m_point_partitioner(source),
+            [](const id_type vid, const auto& neighbor) {
+              ref_recv_buf[vid].push_back(neighbor);
+            },
+            source, n);
+      }
       ++source_i;
-
-      // batch size is the total number of sent neighbors.
       return neighbors.size();
     };
 
     // Use smaller mini batch size here because this operation tends to get
     // stuck frequently in heavy load.
-    run_batched_ygm_async(num_neighbors_to_send, m_option.mini_batch_size / 64,
-                          false, neighbor_sender, m_comm);
+    run_batched_ygm_async(num_neighbors_to_send,
+                          m_option.mini_batch_size / 64ULL, false,
+                          neighbor_sender, m_comm);
     assert(source_i == source_ids.size());
 
     return recv_buf;

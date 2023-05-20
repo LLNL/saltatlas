@@ -75,12 +75,9 @@ inline void run_batched_ygm_async(const std::size_t   num_local_items,
                    << std::endl;
     }
 
-    const auto b = global_batch_size > 0
-                       ? global_batch_size
-                       : std::numeric_limits<std::size_t>::max();
     const auto local_batch_size =
-        mpi::assign_tasks(num_local_remains, b, comm.rank(), comm.size(),
-                          verbose, comm.get_mpi_comm());
+        mpi::assign_tasks(num_local_remains, global_batch_size, comm.rank(),
+                          comm.size(), verbose, comm.get_mpi_comm());
     // Note: this algorithm does not check #of send items in a batch strictly,
     // letting the sender send more items than the batch size.
     for (std::size_t i = 0; i < local_batch_size;) {
