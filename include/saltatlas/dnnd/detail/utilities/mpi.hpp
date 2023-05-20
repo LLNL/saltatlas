@@ -49,7 +49,8 @@ inline void show_task_distribution(const std::vector<std::size_t>& table) {
 inline std::size_t assign_tasks(const std::size_t num_local_tasks,
                                 const std::size_t batch_size,
                                 const int mpi_rank, const int mpi_size,
-                                const bool verbose) {
+                                const bool verbose,
+                                const ::MPI_Comm mpi_comm = MPI_COMM_WORLD) {
   if (batch_size == 0) {
     return num_local_tasks;
   }
@@ -58,11 +59,11 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
   std::size_t local_num_assigned_tasks = 0;
   if (mpi_rank > 0) {
     SALTATLAS_DNND_CHECK_MPI(
-        MPI_Send(&num_local_tasks, 1, MPI_UNSIGNED_LONG, 0, 0, MPI_COMM_WORLD));
+        MPI_Send(&num_local_tasks, 1, MPI_UNSIGNED_LONG, 0, 0, mpi_comm));
 
     MPI_Status status;
     SALTATLAS_DNND_CHECK_MPI(MPI_Recv(&local_num_assigned_tasks, 1,
-                                      MPI_UNSIGNED_LONG, 0, 0, MPI_COMM_WORLD,
+                                      MPI_UNSIGNED_LONG, 0, 0, mpi_comm,
                                       &status));
   } else {
     // Gather the number of tasks each MPI has
@@ -71,7 +72,7 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
     for (int r = 1; r < mpi_size; ++r) {
       MPI_Status status;
       SALTATLAS_DNND_CHECK_MPI(MPI_Recv(&num_remaining_tasks_table[r], 1,
-                                        MPI_UNSIGNED_LONG, r, 0, MPI_COMM_WORLD,
+                                        MPI_UNSIGNED_LONG, r, 0, mpi_comm,
                                         &status));
     }
 
@@ -103,7 +104,7 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
     for (int r = 1; r < mpi_size; ++r) {
       SALTATLAS_DNND_CHECK_MPI(MPI_Send(&task_assignment_table[r], 1,
                                         MPI_UNSIGNED_LONG, r, 0,
-                                        MPI_COMM_WORLD));
+                                        mpi_comm));
     }
     local_num_assigned_tasks = task_assignment_table[0];
 

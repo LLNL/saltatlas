@@ -35,6 +35,7 @@
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
+#include <saltatlas/dnnd/detail/utilities/ygm.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -418,40 +419,52 @@ class dnnd_kernel {
     }
   }
 
-  adj_lsit_type priv_exchange_reverse_neighbors(const adj_lsit_type& table) {
+  adj_lsit_type priv_exchange_reverse_neighbors(
+      const adj_lsit_type& reverse_neighbors) {
     // Only one call is allowed at a time within a process.
     static std::mutex           mutex;
     std::lock_guard<std::mutex> guard(mutex);
 
-    adj_lsit_type         received;
-    static adj_lsit_type& ref_received = received;
-    ref_received.clear();
-    ref_received.reserve(m_point_store.size());
-    m_comm.cf_barrier();
-
-    std::vector<id_type> source_table;
-    source_table.reserve(table.size());
-    for (const auto& item : table) {
-      const auto& source = item.first;
-      source_table.push_back(source);
-    }
     // Randomize the source ID's order to avoid updating the same node from
     // many processes at the same time.
-    std::shuffle(source_table.begin(), source_table.end(), m_rnd_generator);
+    std::vector<id_type> source_ids;
+    source_ids.reserve(reverse_neighbors.size());
+    std::size_t num_neighbors_to_send = 0;
+    for (const auto& item : reverse_neighbors) {
+      const auto& source = item.first;
+      source_ids.push_back(source);
+      num_neighbors_to_send += item.second.size();
+    }
+    std::shuffle(source_ids.begin(), source_ids.end(), m_rnd_generator);
 
-    for (const auto source : source_table) {
-      const auto& neighbors = table.at(source);
-      m_comm.async(
+    adj_lsit_type         recv_buf;
+    static adj_lsit_type& ref_recv_buf = recv_buf;
+    ref_recv_buf.clear();
+    ref_recv_buf.reserve(m_point_store.size());
+    m_comm.cf_barrier();
+
+    // Send reverse neighbors to the owner source.
+    std::size_t source_i = 0;
+    auto neighbor_sender = [&source_i, &source_ids, &reverse_neighbors,
+                            this](ygm::comm& comm) {
+      const auto& source    = source_ids[source_i];
+      const auto& neighbors = reverse_neighbors.at(source);
+      // Send all neighbors to the source at once.
+      comm.async(
           m_point_partitioner(source),
-          [](const id_type                              vid,
-             const typename adj_lsit_type::mapped_type& neighbors) {
-            ref_received[vid].insert(ref_received[vid].end(), neighbors.begin(),
+          [](const id_type vid, const auto& neighbors) {
+            ref_recv_buf[vid].insert(ref_recv_buf[vid].end(), neighbors.begin(),
                                      neighbors.end());
           },
           source, neighbors);
-    }
-    m_comm.barrier();
-    return received;
+      ++source_i;
+      return neighbors.size();  // batch size is the number of neighbors.
+    };
+
+    run_batched_ygm_async(num_neighbors_to_send, m_option.mini_batch_size,
+                          false, neighbor_sender, m_comm);
+
+    return recv_buf;
   }
 
   void priv_update_neighbors(adj_lsit_type& old_table,
