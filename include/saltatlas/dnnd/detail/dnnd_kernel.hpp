@@ -458,11 +458,16 @@ class dnnd_kernel {
           },
           source, neighbors);
       ++source_i;
-      return neighbors.size();  // batch size is the number of neighbors.
+
+      // batch size is the total number of sent neighbors.
+      return neighbors.size();
     };
 
-    run_batched_ygm_async(num_neighbors_to_send, m_option.mini_batch_size,
+    // Use smaller mini batch size here because this operation tends to get
+    // stuck frequently in heavy load.
+    run_batched_ygm_async(num_neighbors_to_send, m_option.mini_batch_size / 64,
                           false, neighbor_sender, m_comm);
+    assert(source_i == source_ids.size());
 
     return recv_buf;
   }

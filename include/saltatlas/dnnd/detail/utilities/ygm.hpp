@@ -54,6 +54,7 @@ inline void distribute_elements_by_block(const container_type &source_container,
 /// Expected signature is: std::size_t(ygm::comm&).
 /// \param num_local_items Number of local items.
 /// \param global_batch_size Global batch size.
+/// if 0 is specified, this function sends all items in one batch.
 /// \param verbose Verbose flag.
 /// \param sender Message sender function.
 /// sender must return the number of sent items during the function call.
@@ -66,15 +67,20 @@ inline void run_batched_ygm_async(const std::size_t   num_local_items,
                                   const bool          verbose,
                                   const async_sender &sender, ygm::comm &comm) {
   for (std::size_t num_sent = 0, batch_no = 0;; ++batch_no) {
-    if (verbose) {
-      comm.cout0() << "Batch #" << batch_no << std::endl;
-    }
-
     assert(num_local_items >= num_sent);
     const auto num_local_remains = num_local_items - num_sent;
+    if (verbose) {
+      comm.cout0() << "Batch #" << batch_no << std::endl;
+      comm.cout0() << "#of remains: " << comm.all_reduce_sum(num_local_remains)
+                   << std::endl;
+    }
+
+    const auto b = global_batch_size > 0
+                       ? global_batch_size
+                       : std::numeric_limits<std::size_t>::max();
     const auto local_batch_size =
-        mpi::assign_tasks(num_local_remains, global_batch_size, comm.rank(),
-                          comm.size(), verbose, comm.get_mpi_comm());
+        mpi::assign_tasks(num_local_remains, b, comm.rank(), comm.size(),
+                          verbose, comm.get_mpi_comm());
     // Note: this algorithm does not check #of send items in a batch strictly,
     // letting the sender send more items than the batch size.
     for (std::size_t i = 0; i < local_batch_size;) {
