@@ -441,6 +441,10 @@ class dnnd_kernel {
     static adj_lsit_type& ref_recv_buf = recv_buf;
     ref_recv_buf.clear();
     ref_recv_buf.reserve(m_point_store.size());
+    // Allocate space beforehand for performance.
+    for (auto& item : m_point_store) {
+      ref_recv_buf[item.first];
+    }
     m_comm.cf_barrier();
 
     // Send reverse neighbors to the owner source.
@@ -465,7 +469,7 @@ class dnnd_kernel {
     // Use smaller mini batch size here because this operation tends to get
     // stuck frequently in heavy load.
     run_batched_ygm_async(num_neighbors_to_send,
-                          m_option.mini_batch_size / 64ULL, false,
+                          m_option.mini_batch_size, false,
                           neighbor_sender, m_comm);
     assert(source_i == source_ids.size());
 
