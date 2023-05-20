@@ -56,16 +56,19 @@ inline void distribute_elements_by_block(const container_type &source_container,
 /// \param global_batch_size Global batch size.
 /// if 0 is specified, this function sends all items in one batch.
 /// \param verbose Verbose flag.
+/// \param comm YGM comm.
 /// \param sender Message sender function.
 /// sender must return the number of sent items during the function call.
 /// This function decide the timing of invoking YGM's barrier() based on the
 /// returned values from the sender.
-/// \param comm YGM comm.
 template <typename async_sender>
 inline void run_batched_ygm_async(const std::size_t   num_local_items,
                                   const std::size_t   global_batch_size,
                                   const bool          verbose,
-                                  const async_sender &sender, ygm::comm &comm) {
+                                  ygm::comm &comm,
+                                  const async_sender &sender) {
+  comm.cf_barrier(); // just in case.
+
   for (std::size_t num_sent = 0, batch_no = 0;; ++batch_no) {
     assert(num_local_items >= num_sent);
     const auto num_local_remains = num_local_items - num_sent;
@@ -78,10 +81,13 @@ inline void run_batched_ygm_async(const std::size_t   num_local_items,
     const auto local_batch_size =
         mpi::assign_tasks(num_local_remains, global_batch_size, comm.rank(),
                           comm.size(), verbose, comm.get_mpi_comm());
+    assert(local_batch_size <= num_local_remains);
+
     // Note: this algorithm does not check #of send items in a batch strictly,
     // letting the sender send more items than the batch size.
     for (std::size_t i = 0; i < local_batch_size;) {
-      const auto n = std::invoke(sender, comm);
+      const auto n = sender(comm);
+      assert(n > 0 && "Sender must send at least one item.");
       i += n;
       num_sent += n;
     }

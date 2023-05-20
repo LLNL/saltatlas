@@ -54,12 +54,20 @@ int main(int argc, char **argv) {
                       opt.verbose);
 
     comm.cout0() << "\n<<Read Points>>" << std::endl;
-    ygm::timer point_read_timer;
-    saltatlas::read_points(opt.point_file_names, opt.point_file_format,
-                           opt.verbose, dnnd.get_point_partitioner(),
-                           dnnd.get_point_store(), comm);
-    comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
-                 << std::endl;
+    {
+      ygm::timer point_read_timer;
+      saltatlas::read_points(opt.point_file_names, opt.point_file_format,
+                             opt.verbose, dnnd.get_point_partitioner(),
+                             dnnd.get_point_store(), comm);
+      comm.cout0() << "\nReading points took (s)\t"
+                   << point_read_timer.elapsed() << std::endl;
+      comm.cout0() << "#of points\t"
+                   << comm.all_reduce_sum(dnnd.get_point_store().size())
+                   << std::endl;
+      comm.cout0() << "Feature dimensions\t"
+                   << dnnd.get_point_store().begin()->second.size()
+                   << std::endl;
+    }
 
     comm.cout0() << "\n<<Index Construction>>" << std::endl;
     ygm::timer const_timer;

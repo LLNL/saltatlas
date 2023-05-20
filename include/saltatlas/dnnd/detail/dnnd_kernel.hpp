@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <type_traits>
@@ -173,10 +174,15 @@ class dnnd_kernel {
       }
       ygm::timer epoch_timer;
 
+      ygm::timer    gen_timer;
       adj_lsit_type old_table;
       adj_lsit_type new_table;
-      priv_select_old_and_new(old_table, new_table);
+      priv_get_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
+      if (m_option.verbose) {
+        m_comm.cout0() << "\nGenerating friend checking requests took (s)\t"
+                       << gen_timer.elapsed() << std::endl;
+      }
 
       m_cnt_new_neighbors = 0;
       priv_update_neighbors(old_table, new_table);
@@ -222,34 +228,45 @@ class dnnd_kernel {
     std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
     assert(m_option.k < m_global_max_id);
 
+    // sqrt(k) is enough?
+    const std::size_t num_initial_neighbors = m_option.k;
+
     for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
       const auto                              sid     = itr->first;
       const auto&                             feature = itr->second;
-      const std::vector<feature_element_type> tmp_feature(feature.begin(),
-                                                          feature.end());
+      const std::vector<feature_element_type> source_feature(feature.begin(),
+                                                             feature.end());
 
-      std::unordered_set<id_type> unique_table;
+      std::unordered_set<id_type> neighbors;
+      // Get the current neighbors
       if (m_knn_heap_table.count(sid) > 0) {
         for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
                   nend = m_knn_heap_table.at(sid).ids_end();
              nitr != nend; ++nitr) {
           const auto& nid = nitr->first;
-          unique_table.insert(nid);
+          neighbors.insert(nid);
         }
       }
 
-      while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?
+      while (neighbors.size() < num_initial_neighbors) {
         id_type nid;
         while (true) {
           nid = dist(m_rnd_generator);
-          if (nid != sid && unique_table.count(nid) == 0) break;
+          if (nid != sid && neighbors.count(nid) == 0) break;
         }
-        unique_table.insert(nid);
+        neighbors.insert(nid);
+        // Visit 'nid' and come back to 'sid' with the distance between them.
         m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
-                     sid, nid, tmp_feature);
+                     sid, nid, source_feature);
       }
     }
     m_comm.barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "#of generated initial neighbors: "
+                     << m_comm.all_reduce_sum(m_knn_heap_table.size() *
+                                              num_initial_neighbors)
+                     << std::endl;
+    }
   }
 
   /// \brief Fills k-NN heap with a given index.
@@ -326,8 +343,8 @@ class dnnd_kernel {
     }
   };
 
-  void priv_select_old_and_new(adj_lsit_type& old_table,
-                               adj_lsit_type& new_table) {
+  void priv_get_old_and_new(adj_lsit_type& old_table,
+                            adj_lsit_type& new_table) {
     priv_select_outgoing_old_and_new(old_table, new_table);
     priv_add_reverse_neighbors(old_table);
     priv_add_reverse_neighbors(new_table);
@@ -361,11 +378,12 @@ class dnnd_kernel {
       }
 
       // Select 'new' items to use for the friend checking.
-      const int num_news_to_select =
+      const int num_news =
           std::min((int)(m_option.r * m_option.k), (int)news.size());
       std::shuffle(news.begin(), news.end(), m_rnd_generator);
-      news.erase(news.begin() + num_news_to_select, news.end());
-      assert(news.size() == num_news_to_select);
+      news.erase(news.begin() + num_news, news.end());
+      assert(news.size() == num_news);
+      // reset their 'new' flags as they have been selected.
       for (const auto& nid : news) {
         neighbors.value(nid) = false;
       }
@@ -378,11 +396,12 @@ class dnnd_kernel {
       r_table = priv_exchange_reverse_neighbors(r_table);
     }
     priv_merge_reversed_table(r_table, table);
+
     priv_remove_duplicates(table);
   }
 
   adj_lsit_type priv_gen_reversed_table(const adj_lsit_type& table) {
-    adj_lsit_type r_table(table.get_allocator());
+    adj_lsit_type r_table;
     for (const auto& elem : table) {
       const auto& source    = elem.first;
       const auto& neighbors = elem.second;
@@ -393,21 +412,24 @@ class dnnd_kernel {
     return r_table;
   }
 
-  void priv_merge_reversed_table(const adj_lsit_type& reversed_table,
-                                 adj_lsit_type&       table) {
-    for (const auto& item : reversed_table) {
-      const auto& source = item.first;
-      auto        r_neighbors(item.second);  // Make a copy on purpose
-
-      const auto num_items =
+  /// Note: this function destroy the contents of reversed_table.
+  void priv_merge_reversed_table(adj_lsit_type& reversed_table,
+                                 adj_lsit_type& table) {
+    for (auto& [source, r_neighbors] : reversed_table) {
+      const auto num_items_to_keep =
           std::min((std::size_t)(m_option.r * m_option.k), r_neighbors.size());
       std::shuffle(r_neighbors.begin(), r_neighbors.end(), m_rnd_generator);
-      r_neighbors.erase(r_neighbors.begin() + num_items, r_neighbors.end());
-      assert(r_neighbors.size() == num_items);
+      r_neighbors.erase(r_neighbors.begin() + num_items_to_keep,
+                        r_neighbors.end());
+      assert(r_neighbors.size() == num_items_to_keep);
 
       table[source].insert(table[source].end(), r_neighbors.begin(),
                            r_neighbors.end());
+      r_neighbors.clear();
+      r_neighbors.shrink_to_fit();
     }
+    reversed_table.clear();
+    reversed_table.rehash(0);
   }
 
   static void priv_remove_duplicates(adj_lsit_type& table) {
@@ -428,50 +450,81 @@ class dnnd_kernel {
     // Randomize the source ID's order to avoid updating the same node from
     // many processes at the same time.
     std::vector<id_type> source_ids;
-    source_ids.reserve(reverse_neighbors.size());
-    std::size_t num_neighbors_to_send = 0;
-    for (const auto& item : reverse_neighbors) {
-      const auto& source = item.first;
-      source_ids.push_back(source);
-      num_neighbors_to_send += item.second.size();
+    std::size_t          num_neighbors_to_send = 0;
+    {
+      source_ids.reserve(reverse_neighbors.size());
+      for (const auto& rns : reverse_neighbors) {
+        source_ids.push_back(rns.first);
+        num_neighbors_to_send += rns.second.size();
+      }
+      std::shuffle(source_ids.begin(), source_ids.end(), m_rnd_generator);
     }
-    std::shuffle(source_ids.begin(), source_ids.end(), m_rnd_generator);
 
+    // Exchange the number of neighbors to send.
+    static std::unordered_map<id_type, std::size_t> count_incoming;
+    {
+      count_incoming.reserve(m_point_store.size());
+      for (auto& item : m_point_store) {
+        count_incoming[item.first] = 0;
+      }
+      m_comm.cf_barrier();
+
+      auto itr = reverse_neighbors.begin();
+      run_batched_ygm_async(
+          reverse_neighbors.size(), m_option.mini_batch_size, false, m_comm,
+          [&itr, this](auto& comm) {
+            const auto& source        = itr->first;
+            const auto  num_neighbors = itr->second.size();
+            comm.async(
+                m_point_partitioner(source),
+                [](const std::size_t id, const std::size_t n) {
+                  count_incoming[id] += n;
+                },
+                source, num_neighbors);
+            ++itr;
+            return 1;
+          });
+      assert(itr == reverse_neighbors.end());
+    }
+
+    // Init the receive buffer.
     adj_lsit_type         recv_buf;
     static adj_lsit_type& ref_recv_buf = recv_buf;
-    ref_recv_buf.clear();
-    ref_recv_buf.reserve(m_point_store.size());
-    // Allocate space beforehand for performance.
-    for (auto& item : m_point_store) {
-      ref_recv_buf[item.first];
-    }
-    m_comm.cf_barrier();
-
-    // Send reverse neighbors to the owner source.
-    std::size_t source_i        = 0;
-    std::size_t neighbor_i      = 0;
-    auto        neighbor_sender = [&source_i, &source_ids, &reverse_neighbors,
-                            this](ygm::comm& comm) {
-      const auto& source    = source_ids[source_i];
-      const auto& neighbors = reverse_neighbors.at(source);
-      for (const auto& n : neighbors) {
-        comm.async(
-            m_point_partitioner(source),
-            [](const id_type vid, const auto& neighbor) {
-              ref_recv_buf[vid].push_back(neighbor);
-            },
-            source, n);
+    {
+      ref_recv_buf.clear();
+      ref_recv_buf.reserve(count_incoming.size());
+      for (auto& item : count_incoming) {
+        ref_recv_buf[item.first].reserve(item.second);
       }
-      ++source_i;
-      return neighbors.size();
-    };
+      count_incoming.clear();
+      count_incoming.rehash(0);
+      m_comm.cf_barrier();
+    }
 
-    // Use smaller mini batch size here because this operation tends to get
-    // stuck frequently in heavy load.
-    run_batched_ygm_async(num_neighbors_to_send,
-                          m_option.mini_batch_size, false,
-                          neighbor_sender, m_comm);
-    assert(source_i == source_ids.size());
+    // Send reverse neighbors to the corresponding sources.
+    {
+      auto sitr            = source_ids.begin();
+      auto neighbor_sender = [&sitr, &reverse_neighbors,
+                              this](ygm::comm& comm) {
+        const auto& src = *sitr;
+        const auto& rn  = reverse_neighbors.at(src);
+        for (const auto& n : rn) {
+          comm.async(
+              m_point_partitioner(src),
+              [](const id_type vid, const auto& neighbor) {
+                ref_recv_buf[vid].push_back(neighbor);
+              },
+              src, n);
+        }
+        ++sitr;
+        return 1;
+      };
+
+      run_batched_ygm_async(source_ids.size(),
+                            m_option.mini_batch_size / m_option.k, false,
+                            m_comm, neighbor_sender);
+      assert(sitr == source_ids.end());
+    }
 
     return recv_buf;
   }

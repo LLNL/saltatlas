@@ -55,12 +55,13 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
     return num_local_tasks;
   }
 
-  // Gather the number of tasks to process to rank 0.
   std::size_t local_num_assigned_tasks = 0;
   if (mpi_rank > 0) {
+    // Send the number of tasks to process to rank 0.
     SALTATLAS_DNND_CHECK_MPI(
         MPI_Send(&num_local_tasks, 1, MPI_UNSIGNED_LONG, 0, 0, mpi_comm));
 
+    // Receive the number of assigned tasks to process from rank 0.
     MPI_Status status;
     SALTATLAS_DNND_CHECK_MPI(MPI_Recv(&local_num_assigned_tasks, 1,
                                       MPI_UNSIGNED_LONG, 0, 0, mpi_comm,
@@ -119,6 +120,10 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
       show_task_distribution(task_assignment_table);
     }
   }
+
+  assert(local_num_assigned_tasks <= num_local_tasks);
+
+  SALTATLAS_DNND_CHECK_MPI(MPI_Barrier(mpi_comm));
 
   return local_num_assigned_tasks;
 }
