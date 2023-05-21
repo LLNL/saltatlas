@@ -85,7 +85,7 @@ class dnnd_kernel {
   void construct(
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_random_values();
     priv_construct_kernel();
@@ -102,7 +102,7 @@ class dnnd_kernel {
                                                           init_knn_index,
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_index(init_knn_index);
     priv_construct_kernel();
@@ -117,7 +117,7 @@ class dnnd_kernel {
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
       nn_index<id_type, distance_type, alloc_type>&            knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_index(init_knn_index);
     priv_construct_kernel();
@@ -139,7 +139,7 @@ class dnnd_kernel {
 
   void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
-      m_comm.cout0() << "Initializing the k-NN index with random neighbors."
+      m_comm.cout0() << "\nInitializing the k-NN index with random neighbors."
                      << std::endl;
     }
     priv_allocate_knn_heap();
@@ -151,7 +151,7 @@ class dnnd_kernel {
       const init_index_store_type& init_knn_index) {
     if (m_option.verbose) {
       m_comm.cout0()
-          << "Initializing the k-NN index using the given initial neighbors."
+          << "\nInitializing the k-NN index using the given initial neighbors."
           << std::endl;
     }
     priv_allocate_knn_heap();
@@ -180,7 +180,7 @@ class dnnd_kernel {
       priv_get_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
       if (m_option.verbose) {
-        m_comm.cout0() << "\nGenerating friend checking requests took (s)\t"
+        m_comm.cout0() << "Generating friend checking requests took (s)\t"
                        << gen_timer.elapsed() << std::endl;
       }
 
@@ -225,6 +225,9 @@ class dnnd_kernel {
   /// \brief Fill k-NN heap with random values.
   /// This function can accept already partially filled heap.
   void priv_fill_knn_heap_with_random_value() {
+    m_comm.cf_barrier();
+    ygm::timer init_timer;
+
     std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
     assert(m_option.k < m_global_max_id);
 
@@ -262,6 +265,8 @@ class dnnd_kernel {
     }
     m_comm.barrier();
     if (m_option.verbose) {
+      m_comm.cout0() << "Filling initial index took (s)\t"
+                     << init_timer.elapsed() << std::endl;
       m_comm.cout0() << "#of generated initial neighbors: "
                      << m_comm.all_reduce_sum(m_knn_heap_table.size() *
                                               num_initial_neighbors)
@@ -309,6 +314,9 @@ class dnnd_kernel {
   }
 
   void priv_allocate_knn_heap() {
+    m_comm.cf_barrier();
+    ygm::timer timer;
+
     m_knn_heap_table.clear();
 
     m_knn_heap_table.reserve(m_point_store.size());
@@ -318,6 +326,10 @@ class dnnd_kernel {
     }
 
     m_comm.cf_barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "Allocating k-NN heap took (s)\t" << timer.elapsed()
+                     << std::endl;
+    }
   }
 
   struct distance_calculator {
@@ -521,7 +533,7 @@ class dnnd_kernel {
       };
 
       run_batched_ygm_async(source_ids.size(),
-                            m_option.mini_batch_size / m_option.k, false,
+                            m_option.mini_batch_size, false,
                             m_comm, neighbor_sender);
       assert(sitr == source_ids.end());
     }
