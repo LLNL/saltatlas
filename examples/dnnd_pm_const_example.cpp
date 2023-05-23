@@ -23,6 +23,7 @@ struct option_t {
   std::string              dhnsw_init_index_path;
   std::string              datastore_path;
   std::string              datastore_transfer_path;
+  std::string              index_dump_prefix{false};
   bool                     verbose{false};
 };
 
@@ -110,6 +111,19 @@ int main(int argc, char **argv) {
     comm.cout0() << "Finished transfer." << std::endl;
   }
 
+  if (!opt.index_dump_prefix.empty()) {
+    comm.cout0() << "\nDumping index to " << opt.index_dump_prefix << std::endl;
+    // Reopen dnnd in read-only mode
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
+                      opt.verbose);
+    if (!dnnd.dump_index(opt.index_dump_prefix)) {
+      comm.cerr0() << "\nFailed to dump index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    comm.cf_barrier();
+    comm.cout0() << "Finished dumping." << std::endl;
+  }
+
   return 0;
 }
 
@@ -121,10 +135,11 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   option.dhnsw_init_index_path.clear();
   option.datastore_path.clear();
   option.datastore_transfer_path.clear();
+  option.index_dump_prefix.clear();
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:D:vh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -168,6 +183,10 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 
       case 'b':
         option.batch_size = std::stoul(optarg);
+        break;
+
+      case 'D':
+        option.index_dump_prefix = optarg;
         break;
 
       case 'v':
@@ -231,21 +250,26 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-x [string] If specified, transfer index to this path at the end."
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."
+      << "\n\t-D [string] If specified, dump the k-NN index (only neighbor "
+         "IDs) to files starting with this prefix at the end (one file per "
+         "process)."
+      << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
 }
 
-void show_options(const option_t &option, ygm::comm &comm) {
+void show_options(const option_t &opt, ygm::comm &comm) {
   comm.cout0() << "\nOptions:"
-               << "\nDatastore path\t" << option.datastore_path
-               << "\nDistance metric name\t" << option.distance_metric_name
-               << "\nPoint file format\t" << option.point_file_format << "\nk\t"
-               << option.index_k << "\nr\t" << option.r << "\ndelta\t"
-               << option.delta << "\nExchange reverse neighbors\t"
-               << option.exchange_reverse_neighbors << "\nBatch size\t"
-               << option.batch_size << "\nDNND init index path\t"
-               << option.dnnd_init_index_path << "\nDHNSW init index path\t"
-               << option.dhnsw_init_index_path << "\nDatastore transfer path\t"
-               << option.datastore_transfer_path << "\nVerbose\t"
-               << option.verbose << std::endl;
+               << "\nDatastore path\t" << opt.datastore_path
+               << "\nDistance metric name\t" << opt.distance_metric_name
+               << "\nPoint file format\t" << opt.point_file_format << "\nk\t"
+               << opt.index_k << "\nr\t" << opt.r << "\ndelta\t" << opt.delta
+               << "\nExchange reverse neighbors\t"
+               << opt.exchange_reverse_neighbors << "\nBatch size\t"
+               << opt.batch_size << "\nDNND init index path\t"
+               << opt.dnnd_init_index_path << "\nDHNSW init index path\t"
+               << opt.dhnsw_init_index_path << "\nDatastore transfer path\t"
+               << opt.datastore_transfer_path
+               << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nVerbose\t" << opt.verbose << std::endl;
 }

@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -236,10 +237,21 @@ class base_dnnd {
     return query_result;
   }
 
-  /// \brief Dump the k-NN index to files.
+  /// \brief Dump the k-NN index to distributed files.
   /// \param out_file_prefix File path prefix.
-  void dump_index(const std::string& out_file_prefix) {
-    priv_dump_index_distributed_file(out_file_prefix);
+  /// \param dump_distance If true, also dump distances
+  /// \details For each neighbor list, the following lines are dumped:
+  /// ```
+  /// source_id neighbor_id_1 neighbor_id_2 ...
+  /// 0.0 distance_1 distance_2 ...
+  /// ```
+  /// Each item is separated by a tab. The first line is the source id and
+  /// neighbor ids. The second line is the dummy value and distances to each
+  /// neighbor. The dummy value is just a placeholder so that each neighbor id
+  /// and distance pair is stored in the same column.
+  bool dump_index(const std::string_view out_file_prefix,
+                  const bool         dump_distance = false) {
+    return priv_dump_index_distributed_file(out_file_prefix, dump_distance);
   }
 
   /// \brief Returns the distance metric name.
@@ -286,41 +298,13 @@ class base_dnnd {
     return kernel;
   }
 
-  void priv_dump_index_distributed_file(const std::string& out_file_prefix) {
+  bool priv_dump_index_distributed_file(const std::string_view out_file_prefix,
+                                        const bool         dump_distance) {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();
-    std::ofstream ofs(file_name.str());
-    if (!ofs.is_open()) {
-      m_comm.cerr() << "Failed to create: " << file_name.str() << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    }
-
-    for (auto sitr = m_data_core->knn_index.points_begin(),
-              send = m_data_core->knn_index.points_end();
-         sitr != send; ++sitr) {
-      const auto& source = sitr->first;
-      ofs << source;
-      for (auto nitr = m_data_core->knn_index.neighbors_begin(source),
-                nend = m_data_core->knn_index.neighbors_end(source);
-           nitr != nend; ++nitr) {
-        ofs << "\t" << nitr->id;
-      }
-      ofs << "\n";
-      ofs << "0.0";
-      for (auto nitr = m_data_core->knn_index.neighbors_begin(source),
-                nend = m_data_core->knn_index.neighbors_end(source);
-           nitr != nend; ++nitr) {
-        ofs << "\t" << nitr->distance;
-      }
-      ofs << "\n";
-    }
-    ofs.close();
-    if (!ofs) {
-      m_comm.cerr() << "Failed to write data to: " << file_name.str()
-                    << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    }
-    m_comm.cf_barrier();
+    const auto ret =
+        m_data_core->knn_index.dump(file_name.str(), dump_distance);
+    return ret;
   }
 
   data_core_type*         m_data_core{nullptr};

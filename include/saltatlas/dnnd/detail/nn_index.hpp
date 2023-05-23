@@ -149,6 +149,50 @@ class nn_index {
 
   bool empty() const { return m_index.empty(); }
 
+  /// \brief Dump the index to a file.
+  /// \param filename The file name to dump the index.
+  /// \param dump_distance If true, the distance to each neighbor is also
+  /// dumped. \return True if the dump is successful. \details For each neighbor
+  /// list, the following lines are dumped:
+  /// ```
+  /// source_id neighbor_id_1 neighbor_id_2 ...
+  /// 0.0 distance_1 distance_2 ...
+  /// ```
+  /// Each item is separated by a space. The first line is the source id and
+  /// neighbor ids. The second line is the dummy value and distances to each
+  /// neighbor. The dummy value is just a placeholder so that each neighbor id
+  /// and distance pair is stored in the same column.
+  bool dump(const std::string_view filename, bool dump_distance = false) const {
+    std::ofstream ofs(filename.data());
+    if (!ofs) {
+      std::cerr << "Failed to open the file: " << filename << std::endl;
+      return false;
+    }
+
+    for (const auto &[source, neighbors] : m_index) {
+      ofs << source;
+      for (const auto &neighbor : neighbors) {
+        ofs << "\t" << neighbor.id;
+      }
+      ofs << "\n";
+
+      if (!dump_distance) continue;
+
+      ofs << "0.0";  // dummy distance
+      for (const auto &neighbor : neighbors) {
+        ofs << "\t" << neighbor.distance;
+      }
+      ofs << "\n";
+    }
+
+    ofs.close();
+    if (!ofs) {
+      std::cerr << "Failed to close the file: " << filename << std::endl;
+      return false;
+    }
+    return true;
+  }
+
  private:
   point_table_type m_index;
 };

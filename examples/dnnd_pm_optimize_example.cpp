@@ -21,6 +21,7 @@ struct option_t {
   double      pruning_degree_multiplier{0.0};  // no pruning by default
   bool        remove_long_paths{false};
   std::size_t batch_size{1ULL << 28};
+  std::string index_dump_prefix{false};
   bool        verbose{true};
 };
 
@@ -68,6 +69,7 @@ int main(int argc, char **argv) {
     comm.cout0() << "\nIndex optimization took (s)\t"
                  << optimization_timer.elapsed() << std::endl;
   }
+  comm.cout0() << "\nThe index is ready for query." << std::endl;
 
   if (!opt.datastore_transfer_path.empty()) {
     comm.cout0() << "\nTransferring index data store " << opt.datastore_path
@@ -78,8 +80,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  comm.cout0() << "\nThe index is ready for query." << std::endl;
-  comm.cf_barrier();
+  if (!opt.index_dump_prefix.empty()) {
+    comm.cout0() << "\nDumping index to " << opt.index_dump_prefix << std::endl;
+    // Reopen dnnd in read-only mode
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
+                      opt.verbose);
+    if (!dnnd.dump_index(opt.index_dump_prefix)) {
+      comm.cerr0() << "\nFailed to dump index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    comm.cf_barrier();
+    comm.cout0() << "Finished dumping." << std::endl;
+  }
 
   return 0;
 }
@@ -91,7 +103,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "i:z:x:um:lb:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "i:z:x:um:lb:D:vh")) != -1) {
     switch (n) {
       case 'i':
         opt.original_datastore_path = optarg;
@@ -119,6 +131,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 
       case 'b':
         opt.batch_size = std::stoull(optarg);
+        break;
+
+      case 'D':
+        opt.index_dump_prefix = optarg;
         break;
 
       case 'v':
@@ -159,6 +175,10 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << "\n\t-x [string] If specified, transfer the index to this path at "
           "the end."
        << "\n\t-b [long int] Batch size (0 is the full batch mode)."
+       << "\n\t-D [string] If specified, dump the k-NN index (only neighbor "
+          "IDs) to files starting with this prefix at the end (one file per "
+          "process)."
+       << "\n"
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;
 }
@@ -172,5 +192,6 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.pruning_degree_multiplier << "\nRemove long paths\t"
                << opt.remove_long_paths << "\nBatch size\t" << opt.batch_size
                << "\nDatastore transfer path\t" << opt.datastore_transfer_path
+               << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
                << "\nVerbose\t" << opt.verbose << std::endl;
 }
