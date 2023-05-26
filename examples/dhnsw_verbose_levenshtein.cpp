@@ -283,6 +283,13 @@ int main(int argc, char** argv) {
 
   dist_index.partition_data(bag_data, num_seeds);
 
+  // Show functionality to ask partitioner for partition assignment of an
+  // arbitrary point
+  std::string my_string = "whatever";
+  auto        my_rep =
+      fuzzy_partitioner.find_point_partition_representative(my_string);
+  world.cout0(my_string, " rep: ", my_rep);
+
   world.barrier();
 
   fuzzy_partitioner.print_tree();
