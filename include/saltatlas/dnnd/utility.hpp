@@ -16,8 +16,11 @@
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/utilities/float.hpp>
+#include <saltatlas/dnnd/detail/utilities/file.hpp>
 
 namespace saltatlas::utility {
+
+using saltatlas::dndetail::find_file_paths;
 
 namespace {
 using saltatlas::dndetail::neighbor;

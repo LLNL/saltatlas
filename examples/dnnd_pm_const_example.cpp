@@ -56,9 +56,13 @@ int main(int argc, char **argv) {
 
     comm.cout0() << "\n<<Read Points>>" << std::endl;
     {
+      // Gather file paths if directories are given by the user
+      const auto paths =
+          saltatlas::utility::find_file_paths(opt.point_file_names);
+
       ygm::timer point_read_timer;
-      saltatlas::read_points(opt.point_file_names, opt.point_file_format,
-                             opt.verbose, dnnd.get_point_partitioner(),
+      saltatlas::read_points(paths, opt.point_file_format, opt.verbose,
+                             dnnd.get_point_partitioner(),
                              dnnd.get_point_store(), comm);
       comm.cout0() << "\nReading points took (s)\t"
                    << point_read_timer.elapsed() << std::endl;
@@ -222,7 +226,8 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 template <typename cout_type>
 void usage(std::string_view exe_name, cout_type &cout) {
   cout << "Usage: mpirun -n [#of processes] " << exe_name
-       << " [options (see below)] [list of input point files (required)]"
+       << " [options (see below)] [list of input point files (or directories "
+          "that contain input files) (required)]"
        << std::endl;
 
   cout
