@@ -21,7 +21,7 @@ struct option_t {
   double      pruning_degree_multiplier{0.0};  // no pruning by default
   bool        remove_long_paths{false};
   std::size_t batch_size{1ULL << 28};
-  std::string index_dump_prefix{false};
+  std::string index_dump_prefix;
   bool        verbose{true};
 };
 
@@ -100,6 +100,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   opt.original_datastore_path.clear();
   opt.datastore_path.clear();
   opt.datastore_transfer_path.clear();
+  opt.index_dump_prefix.clear();
   help = false;
 
   int n;
