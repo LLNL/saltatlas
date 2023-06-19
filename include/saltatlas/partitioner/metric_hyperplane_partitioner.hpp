@@ -305,7 +305,7 @@ class metric_hyperplane_partitioner {
 
       dist_t theta = pow(dist2, 2) - pow(dist1, 2);
 
-      if (theta < node.theta) {
+      if (theta > node.theta) {
         tree_index = tree_index * 2 + 1;
       } else {
         tree_index = tree_index * 2 + 2;
@@ -475,7 +475,7 @@ class metric_hyperplane_partitioner {
 
       dist_t theta = pow(dist2, 2) - pow(dist1, 2);
 
-      if (theta < node.theta) {
+      if (theta > node.theta) {
         point_assignments[index] = 2 * tree_index + 1;
 
         auto [level, node] = index_to_ln(2 * tree_index + 1);
