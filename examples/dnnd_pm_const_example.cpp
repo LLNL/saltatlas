@@ -256,7 +256,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."
       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
-         "with this prefix at the end (one file per process)."
+         "with this prefix (one file per process). A line starts from the "
+         "corresponding source ID followed by the list of neighbor IDs."
       << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
