@@ -176,9 +176,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << "\n\t-x [string] If specified, transfer the index to this path at "
           "the end."
        << "\n\t-b [long int] Batch size (0 is the full batch mode)."
-       << "\n\t-D [string] If specified, dump the k-NN index (only neighbor "
-          "IDs) to files starting with this prefix at the end (one file per "
-          "process)."
+       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
+          "with this prefix at the end (one file per process)."
        << "\n"
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;
