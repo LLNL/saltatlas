@@ -228,53 +228,64 @@ class dnnd_kernel {
     m_comm.cf_barrier();
     ygm::timer init_timer;
 
-    std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
-    assert(m_option.k < m_global_max_id);
-
     // sqrt(k) is enough?
-    const std::size_t num_initial_neighbors = m_option.k;
+    const std::size_t init_k = m_option.k;
 
-    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
-      const auto                              sid     = itr->first;
-      const auto&                             feature = itr->second;
-      const std::vector<feature_element_type> source_feature(feature.begin(),
-                                                             feature.end());
+    // Initialize the k-nn heap with random values using a batched algorithm to
+    // avoid sending too many messages at once. A single task corresponds to all
+    // works of a single point in the dataset to simplify the implementation.
+    // Thus, the total number of tasks is equal to the number of points in the
+    // dataset. The global batch size is equal to the mini-batch size divided by
+    // init_k as each point sends up to init_k messages for initialization.
+    auto pitr = m_point_store.begin();
+    run_batched_ygm_async(
+        m_point_store.size(),               // #of tasks in local
+        m_option.mini_batch_size / init_k,  // global batch size
+        m_option.verbose, m_comm, [this, &pitr, init_k](auto& comm) {
+          const auto                              sid     = pitr->first;
+          const auto&                             feature = pitr->second;
+          const std::vector<feature_element_type> source_feature(
+              feature.begin(), feature.end());
 
-      std::unordered_set<id_type> neighbors;
-      // Get the current neighbors
-      if (m_knn_heap_table.count(sid) > 0) {
-        for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
-                  nend = m_knn_heap_table.at(sid).ids_end();
-             nitr != nend; ++nitr) {
-          const auto& nid = nitr->first;
-          neighbors.insert(nid);
-        }
-      }
+          std::unordered_set<id_type> neighbors;
+          // Get the neighbors already in the heap
+          if (m_knn_heap_table.count(sid) > 0) {
+            for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
+                      nend = m_knn_heap_table.at(sid).ids_end();
+                 nitr != nend; ++nitr) {
+              const auto& nid = nitr->first;
+              neighbors.insert(nid);
+            }
+          }
 
-      while (neighbors.size() < num_initial_neighbors) {
-        id_type nid;
-        while (true) {
-          nid = dist(m_rnd_generator);
-          if (nid != sid && neighbors.count(nid) == 0) break;
-        }
-        neighbors.insert(nid);
-        // Visit 'nid' and come back to 'sid' with the distance between them.
-        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
-                     sid, nid, source_feature);
-      }
-    }
+          // Fill the remaining space with random values
+          while (neighbors.size() < init_k) {
+            id_type nid;
+            // Generate a random id that is not in the neighbor set
+            while (true) {
+              std::uniform_int_distribution<id_type> pid_dist(0,
+                                                              m_global_max_id);
+              assert(m_option.k < m_global_max_id);
+              nid = pid_dist(m_rnd_generator);
+              if (nid != sid && neighbors.count(nid) == 0) break;
+            }
 
-    // This cf_barrier() shouldn't be necessary,
-    // but somehow this program stalls at barrier() without cf_barrier() here.
-    m_comm.cf_barrier();
-    m_comm.barrier();
+            neighbors.insert(nid);
+            // Visit 'nid' and come back to 'sid' with the distance between
+            // them.
+            m_comm.async(m_point_partitioner(nid), distance_calculator{},
+                         m_this, sid, nid, source_feature);
+          }
+
+          ++pitr;
+          return 1;
+        });
 
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
       m_comm.cout0() << "#of generated initial neighbors: "
-                     << m_comm.all_reduce_sum(m_knn_heap_table.size() *
-                                              num_initial_neighbors)
+                     << m_comm.all_reduce_sum(m_knn_heap_table.size() * init_k)
                      << std::endl;
     }
   }
@@ -537,8 +548,7 @@ class dnnd_kernel {
         return 1;
       };
 
-      run_batched_ygm_async(source_ids.size(),
-                            m_option.mini_batch_size, false,
+      run_batched_ygm_async(source_ids.size(), m_option.mini_batch_size, false,
                             m_comm, neighbor_sender);
       assert(sitr == source_ids.end());
     }
