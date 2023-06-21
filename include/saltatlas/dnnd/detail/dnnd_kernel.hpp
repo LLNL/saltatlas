@@ -263,7 +263,12 @@ class dnnd_kernel {
                      sid, nid, source_feature);
       }
     }
+
+    // This cf_barrier() shouldn't be necessary,
+    // but somehow this program stalls at barrier() without cf_barrier() here.
+    m_comm.cf_barrier();
     m_comm.barrier();
+
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
