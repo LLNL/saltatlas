@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
   ygm::container::bag<std::pair<index_t, point_t>> bag_data(world);
   size_t                                           local_counter;
   ascii_lines.for_all(
-      [&bag_data, &local_counter, world](const auto& ascii_line) {
+      [&bag_data, &local_counter, &world](const auto& ascii_line) {
         bag_data.async_insert(std::make_pair(
             (local_counter * world.size()) + world.rank(), ascii_line));
         ++local_counter;
