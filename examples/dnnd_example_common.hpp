@@ -23,9 +23,23 @@
 #include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
+#ifdef SALTATLAS_DNND_EXAMPLE_ID_TYPE
+using id_type = SALTATLAS_DNND_EXAMPLE_ID_TYPE;
+#else
 using id_type              = uint32_t;
+#endif
+
+#ifdef SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE
+using feature_element_type = SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE;
+#else
 using feature_element_type = float;
+#endif
+
+#ifdef SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE
+using distance_type = SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE;
+#else
 using distance_type        = float;
+#endif
 
 using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;
 using neighbor_type = typename dnnd_type::neighbor_type;
