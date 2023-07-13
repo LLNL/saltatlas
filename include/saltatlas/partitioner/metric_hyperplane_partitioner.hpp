@@ -67,19 +67,43 @@ class metric_hyperplane_partitioner {
       uint32_t num_level_nodes = ((uint32_t)1) << l;
       next_level_points.resize(2 * num_level_nodes);
 
+      std::vector<std::pair<point_t, point_t>> best_selectors(num_level_nodes);
+      std::vector<dist_t>                      best_thetas(num_level_nodes,
+                                                           std::numeric_limits<dist_t>::max());
+
+      for (int selector_trial = 0; selector_trial < max_selector_trials;
+           ++selector_trial) {
+        std::vector<std::pair<point_t, point_t>> selector_pairs;
+        for (uint32_t node = 0; node < num_level_nodes; ++node) {
+          selector_pairs.push_back(
+              choose_selectors(current_level_points[node]));
+        }
+
+        auto node_thetas = calculate_thetas(num_level_nodes, point_assignments,
+                                            data, selector_pairs);
+
+        for (uint32_t node = 0; node < num_level_nodes; ++node) {
+          uint32_t index = ln_to_index(l, node);
+
+          auto theta_median =
+              sampled_median(node_thetas[node], 0.01,
+                             l * max_selector_trials * num_level_nodes +
+                                 selector_trial * num_level_nodes * node);
+
+          if (std::abs(theta_median) < std::abs(best_thetas[node])) {
+            best_thetas[node]    = theta_median;
+            best_selectors[node] = selector_pairs[node];
+          }
+        }
+      }
+
+      // Record best thetas and associated selectors
       for (uint32_t node = 0; node < num_level_nodes; ++node) {
         uint32_t index = ln_to_index(l, node);
 
-        std::pair<point_t, point_t> selectors =
-            choose_selectors(current_level_points[node]);
-
-        m_tree[index].selectors = selectors;
+        m_tree[index].selectors = best_selectors[node];
+        m_tree[index].theta     = best_thetas[node];
       }
-
-      auto node_thetas =
-          calculate_thetas(num_level_nodes, point_assignments, data);
-
-      find_split_thetas(node_thetas, l);
 
       assign_points(point_assignments, next_level_points, data);
 
@@ -293,6 +317,56 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
+  dist_t sampled_median(const std::vector<dist_t> &vals,
+                        const float                sample_ratio = 0.01,
+                        const int                  seed         = 1234) {
+    std::vector<dist_t>         samples;
+    static std::vector<dist_t> &s_samples = samples;
+    std::vector<dist_t>         local_samples;
+
+    auto insert_lambda = [](const auto &vals) {
+      s_samples.insert(s_samples.end(), vals.begin(), vals.end());
+    };
+
+    std::mt19937_64                       gen(m_comm.rank() * seed);
+    std::uniform_int_distribution<size_t> dist(0, vals.size() - 1);
+
+    int num_samples = std::min<int>(
+        vals.size(), static_cast<int>(std::ceil(sample_ratio * vals.size())));
+
+    for (int i = 0; i < num_samples; ++i) {
+      auto index = dist(gen);
+
+      local_samples.push_back(vals[index]);
+    }
+
+    m_comm.async(0, insert_lambda, local_samples);
+
+    m_comm.barrier();
+
+    dist_t         to_return;
+    static dist_t &s_to_return = to_return;
+
+    if (m_comm.rank() == 0) {
+      std::sort(samples.begin(), samples.end());
+      ASSERT_RELEASE(samples.size() > 0);
+
+      if (samples.size() % 2 == 1) {
+        to_return = samples[samples.size() / 2];
+      } else {
+        auto upper_index = samples.size() / 2;
+        to_return = (samples[upper_index - 1] + samples[upper_index]) / 2;
+      }
+
+      m_comm.async_bcast([](const auto median) { s_to_return = median; },
+                         to_return);
+    }
+
+    m_comm.barrier();
+
+    return to_return;
+  }
+
   uint64_t search_tree(const point_t &point) const {
     uint64_t tree_index = 0;
     while (tree_index < m_tree.size()) {
@@ -419,19 +493,19 @@ class metric_hyperplane_partitioner {
   template <typename Container>
   std::vector<std::vector<dist_t>> calculate_thetas(
       uint32_t                              num_nodes,
-      std::unordered_map<index_t, index_t> &point_assignments,
-      Container                            &data) {
+      std::unordered_map<index_t, index_t> &point_assignments, Container &data,
+      const std::vector<std::pair<point_t, point_t>> &selector_pairs) {
     std::vector<std::vector<dist_t>> thetas(num_nodes);
 
-    data.for_all([&point_assignments, &thetas, this](const auto &index,
-                                                     const auto &point) {
+    data.for_all([&point_assignments, &thetas, &selector_pairs, this](
+                     const auto &index, const auto &point) {
       const auto tree_index = point_assignments[index];
-      auto      &node       = this->m_tree[tree_index];
+      auto [level, node]    = index_to_ln(tree_index);
 
-      dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                             m_space.get_dist_func_param());
-      dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                             m_space.get_dist_func_param());
+      dist_t dist1 = m_space.get_dist_func()(
+          &point, &selector_pairs[node].first, m_space.get_dist_func_param());
+      dist_t dist2 = m_space.get_dist_func()(
+          &point, &selector_pairs[node].second, m_space.get_dist_func_param());
 
       dist_t theta = pow(dist2, 2) - pow(dist1, 2);
 
@@ -449,7 +523,8 @@ class metric_hyperplane_partitioner {
     for (int i = 0; i < thetas.size(); ++i) {
       m_comm.barrier();
       ygm::timer t{};
-      auto       theta_median = median(thetas[i], i % m_comm.size());
+      // auto       theta_median = median(thetas[i], i % m_comm.size());
+      auto theta_median = sampled_median(thetas[i], 0.01, i);
       m_median_time += t.elapsed();
 
       auto index = ln_to_index(level, i);
@@ -504,6 +579,8 @@ class metric_hyperplane_partitioner {
   std::unique_ptr<hnswlib::HierarchicalNSW<dist_t>> m_hnsw_ptr;
 
   double m_median_time{0.0};
+
+  int max_selector_trials = 10;
 };
 
 }  // namespace saltatlas
