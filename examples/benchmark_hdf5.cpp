@@ -268,8 +268,9 @@ void benchmark_query_trial(
 
   auto empty_lambda =
       [](const Point                              &query_pt,
-         const std::multimap<DistType, IndexType> &nearest_neighbors,
-         auto                                      dhnsw) { ++num_queries; };
+         const std::multimap<DistType, IndexType> &nearest_neighbors) {
+        ++num_queries;
+      };
 
   auto perform_query_lambda = [&empty_lambda, &dist_index, &hops, &voronoi_rank,
                                &k](const auto &index, const auto &point) {
@@ -355,7 +356,7 @@ void benchmark_query_trial_ground_truth(
   // stored in distributed map
   auto query_nearest_neighbors_lambda =
       [](const point_t                        &query_pt,
-         const std::multimap<dist_t, index_t> &nearest_neighbors, auto dhnsw,
+         const std::multimap<dist_t, index_t> &nearest_neighbors,
          uint64_t data_index, auto ground_truth_ptr) {
         // Lambda to check ANN against ground truth
         auto check_nearest_neighbors_lambda = [](const auto &query_ID, auto &gt,
