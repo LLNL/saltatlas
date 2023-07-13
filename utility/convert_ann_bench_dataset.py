@@ -84,7 +84,7 @@ def write_test(data, out_file_prefix):
         data = data.astype(int)
         print(data)
 
-    with open(out_file_prefix + '-test.txt', 'w') as f:
+    with open(out_file_prefix + '-query.txt', 'w') as f:
         for point in data:
             for i, feature in enumerate(point):
                 if i > 0:
