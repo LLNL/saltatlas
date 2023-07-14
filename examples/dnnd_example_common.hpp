@@ -12,6 +12,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <ygm/comm.hpp>
@@ -38,7 +39,9 @@ using feature_element_type = float;
 #ifdef SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE
 using distance_type = SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE;
 #else
-using distance_type        = float;
+using distance_type =
+    std::conditional_t<std::is_same_v<feature_element_type, double>, double,
+                       float>;
 #endif
 
 using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;

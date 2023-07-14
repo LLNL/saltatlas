@@ -51,6 +51,10 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example_with_feature_type(dnnd_pm_const_example uint8_t)
     add_saltatlas_example_with_feature_type(dnnd_pm_optimize_example uint8_t)
     add_saltatlas_example_with_feature_type(dnnd_pm_query_example uint8_t)
+
+    add_saltatlas_example_with_feature_type(dnnd_pm_const_example double)
+    add_saltatlas_example_with_feature_type(dnnd_pm_optimize_example double)
+    add_saltatlas_example_with_feature_type(dnnd_pm_query_example double)
 endif ()
 
 add_subdirectory(datasets)
