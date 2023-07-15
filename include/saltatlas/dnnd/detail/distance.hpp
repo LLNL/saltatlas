@@ -91,9 +91,8 @@ inline distance_type cosine(const feature_element_type *const f0,
 }
 
 /// \brief Alternative cosine distance. The original model is from PyNNDescent.
-/// This function returns the same relative distance relationships as the normal
-/// cosine similarity. However, this function may contribute to faster
-/// convergence when points are located in very close distances.
+/// This function returns the same relative distance orders as the normal
+/// cosine similarity.
 template <typename feature_element_type, typename distance_type>
 inline distance_type alt_cosine(const feature_element_type *const f0,
                                 const std::size_t                 len0,
@@ -141,6 +140,31 @@ inline distance_type jaccard_index(const feature_element_type *const f0,
            static_cast<distance_type>(num_non_zero);
 }
 
+/// \brief Alternative Jaccard index. The original model is from PyNNDescent.
+/// This function returns the same relative distance orders as the normal
+/// Jaccard index.
+template <typename feature_element_type, typename distance_type>
+inline distance_type alt_jaccard_index(const feature_element_type *const f0,
+                                       const std::size_t                 len0,
+                                       const feature_element_type *const f1,
+                                       const std::size_t                 len1) {
+  assert(len0 == len1);
+  std::size_t num_non_zero = 0;
+  std::size_t num_equal    = 0;
+  for (std::size_t i = 0; i < len0; ++i) {
+    const bool x_true = !!f0[i];
+    const bool y_true = !!f1[i];
+    num_non_zero += x_true | y_true;
+    num_equal += x_true & y_true;
+  }
+
+  if (num_non_zero == 0)
+    return distance_type{0};
+  else
+    return static_cast<distance_type>(
+        -std::log2(distance_type(num_equal) / distance_type(num_non_zero)));
+}
+
 template <typename feature_element_type, typename distance_type>
 inline distance_type levenshtein(const feature_element_type *const s0,
                                  const std::size_t                 m,
@@ -185,6 +209,7 @@ enum class metric_id : uint8_t {
   cosine,
   altcosine,
   jaccard,
+  altjaccard,
   levenshtein
 };
 
@@ -201,6 +226,8 @@ inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
     return metric_id::altcosine;
   } else if (metric_name == "jaccard") {
     return metric_id::jaccard;
+  } else if (metric_name == "altjaccard") {
+    return metric_id::altjaccard;
   } else if (metric_name == "levenshtein") {
     return metric_id::levenshtein;
   }
@@ -221,6 +248,8 @@ inline std::string convert_to_metric_name(const metric_id &id) {
       return "altcosine";
     case metric_id::jaccard:
       return "jaccard";
+    case metric_id::altjaccard:
+      return "altjaccard";
     case metric_id::levenshtein:
       return "levenshtein";
     default:
@@ -243,6 +272,8 @@ inline metric_type<feature_element_type, distance_type> &metric(
     return alt_cosine<feature_element_type, distance_type>;
   } else if (id == metric_id::jaccard) {
     return jaccard_index<feature_element_type, distance_type>;
+  } else if (id == metric_id::altjaccard) {
+    return alt_jaccard_index<feature_element_type, distance_type>;
   } else if (id == metric_id::levenshtein) {
     return levenshtein<feature_element_type, distance_type>;
   }
