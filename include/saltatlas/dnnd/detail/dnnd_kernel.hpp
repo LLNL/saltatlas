@@ -27,6 +27,16 @@
 #include <unordered_map>
 #include <vector>
 
+#if __has_include(<boost/unordered/unordered_flat_map.hpp>) \
+&& __has_include(<boost/unordered/unordered_node_map.hpp>) \
+&& defined(BOOST_VERSION) && BOOST_VERSION >= 108200
+#ifndef SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+#define SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER 1
+#endif
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_node_map.hpp>
+#endif
+
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
@@ -131,11 +141,22 @@ class dnnd_kernel {
 
   // bool is the flag to represent if the neighbor has been selected for the
   // friend checking.
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  using knn_heap_table_type =
+      boost::unordered_node_map<id_type,
+                                unique_knn_heap<id_type, distance_type, bool>>;
+#elif
   using knn_heap_table_type =
       std::unordered_map<id_type,
                          unique_knn_heap<id_type, distance_type, bool>>;
+#endif
   using neighbor_type = neighbor<id_type, distance_type>;
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  using adj_lsit_type =
+      boost::unordered_node_map<id_type, std::vector<id_type>>;
+#else
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
+#endif
 
   void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
@@ -489,7 +510,11 @@ class dnnd_kernel {
     }
 
     // Exchange the number of neighbors to send.
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+    static boost::unordered_flat_map<id_type, std::size_t> count_incoming;
+#else
     static std::unordered_map<id_type, std::size_t> count_incoming;
+#endif
     {
       count_incoming.reserve(m_point_store.size());
       for (auto& item : m_point_store) {
