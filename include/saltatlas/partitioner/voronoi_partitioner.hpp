@@ -15,19 +15,19 @@ namespace saltatlas {
 template <typename DistType, typename IndexType, typename Point>
 class voronoi_partitioner {
  public:
-  using dist_t  = DistType;
-  using index_t = IndexType;
-  using point_t = Point;
+  using dist_type  = DistType;
+  using index_type = IndexType;
+  using point_type = Point;
 
-  voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<dist_t> &space)
+  voronoi_partitioner(ygm::comm &c, hnswlib::SpaceInterface<dist_type> &space)
       : m_comm(c), m_space(space) {}
 
   template <typename Container>
   void initialize(Container &data, const uint32_t num_partitions) {
     size_t num_points = data.size();
 
-    std::vector<index_t> seed_ids(num_partitions);
-    std::vector<point_t> seed_features;
+    std::vector<index_type> seed_ids(num_partitions);
+    std::vector<point_type> seed_features;
     if (m_comm.rank0()) {
       select_random_seed_ids(num_partitions, num_points, seed_ids);
     }
@@ -45,7 +45,7 @@ class voronoi_partitioner {
         auto seed_index = std::distance(seed_ids.begin(), lower_iter);
 
         this->m_comm.async_bcast(
-            [](auto seed_index, const point_t &seed, auto seeds_vector_ptr) {
+            [](auto seed_index, const point_type &seed, auto seeds_vector_ptr) {
               (*seeds_vector_ptr)[seed_index] = seed;
             },
             seed_index, point, seed_features_ptr);
@@ -58,16 +58,16 @@ class voronoi_partitioner {
     fill_seed_hnsw();
   }
 
-  std::vector<index_t> find_point_partitions(const point_t &features,
+  std::vector<index_type> find_point_partitions(const point_type &features,
                                              const uint32_t num_partitions) {
-    std::vector<index_t> to_return(num_partitions);
+    std::vector<index_type> to_return(num_partitions);
 
     std::priority_queue<std::pair<float, hnswlib::labeltype>> nearest_seeds_pq =
         m_seed_hnsw_ptr->searchKnn(&features, num_partitions);
 
     uint32_t i = num_partitions;
     while (nearest_seeds_pq.size() > 0) {
-      index_t seed_ID = nearest_seeds_pq.top().second;
+      index_type seed_ID = nearest_seeds_pq.top().second;
       to_return[--i]  = seed_ID;
       nearest_seeds_pq.pop();
     }
@@ -78,7 +78,7 @@ class voronoi_partitioner {
   uint32_t num_partitions() { return m_seeds.size(); }
 
   void fill_seed_hnsw() {
-    m_seed_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
+    m_seed_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_type>>(
         &m_space, m_seeds.size(), 16, 200, 3149);
 
 #pragma omp parallel for
@@ -87,7 +87,7 @@ class voronoi_partitioner {
     }
   }
 
-  void set_seeds(const std::vector<point_t> &seed_features) {
+  void set_seeds(const std::vector<point_type> &seed_features) {
     m_seeds.clear();
 
     for (uint32_t i = 0; i < seed_features.size(); ++i) {
@@ -97,9 +97,9 @@ class voronoi_partitioner {
 
   void select_random_seed_ids(const uint32_t        num_seeds,
                               const uint64_t        num_points,
-                              std::vector<index_t> &seed_ids) {
+                              std::vector<index_type> &seed_ids) {
     std::mt19937                           rng(123);
-    std::uniform_int_distribution<index_t> uni(0, num_points - 1);
+    std::uniform_int_distribution<index_type> uni(0, num_points - 1);
 
     for (uint32_t i = 0; i < num_seeds; ++i) {
       seed_ids[i] = uni(rng);
@@ -128,10 +128,10 @@ class voronoi_partitioner {
  private:
   ygm::comm &m_comm;
 
-  hnswlib::SpaceInterface<dist_t> &m_space;
+  hnswlib::SpaceInterface<dist_type> &m_space;
 
-  std::unique_ptr<hnswlib::HierarchicalNSW<dist_t>> m_seed_hnsw_ptr;
-  std::vector<point_t>                              m_seeds;
+  std::unique_ptr<hnswlib::HierarchicalNSW<dist_type>> m_seed_hnsw_ptr;
+  std::vector<point_type>                              m_seeds;
 };
 
 }  // namespace saltatlas

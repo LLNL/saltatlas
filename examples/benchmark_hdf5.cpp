@@ -296,11 +296,11 @@ void benchmark_query_trial_ground_truth(
     ygm::container::bag<std::string> &bag_query_files,
     ygm::container::bag<std::string> &bag_ground_truth_files,
     const std::vector<std::string>   &data_col_names) {
-  using dist_t  = typename DHNSW::dist_t;
-  using index_t = typename DHNSW::index_t;
-  using point_t = typename DHNSW::point_t;
+  using dist_type  = typename DHNSW::dist_type;
+  using index_type = typename DHNSW::index_type;
+  using point_type = typename DHNSW::point_type;
 
-  ygm::container::map<index_t, std::vector<index_t>> ground_truth(
+  ygm::container::map<index_type, std::vector<index_type>> ground_truth(
       dist_index.comm());
 
   if (dist_index.comm().rank() == 0) {
@@ -331,12 +331,12 @@ void benchmark_query_trial_ground_truth(
     auto nearest_neighbor_col_names =
         generic_column_names(num_ground_truth_nearest_neighbors);
 
-    const auto indices = reader.read_column<index_t>("index");
+    const auto indices = reader.read_column<index_type>("index");
     const auto ground_truth_part =
-        reader.read_columns_row_wise<index_t>(nearest_neighbor_col_names);
+        reader.read_columns_row_wise<index_type>(nearest_neighbor_col_names);
 
     for (int i = 0; i < ground_truth_part.size(); ++i) {
-      std::vector<index_t> truncated_ground_truth;
+      std::vector<index_type> truncated_ground_truth;
       for (int j = 0; j < k; ++j) {
         truncated_ground_truth.push_back(ground_truth_part[i][j]);
       }
@@ -355,8 +355,8 @@ void benchmark_query_trial_ground_truth(
   // Find approximate nearest neighbors, then check against ground truth values
   // stored in distributed map
   auto query_nearest_neighbors_lambda =
-      [](const point_t                        &query_pt,
-         const std::multimap<dist_t, index_t> &nearest_neighbors,
+      [](const point_type                        &query_pt,
+         const std::multimap<dist_type, index_type> &nearest_neighbors,
          uint64_t data_index, auto ground_truth_ptr) {
         // Lambda to check ANN against ground truth
         auto check_nearest_neighbors_lambda = [](const auto &query_ID, auto &gt,
@@ -389,7 +389,7 @@ void benchmark_query_trial_ground_truth(
         };
 
         // Put approximate nearest neighbors into vector
-        std::vector<index_t> ann_vec;
+        std::vector<index_type> ann_vec;
 
         for (const auto &dist_ngbr : nearest_neighbors) {
           ann_vec.push_back(dist_ngbr.second);
@@ -409,7 +409,7 @@ void benchmark_query_trial_ground_truth(
 
   dist_index.comm().cout0("Reading query points into bag");
   auto bag_query_points =
-      read_data<index_t, point_t>(bag_query_files, data_col_names);
+      read_data<index_type, point_type>(bag_query_files, data_col_names);
 
   bag_query_points.for_all(perform_query_lambda);
 
