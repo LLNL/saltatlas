@@ -75,8 +75,10 @@ class metric_hyperplane_partitioner {
            ++selector_trial) {
         std::vector<std::pair<point_t, point_t>> selector_pairs;
         for (uint32_t node = 0; node < num_level_nodes; ++node) {
-          selector_pairs.push_back(
-              choose_selectors(current_level_points[node]));
+          selector_pairs.push_back(choose_selectors(
+              current_level_points[node],
+              l * max_selector_trials * num_level_nodes +
+                  selector_trial * num_level_nodes + node + 654321));
         }
 
         auto node_thetas = calculate_thetas(num_level_nodes, point_assignments,
@@ -88,7 +90,7 @@ class metric_hyperplane_partitioner {
           auto theta_median =
               sampled_median(node_thetas[node], 0.01,
                              l * max_selector_trials * num_level_nodes +
-                                 selector_trial * num_level_nodes * node);
+                                 selector_trial * num_level_nodes + node);
 
           if (std::abs(theta_median) < std::abs(best_thetas[node])) {
             best_thetas[node]    = theta_median;
@@ -328,7 +330,7 @@ class metric_hyperplane_partitioner {
       s_samples.insert(s_samples.end(), vals.begin(), vals.end());
     };
 
-    std::mt19937_64                       gen(m_comm.rank() * seed);
+    std::mt19937_64                       gen(m_comm.rank() ^ seed);
     std::uniform_int_distribution<size_t> dist(0, vals.size() - 1);
 
     int num_samples = std::min<int>(
@@ -336,7 +338,6 @@ class metric_hyperplane_partitioner {
 
     for (int i = 0; i < num_samples; ++i) {
       auto index = dist(gen);
-
       local_samples.push_back(vals[index]);
     }
 
@@ -410,12 +411,11 @@ class metric_hyperplane_partitioner {
 
   // Selectors are not currently chosen uniformly
   std::pair<point_t, point_t> choose_selectors(
-      const std::vector<point_t> &node_points) {
+      const std::vector<point_t> &node_points, const uint64_t seed = 12345) {
     std::pair<point_t, point_t> to_return;
     auto                        to_return_ptr = m_comm.make_ygm_ptr(to_return);
 
-    std::default_random_engine            gen(m_comm.rank() +
-                                              node_points.size() * m_comm.size() + 10);
+    std::default_random_engine            gen(m_comm.rank() ^ seed);
     std::uniform_real_distribution<float> dist;
 
     // Choose first point
@@ -580,7 +580,7 @@ class metric_hyperplane_partitioner {
 
   double m_median_time{0.0};
 
-  int max_selector_trials = 10;
+  int max_selector_trials = 100;
 };
 
 }  // namespace saltatlas
