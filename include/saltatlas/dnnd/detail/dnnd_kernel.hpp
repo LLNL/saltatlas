@@ -158,6 +158,8 @@ class dnnd_kernel {
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
 #endif
 
+  static constexpr std::size_t k_neighbor_check_local_batch_size_factor = 4;
+
   void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
       m_comm.cout0() << "\nInitializing the k-NN index with random neighbors."
@@ -610,6 +612,10 @@ class dnnd_kernel {
     auto task_generator = [this, &srcs, &new_table, &targets](
                               std::size_t& pos_src, std::size_t& pos1,
                               std::size_t& pos2) {
+      static const auto local_batch_size =
+          (m_option.mini_batch_size / m_comm.size()) *
+          k_neighbor_check_local_batch_size_factor;
+
       for (; pos_src < srcs.size(); ++pos_src) {
         const auto& news = new_table.at(srcs[pos_src]);
         for (; pos1 < news.size(); ++pos1) {
@@ -619,8 +625,7 @@ class dnnd_kernel {
             if (u1 >= u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 &&
-                targets.size() >= m_option.mini_batch_size) {
+            if (local_batch_size > 0 && targets.size() >= local_batch_size) {
               ++pos2;
               return false;
             }
@@ -646,6 +651,10 @@ class dnnd_kernel {
   void priv_update_neighbors_old_new(const std::vector<id_type>& new_srcs,
                                      const adj_lsit_type&        old_table,
                                      const adj_lsit_type&        new_table) {
+    static const auto local_batch_size =
+        (m_option.mini_batch_size / m_comm.size()) *
+        k_neighbor_check_local_batch_size_factor;
+
     std::queue<std::pair<id_type, id_type>> targets;
     auto task_generator = [this, &new_srcs, &old_table, &new_table, &targets](
                               std::size_t& pos_src, std::size_t& pos_old,
@@ -662,8 +671,7 @@ class dnnd_kernel {
             if (u1 == u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 &&
-                targets.size() >= m_option.mini_batch_size) {
+            if (local_batch_size > 0 && targets.size() >= local_batch_size) {
               ++pos_old;
               return false;
             }
