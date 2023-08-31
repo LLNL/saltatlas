@@ -71,6 +71,12 @@ class dhnsw_impl {
     }
   }
 
+  void set_ef(const size_t ef) {
+    for (auto cell_hnsw_ptr : m_voronoi_cell_hnsw) {
+      cell_hnsw_ptr->setEf(ef);
+    }
+  }
+
   template <typename Container>
   void partition_data(Container &data, const uint32_t num_partitions) {
     m_partitioner.initialize(data, num_partitions);
