@@ -18,9 +18,9 @@ template <typename DistType, typename IndexType, typename Point,
           template <typename, typename, typename> class Partitioner>
 class dhnsw {
  public:
-  using dist_type     = DistType;
-  using index_type    = IndexType;
-  using point_type    = Point;
+  using dist_type        = DistType;
+  using index_type       = IndexType;
+  using point_type       = Point;
   using partitioner_type = Partitioner<dist_type, index_type, point_type>;
 
   dhnsw(int max_voronoi_rank, int num_cells,
@@ -32,18 +32,18 @@ class dhnsw {
 
   template <template <typename, typename, typename...> class Container>
   void partition_data(Container<index_type, point_type> &data,
-                      const uint32_t               num_partitions) {
+                      const uint32_t                     num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
   void partition_data(ygm::container::array<point_type, index_type> &data,
-                      const uint32_t                           num_partitions) {
+                      const uint32_t num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
   void partition_data(
       ygm::container::bag<std::pair<index_type, point_type>> &data,
-      const uint32_t num_partitions) {
+      const uint32_t                                          num_partitions) {
     m_index_impl.partition_data(data, num_partitions);
   }
 
@@ -53,8 +53,10 @@ class dhnsw {
     m_index_impl.set_hnsw_params(p);
   }
 
-  void queue_data_point_insertion(
-      const index_type pt_idx, const point_type &pt) {
+  void set_ef(const size_t ef) { m_index_impl.set_ef(ef); }
+
+  void queue_data_point_insertion(const index_type  pt_idx,
+                                  const point_type &pt) {
     m_index_impl.add_data_point_to_insertion_queue(pt_idx, pt);
   }
 
@@ -89,9 +91,10 @@ m_index_impl.store_seeds(seed_features);
   }
 
   template <typename Callback, typename... Callback_Args>
-  void query_with_features(const point_type &query_pt, const int k, const int hops,
-                           const int voronoi_rank, const int initial_queries,
-                           Callback c, const Callback_Args &...args) {
+  void query_with_features(const point_type &query_pt, const int k,
+                           const int hops, const int voronoi_rank,
+                           const int initial_queries, Callback c,
+                           const Callback_Args &...args) {
     m_query_engine_impl.query_with_features(query_pt, k, hops, voronoi_rank,
                                             initial_queries, c, args...);
   }
@@ -106,9 +109,11 @@ m_index_impl.store_seeds(seed_features);
   inline ygm::comm &comm() { return *m_comm; }
 
  private:
-  ygm::comm                                                      *m_comm;
-  dhnsw_detail::dhnsw_impl<dist_type, index_type, point_type, Partitioner> m_index_impl;
-  dhnsw_detail::query_engine_impl<dist_type, index_type, point_type, Partitioner>
+  ygm::comm *m_comm;
+  dhnsw_detail::dhnsw_impl<dist_type, index_type, point_type, Partitioner>
+      m_index_impl;
+  dhnsw_detail::query_engine_impl<dist_type, index_type, point_type,
+                                  Partitioner>
       m_query_engine_impl;
 };
 
