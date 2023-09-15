@@ -24,6 +24,16 @@
 #include <unordered_map>
 #endif
 
+#if __has_include(<boost/unordered/unordered_flat_map.hpp>) \
+&& __has_include(<boost/unordered/unordered_node_map.hpp>) \
+&& defined(BOOST_VERSION) && BOOST_VERSION >= 108200
+#ifndef SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+#define SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER 1
+#endif
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_node_map.hpp>
+#endif
+
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/float.hpp>
 
@@ -49,8 +59,7 @@ struct neighbor {
       : id(_id), distance(_distance) {}
 
   friend bool operator<(const neighbor& lhd, const neighbor& rhd) {
-    if (lhd.distance != rhd.distance)
-      return lhd.distance < rhd.distance;
+    if (lhd.distance != rhd.distance) return lhd.distance < rhd.distance;
     return lhd.id < rhd.id;
   }
 
@@ -95,9 +104,21 @@ class unique_knn_heap {
       nenghbor_type,
       container::vector<nenghbor_type,
                         other_allocator<allocator_type, nenghbor_type>>>;
+
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  // Safeguard for not using offset-pointers with boost open address
+  // TODO: check pointer type rather than allocator
+  static_assert(
+      std::is_same_v<allocator_type, std::allocator<std::byte>>,
+      "Boost open address containers may not work with custom allocators");
+  using map_type = boost::unordered_flat_map<
+      id_type, value_type, std::hash<id_type>, std::equal_to<>,
+      other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
+#else
   using map_type = container::unordered_map<
       id_type, value_type, std::hash<id_type>, std::equal_to<>,
       other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
+#endif
 
  public:
   explicit unique_knn_heap(const std::size_t k,
@@ -155,9 +176,7 @@ class unique_knn_heap {
 
   bool empty() const { return m_knn_heap.empty(); }
 
-  std::size_t k() const {
-    return m_k;
-  }
+  std::size_t k() const { return m_k; }
 
  private:
   void priv_push_nocheck(const id_type& id, const distance_type& d,

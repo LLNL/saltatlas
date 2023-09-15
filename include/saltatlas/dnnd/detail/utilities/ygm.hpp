@@ -8,8 +8,10 @@
 #include <iterator>
 #include <type_traits>
 
-#include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <ygm/comm.hpp>
+
+#include <saltatlas/dnnd/detail/utilities/general.hpp>
+#include <saltatlas/dnnd/detail/utilities/mpi.hpp>
 
 namespace saltatlas::dndetail {
 /// \brief Distributes elements in a container.
@@ -46,4 +48,57 @@ inline void distribute_elements_by_block(const container_type &source_container,
   }
   comm.barrier();
 }
+
+/// \briefe Send YGM's async messages in batch mode.
+/// \tparam async_sender Message launcher function type.
+/// Expected signature is: std::size_t(ygm::comm&).
+/// \param num_local_items Number of local items.
+/// \param global_batch_size Global batch size.
+/// if 0 is specified, this function sends all items in one batch.
+/// \param verbose Verbose flag.
+/// \param comm YGM comm.
+/// \param sender Message sender function.
+/// sender must return the number of sent items during the function call.
+/// This function decide the timing of invoking YGM's barrier() based on the
+/// returned values from the sender.
+template <typename async_sender>
+inline void run_batched_ygm_async(const std::size_t   num_local_items,
+                                  const std::size_t   global_batch_size,
+                                  const bool          verbose,
+                                  ygm::comm &comm,
+                                  const async_sender &sender) {
+  comm.cf_barrier(); // just in case.
+
+  for (std::size_t num_sent = 0, batch_no = 0;; ++batch_no) {
+    assert(num_local_items >= num_sent);
+    const auto num_local_remains = num_local_items - num_sent;
+    if (verbose) {
+      comm.cout0() << "Batch #" << batch_no << std::endl;
+      comm.cout0() << "#of remains: " << comm.all_reduce_sum(num_local_remains)
+                   << std::endl;
+    }
+
+    const auto local_batch_size =
+        mpi::assign_tasks(num_local_remains, global_batch_size, comm.rank(),
+                          comm.size(), verbose, comm.get_mpi_comm());
+    assert(local_batch_size <= num_local_remains);
+
+    // Note: this algorithm does not check #of send items in a batch strictly,
+    // letting the sender send more items than the batch size.
+    for (std::size_t i = 0; i < local_batch_size;) {
+      const auto n = sender(comm);
+      assert(n > 0 && "Sender must send at least one item.");
+      i += n;
+      num_sent += n;
+    }
+    assert(num_sent <= num_local_items &&
+           "More items than initially told were sent.");
+    comm.barrier();
+
+    const auto finished =
+        comm.all_reduce_min(num_sent == num_local_items ? 1 : 0);
+    if (finished > 0) break;
+  }
+}
+
 }  // namespace saltatlas::dndetail
