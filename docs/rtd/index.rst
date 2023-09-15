@@ -16,7 +16,6 @@ Welcome to saltatlas's documentation!
    :caption: Getting Started:
 
    build
-   build_lc
 
 
 saltatlas Algorithm Details

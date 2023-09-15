@@ -12,8 +12,8 @@ Required
 
 * MPI
 
-.. WARNING::
-  Which MPI version is required for YGM?
+..
+  TODO: Which MPI version is required for YGM?
 
 
 Option
@@ -21,8 +21,8 @@ Option
 
 * HDF5 (C++ interface)
 
-.. WARNING::
-  should we turn off HDF5 by default?
+..
+  TODO: should we turn off HDF5 by default?
 
 
 Dependencies
@@ -53,12 +53,12 @@ Often Used CMake Options
 
   * If :code:`on` is specified, saltatlas is built with HDF5.
   * HDF5 must be installed (for more details, see [link]).
-  * Default is off.
+  * Default is `on`.
 
 * :code:`SALTATLAS_USE_METALL=on/off`
 
   * If :code:`on` is specified, saltatlas is built with Metall.
-  * DNND PM depends on Metall.
+  * DNND PM (persistent memory) mode depends on Metall.
   * saltatlas's CMake automatically downloads and sets up Metall if this option is turned on.
 
 * :code:`BOOST_ROOT=/path/to/boost`
@@ -66,3 +66,9 @@ Often Used CMake Options
   * Path to C++ Boost Libraries.
   * If this option is used, our CMake configure step uses the specified Boost instead of downloading.
   * Install is not required. Only header files are used.
+
+
+Special Instruction for Building on LC Systems
+^^^^
+
+To load a proper compiler on TOSS4 systems, type :code:`module load gcc/12.1.1-magic`, for example.

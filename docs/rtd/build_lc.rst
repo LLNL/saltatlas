@@ -1,4 +1,6 @@
 Special Instruction for Building on LC Systems
 =======
 
-maybe, an independent page for LC machines?
+The following instructions are for building on LC systems.
+
+Under construction....
