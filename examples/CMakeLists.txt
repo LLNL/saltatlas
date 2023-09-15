@@ -26,9 +26,9 @@ if (SALTATLAS_USE_HDF5)
 endif ()
 
 #
-# This function adds an example with the given feature type.
+# This function adds a DNND example with the given feature element type.
 #
-function(add_saltatlas_example_with_feature_type example_name type_name)
+function(add_saltatlas_dnnd_example_feature_type example_name type_name)
     set(example_source "${example_name}.cpp")
     set(example_exe "${example_name}_${type_name}_features")
     add_executable(${example_exe} ${example_source})
@@ -44,17 +44,17 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_pm_optimize_example)
     add_saltatlas_example(dnnd_pm_query_example)
 
-    add_saltatlas_example_with_feature_type(dnnd_pm_const_example float)
-    add_saltatlas_example_with_feature_type(dnnd_pm_optimize_example float)
-    add_saltatlas_example_with_feature_type(dnnd_pm_query_example float)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example float)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example float)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example float)
 
-    add_saltatlas_example_with_feature_type(dnnd_pm_const_example uint8_t)
-    add_saltatlas_example_with_feature_type(dnnd_pm_optimize_example uint8_t)
-    add_saltatlas_example_with_feature_type(dnnd_pm_query_example uint8_t)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example uint8_t)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example uint8_t)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example uint8_t)
 
-    add_saltatlas_example_with_feature_type(dnnd_pm_const_example double)
-    add_saltatlas_example_with_feature_type(dnnd_pm_optimize_example double)
-    add_saltatlas_example_with_feature_type(dnnd_pm_query_example double)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example double)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example double)
+    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example double)
 endif ()
 
 add_subdirectory(datasets)
