@@ -49,13 +49,13 @@ The example directory also contains three programs for DNND PM mode as follows:
   # Assumes that we are in a build directory
 
   # Construct a k-NNG
-  srun -n 24 -N 1 ./examples/dnnd_pm_const_example -f l2 -p wsv -k 20 -r 0.8 -d 0.001 -e  -z ./index  -v  ./examples/datasets/point_5-4.txt
+  srun -n 10 -N 1 ./examples/dnnd_pm_const_example -f l2 -p wsv -k 4 -r 0.8 -d 0.001 -e  -z ./index  -v  ./examples/datasets/point_5-4.txt
 
   # Optimize a k-NNG
-  srun -n 24 -N 1 ./examples/dnnd_pm_optimize_example -z ./index -v -u -m 1.5
+  srun -n 10 -N 1 ./examples/dnnd_pm_optimize_example -z ./index -v -u -m 1.5
 
   # Perform a k-approximate nearest neighbor search
-  srun -n 24 -N 1 ./examples/dnnd_pm_query_example -z ./index -q ./examples/datasets/query_5-4.txt -n 100 -g  ./examples/datasets/ground-truth_5-4.txt
+  srun -n 10 -N 1 ./examples/dnnd_pm_query_example -z ./index -q ./examples/datasets/query_5-4.txt -n 4 -g  ./examples/datasets/ground-truth_5-4.txt
 
 For more details about the options, please run the programs with the :code:`-h` option.
 
