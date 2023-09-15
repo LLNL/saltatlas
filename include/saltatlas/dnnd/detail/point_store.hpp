@@ -55,7 +55,6 @@ class point_store {
   using const_iterator = typename point_table_type::const_iterator;
 
  public:
-
   /// \brief Constructor.
   /// \param allocator Allocator instance.
   explicit point_store(const allocator_type &allocator = allocator_type{})
@@ -96,7 +95,7 @@ class point_store {
   /// \param last Iterator pointing to the end element inserted.
   template <typename iterator>
   void set(const id_type &id, iterator first, iterator last) {
-    auto& f = feature_vector(id);
+    auto &f = feature_vector(id);
     f.clear();
     f.insert(f.begin(), first, last);
   }
@@ -118,8 +117,11 @@ class point_store {
   /// \return An iterator that points the next element of the last one.
   const_iterator end() const { return m_point_table.end(); }
 
-  /// \brief Clear contents.
-  void clear() { m_point_table.clear(); }
+  /// \brief Clear contents and reduce the storage usage.
+  void reset() {
+    m_point_table.clear();
+    m_point_table.rehash(0);
+  }
 
   /// \brief Reserve internal storage to hold 'n' elements.
   /// \param n Reservation size.

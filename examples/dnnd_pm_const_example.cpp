@@ -15,7 +15,7 @@ struct option_t {
   double                   r{0.8};
   double                   delta{0.001};
   bool                     exchange_reverse_neighbors{true};
-  std::size_t              batch_size{1ULL << 31};
+  std::size_t              batch_size{1ULL << 30};
   std::string              distance_metric_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
@@ -23,13 +23,14 @@ struct option_t {
   std::string              dhnsw_init_index_path;
   std::string              datastore_path;
   std::string              datastore_transfer_path;
+  std::string              index_dump_prefix{false};
   bool                     verbose{false};
 };
 
-bool parse_options(int argc, char **argv, option_t &option, bool &help);
-
+bool parse_options(int, char **, option_t &, bool &);
 template <typename cout_type>
-void usage(std::string_view exe_name, cout_type &cout);
+void usage(std::string_view, cout_type &);
+void show_options(const option_t &, ygm::comm &);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
@@ -46,6 +47,7 @@ int main(int argc, char **argv) {
     usage(argv[0], comm.cout0());
     return 0;
   }
+  show_options(opt, comm);
 
   {
     dnnd_pm_type dnnd(dnnd_pm_type::create, opt.datastore_path,
@@ -53,12 +55,24 @@ int main(int argc, char **argv) {
                       opt.verbose);
 
     comm.cout0() << "\n<<Read Points>>" << std::endl;
-    ygm::timer point_read_timer;
-    saltatlas::read_points(opt.point_file_names, opt.point_file_format,
-                           opt.verbose, dnnd.get_point_partitioner(),
-                           dnnd.get_point_store(), comm);
-    comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
-                 << std::endl;
+    {
+      // Gather file paths if directories are given by the user
+      const auto paths =
+          saltatlas::utility::find_file_paths(opt.point_file_names);
+
+      ygm::timer point_read_timer;
+      saltatlas::read_points(paths, opt.point_file_format, opt.verbose,
+                             dnnd.get_point_partitioner(),
+                             dnnd.get_point_store(), comm);
+      comm.cout0() << "\nReading points took (s)\t"
+                   << point_read_timer.elapsed() << std::endl;
+      comm.cout0() << "#of points\t"
+                   << comm.all_reduce_sum(dnnd.get_point_store().size())
+                   << std::endl;
+      comm.cout0() << "Feature dimensions\t"
+                   << dnnd.get_point_store().begin()->second.size()
+                   << std::endl;
+    }
 
     comm.cout0() << "\n<<Index Construction>>" << std::endl;
     ygm::timer const_timer;
@@ -101,6 +115,19 @@ int main(int argc, char **argv) {
     comm.cout0() << "Finished transfer." << std::endl;
   }
 
+  if (!opt.index_dump_prefix.empty()) {
+    comm.cout0() << "\nDumping index to " << opt.index_dump_prefix << std::endl;
+    // Reopen dnnd in read-only mode
+    dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
+                      opt.verbose);
+    if (!dnnd.dump_index(opt.index_dump_prefix)) {
+      comm.cerr0() << "\nFailed to dump index." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    comm.cf_barrier();
+    comm.cout0() << "Finished dumping." << std::endl;
+  }
+
   return 0;
 }
 
@@ -112,10 +139,11 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   option.dhnsw_init_index_path.clear();
   option.datastore_path.clear();
   option.datastore_transfer_path.clear();
+  option.index_dump_prefix.clear();
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:D:vh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -161,6 +189,10 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
         option.batch_size = std::stoul(optarg);
         break;
 
+      case 'D':
+        option.index_dump_prefix = optarg;
+        break;
+
       case 'v':
         option.verbose = true;
         break;
@@ -194,7 +226,8 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 template <typename cout_type>
 void usage(std::string_view exe_name, cout_type &cout) {
   cout << "Usage: mpirun -n [#of processes] " << exe_name
-       << " [options (see below)] [list of input point files (required)]"
+       << " [options (see below)] [list of input point files (or directories "
+          "that contain input files) (required)]"
        << std::endl;
 
   cout
@@ -222,6 +255,26 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-x [string] If specified, transfer index to this path at the end."
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."
+      << "\n\t-D [string] If specified, dump the k-NN index to files starting "
+         "with this prefix (one file per process). A line starts from the "
+         "corresponding source ID followed by the list of neighbor IDs."
+      << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
+}
+
+void show_options(const option_t &opt, ygm::comm &comm) {
+  comm.cout0() << "\nOptions:"
+               << "\nDatastore path\t" << opt.datastore_path
+               << "\nDistance metric name\t" << opt.distance_metric_name
+               << "\nPoint file format\t" << opt.point_file_format << "\nk\t"
+               << opt.index_k << "\nr\t" << opt.r << "\ndelta\t" << opt.delta
+               << "\nExchange reverse neighbors\t"
+               << opt.exchange_reverse_neighbors << "\nBatch size\t"
+               << opt.batch_size << "\nDNND init index path\t"
+               << opt.dnnd_init_index_path << "\nDHNSW init index path\t"
+               << opt.dhnsw_init_index_path << "\nDatastore transfer path\t"
+               << opt.datastore_transfer_path
+               << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nVerbose\t" << opt.verbose << std::endl;
 }

@@ -5,6 +5,19 @@
 
 #pragma once
 
+#include <algorithm>
+#include <functional>
+#include <mutex>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/detail/neighbor.hpp>
+#include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
+#include <saltatlas/dnnd/detail/nn_index.hpp>
+#include <saltatlas/dnnd/detail/point_store.hpp>
+
 namespace saltatlas::dndetail {
 
 template <typename PointStore, typename KNNIndex>
@@ -21,8 +34,8 @@ class nn_index_optimizer {
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
-  using featur_vector_type = typename point_store_type::feature_vector_type;
-  using point_partitioner  = std::function<int(const id_type& id)>;
+  using feature_vector_type = typename point_store_type::feature_vector_type;
+  using point_partitioner   = std::function<int(const id_type& id)>;
   using distance_metric =
       distance::metric_type<feature_element_type, distance_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
@@ -32,6 +45,7 @@ class nn_index_optimizer {
     bool        undirected{false};
     double      pruning_degree_multiplier{-1};  // if <= 0, no pruning.
     bool        remove_long_paths{false};
+    std::size_t batch_size{1 << 25};  // if <= 0, process all at a time.
     bool        verbose{false};
   };
 
@@ -70,24 +84,33 @@ class nn_index_optimizer {
     if (m_option.verbose) {
       m_comm.cout0() << "Making the index undirected" << std::endl;
     }
+    if (m_option.verbose) {
+      m_comm.cout0() << "#of original neighbors\t"
+                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
+                     << std::endl;
+    }
+
     auto        reversed_index = priv_generate_reverse_index();
     std::size_t max_degree     = 0;
-    for (auto sitr = reversed_index.points_begin(),
-              send = reversed_index.points_end();
-         sitr != send; ++sitr) {
-      const auto& source = sitr->first;
+    for (auto pitr = reversed_index.points_begin(),
+              pend = reversed_index.points_end();
+         pitr != pend; ++pitr) {
+      const auto& source = pitr->first;
       assert(m_point_partitioner(source) == m_comm.rank());
       for (auto nitr = reversed_index.neighbors_begin(source),
                 nend = reversed_index.neighbors_end(source);
            nitr != nend; ++nitr) {
         m_nn_index.insert(source, *nitr);
       }
-      reversed_index.clear_neighbors(source);  // reduce memory usage
+      reversed_index.reset_neighbors(source);  // release memory.
       m_nn_index.sort_and_remove_duplicate_neighbors(source);
       max_degree = std::max(m_nn_index.num_neighbors(source), max_degree);
     }
     m_comm.cf_barrier();
     if (m_option.verbose) {
+      m_comm.cout0() << "#of neighbors\t"
+                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
+                     << std::endl;
       m_comm.cout0() << "Max #of neighbors\t"
                      << m_comm.all_reduce_max(max_degree) << std::endl;
     }
@@ -101,12 +124,12 @@ class nn_index_optimizer {
 
     nn_index_type         reversed_index(m_nn_index.get_allocator());
     static nn_index_type& ref_reversed_index(reversed_index);
-    ref_reversed_index.clear();
+    ref_reversed_index.reset();
     m_comm.cf_barrier();
 
-    for (auto sitr = m_nn_index.points_begin(), send = m_nn_index.points_end();
-         sitr != send; ++sitr) {
-      const auto& source = sitr->first;
+    for (auto pitr = m_nn_index.points_begin(), pend = m_nn_index.points_end();
+         pitr != pend; ++pitr) {
+      const auto& source = pitr->first;
       for (auto nitr = m_nn_index.neighbors_begin(source),
                 nend = m_nn_index.neighbors_end(source);
            nitr != nend; ++nitr) {
@@ -138,9 +161,9 @@ class nn_index_optimizer {
                      << std::endl;
     }
     std::size_t count = 0;
-    for (auto sitr = m_nn_index.points_begin(), send = m_nn_index.points_end();
-         sitr != send; ++sitr) {
-      const auto& source   = sitr->first;
+    for (auto pitr = m_nn_index.points_begin(), pend = m_nn_index.points_end();
+         pitr != pend; ++pitr) {
+      const auto& source   = pitr->first;
       const auto  old_size = m_nn_index.num_neighbors(source);
       m_nn_index.prune_neighbors(source, num_max_neighbors_to_retain);
       count += old_size - m_nn_index.num_neighbors(source);
@@ -155,136 +178,156 @@ class nn_index_optimizer {
     if (m_option.verbose) {
       m_comm.cout0() << "\nRemoving long paths" << std::endl;
     }
-    // Only one call is allowed at a time within a process.
-    static std::mutex           mutex;
-    std::lock_guard<std::mutex> guard(mutex);
 
-    static point_store<id_type, feature_element_type> point_store;
-    m_comm.cf_barrier();
+    const auto global_initial_num_neighbors =
+        m_comm.all_reduce_sum(m_nn_index.count_all_neighbors());
 
-    std::size_t num_retained_paths = 0;
-    std::size_t num_removed_paths  = 0;
+    const std::size_t local_batch_size =
+        (m_option.batch_size > 0) ? m_option.batch_size / m_comm.size()
+                                  : std::numeric_limits<std::size_t>::max();
 
-    auto sitr = m_nn_index.points_begin();
-    auto send = m_nn_index.points_end();
+    auto        pitr     = m_nn_index.points_begin();
+    const auto  pend     = m_nn_index.points_end();
+    std::size_t batch_no = 0;
     while (true) {
-      auto sitr2 = sitr;
+      if (m_option.verbose) {
+        m_comm.cout0() << "Batch #" << batch_no << std::endl;
+      }
+      for (std::size_t i = 0; i < local_batch_size && pitr != pend;
+           ++i, ++pitr) {
+        const auto& source = pitr->first;
+        if (m_nn_index.num_neighbors(source) <= 1) {
+          continue;
+        }
 
-      // Gather 'some' feature vectors from remote
-      sitr = priv_gather_feature_vectors(sitr, send);
+        std::vector<neighbor_type> candidates{
+            m_nn_index.neighbors_begin(source),
+            m_nn_index.neighbors_end(source)};
+        std::sort(candidates.begin(), candidates.end());
 
-      // Remove long paths of points from 'sitr2' to 'sitr',
-      // using the feature vectors corrected in above
-      const auto counts = priv_remove_long_paths_core(sitr2, sitr);
-      num_retained_paths += counts.first;
-      num_removed_paths += counts.second;
+        // Closest neighbor is always retained.
+        std::vector<id_type> retained_neighbors;
+        retained_neighbors.push_back(candidates.front().id);
+        candidates.erase(candidates.begin());
 
-      const bool finished = sitr == send;
-      if (m_comm.template all_reduce_sum((int)finished) == m_comm.size()) {
+        m_comm.async(m_point_partitioner(retained_neighbors.back()),
+                     distance_based_path_selector{}, m_this, source, candidates,
+                     retained_neighbors);
+      }
+      m_comm.barrier();
+      const auto finished =
+          m_comm.all_reduce_min(std::size_t(pitr == pend ? 1 : 0));
+      if (finished > 0) {
         break;
       }
-      point_store.clear();
+      ++batch_no;
     }
+
+    const auto global_retained_num_neighbors =
+        m_comm.all_reduce_sum(m_nn_index.count_all_neighbors());
+    const auto global_removed_num_neighbors =
+        global_initial_num_neighbors - global_retained_num_neighbors;
     if (m_option.verbose) {
-      m_comm.cout0() << "#of retained paths\t"
-                     << m_comm.all_reduce_sum(num_retained_paths) << std::endl;
-      m_comm.cout0() << "#of removed paths\t"
-                     << m_comm.all_reduce_sum(num_removed_paths) << std::endl;
+      m_comm.cout0() << "#of removed neighbors\t"
+                     << global_removed_num_neighbors << std::endl;
+      m_comm.cout0() << "#of retained neighbors\t"
+                     << global_retained_num_neighbors << std::endl;
+      m_comm.cout0() << "Removed ratio\t"
+                     << (double(global_removed_num_neighbors) /
+                         global_initial_num_neighbors)
+                     << std::endl;
     }
   }
 
-  template <typename iterator_type>
-  iterator_type priv_gather_feature_vectors(iterator_type sitr,
-                                            iterator_type send) {
-    std::size_t                 count = 0;
-    std::unordered_set<id_type> requested;
-    // Get up to 'k_batch_size' feature vectors from remote
-    for (; sitr != send; ++sitr) {
-      const auto& source = sitr->first;
-      for (auto nitr = m_nn_index.neighbors_begin(source),
-                nend = m_nn_index.neighbors_end(source);
-           nitr != nend; ++nitr) {
-        const auto& neighbor = *nitr;
+  /// \brief Selects neighbors worth to be retained based on distance.
+  struct distance_based_path_selector {
+    /// \note candidates must be sorted by distance in ascending order.
+    void operator()(self_pointer_type local_this, const id_type source,
+                    const std::vector<neighbor_type>& candidates,
+                    std::vector<id_type>              retained) {
+      assert(!retained.empty());
+      const auto my_id    = retained.back();
+      auto&      nn_index = local_this->m_nn_index;
+      assert(local_this->m_nn_index.num_neighbors(my_id) > 0);
 
-        // Avoid requesting the same feature vector multiple times
-        if (requested.count(neighbor.id)) continue;
-        requested.insert(neighbor.id);
+      std::vector<neighbor_type> new_candidates;
+      for (std::size_t i = 0; i < candidates.size(); ++i) {
+        auto& candidate = candidates[i];
+        assert(candidate.id != my_id);
 
-        // Get a feature vector from remote asynchronously
-        m_comm.async(m_point_partitioner(neighbor.id), feature_vector_gather{},
-                     m_this, neighbor.id, m_comm.rank());
-      }
-
-      if (++count > k_batch_size) break;
-    }
-    m_comm.barrier();
-
-    return sitr;
-  }
-
-  struct feature_vector_gather {
-    // First call,
-    // send back the feature vector of targe_id to 'rank_to_return'.
-    void operator()(self_pointer_type local_this, const id_type targe_id,
-                    const int rank_to_return) {
-      const auto& f = local_this->m_point_store.feature_vector(targe_id);
-      const std::vector<feature_element_type> shipping_feature(f.begin(),
-                                                               f.end());
-      local_this->m_comm.async(rank_to_return, feature_vector_gather{},
-                               local_this, targe_id, shipping_feature);
-    }
-
-    // Second call,
-    // store a received feature vector.
-    void operator()(self_pointer_type local_this, const id_type targe_id,
-                    const std::vector<feature_element_type>& feature) {
-      auto& target_feature =
-          local_this->m_remote_point_store.feature_vector(targe_id);
-      target_feature.insert(target_feature.begin(), feature.begin(),
-                            feature.end());
-    }
-  };
-
-  template <typename iterator_type>
-  std::pair<std::size_t, std::size_t> priv_remove_long_paths_core(
-      iterator_type sitr, iterator_type send) {
-    std::size_t num_retained_paths = 0;
-    std::size_t num_removed_paths  = 0;
-    for (; sitr != send; ++sitr) {
-      const auto&                source = sitr->first;
-      std::vector<neighbor_type> retained_neighbors;
-      for (auto nitr = m_nn_index.neighbors_begin(source),
-                nend = m_nn_index.neighbors_end(source);
-           nitr != nend; ++nitr) {
-        const auto& neighbor        = *nitr;
-        const auto  distance_to_src = neighbor.distance;
-        bool        remove          = false;
-        for (const auto& rn : retained_neighbors) {
-          const auto& rt_feature = m_remote_point_store.feature_vector(rn.id);
-          const auto& n_feature =
-              m_remote_point_store.feature_vector(neighbor.id);
-          const auto distance_to_retained_neighbor =
-              m_distance_metric(rt_feature.data(), rt_feature.size(),
-                                n_feature.data(), n_feature.size());
-          if (distance_to_src > distance_to_retained_neighbor) {
-            remove = true;
+        // Check if I connect to the candidate.
+        bool          connect_to_candidate = false;
+        distance_type me_to_candidate_distance;
+        for (auto nitr = nn_index.neighbors_begin(my_id),
+                  nend = nn_index.neighbors_end(my_id);
+             nitr != nend; ++nitr) {
+          if (nitr->id == candidate.id) {
+            connect_to_candidate     = true;
+            me_to_candidate_distance = nitr->distance;
             break;
           }
         }
-        if (remove) {
-          ++num_removed_paths;
+
+        const auto source_to_candidate_distance = candidate.distance;
+        if (connect_to_candidate &&
+            me_to_candidate_distance >= source_to_candidate_distance) {
+          // The candidate is not worth to keep.
+          // Does not include in the new candidate list.
+          continue;
+        }
+
+        if (new_candidates.empty()) {
+          // As the candidate list is sorted by the distance from the source,
+          // the first candidate that passes the dropping test is allowed to
+          // include to the retained neighbors list.
+          retained.push_back(candidate.id);
         } else {
-          retained_neighbors.push_back(neighbor);
-          ++num_retained_paths;
+          // Still not sure if it is worth keeping the candidate.
+          new_candidates.push_back(candidate);
         }
       }
-      m_nn_index.clear_neighbors(source);
-      for (const auto n : retained_neighbors) {
-        m_nn_index.insert(source, n);
+
+      if (new_candidates.empty()) {
+        // go back to the source to update knn index as there is no more
+        // candidates to check.
+        local_this->m_comm.async(local_this->m_point_partitioner(source),
+                                 distance_based_path_selector{}, local_this,
+                                 source, retained);
+      } else {
+        // keep the selection
+        local_this->m_comm.async(
+            local_this->m_point_partitioner(retained.back()),
+            distance_based_path_selector{}, local_this, source, new_candidates,
+            retained);
       }
     }
-    return std::make_pair(num_retained_paths, num_removed_paths);
-  }
+
+    // Replace the neighbors of 'source' with the retained ones.
+    void operator()(self_pointer_type local_this, const id_type source,
+                    const std::vector<id_type>& retained_ids) {
+      assert(!retained_ids.empty());
+      auto& nn_index = local_this->m_nn_index;
+
+      std::vector<neighbor_type> new_neighbors;
+      for (const auto& id : retained_ids) {
+        for (auto nitr = nn_index.neighbors_begin(source),
+                  nend = nn_index.neighbors_end(source);
+             nitr != nend; ++nitr) {
+          if (nitr->id == id) {
+            new_neighbors.push_back(*nitr);
+            break;
+          }
+        }
+      }
+      assert(!new_neighbors.empty());
+
+      nn_index.reset_neighbors(source);
+      nn_index.reserve_neighbors(source, new_neighbors.size());
+      for (const auto n : new_neighbors) {
+        nn_index.insert(source, n);
+      }
+    }
+  };
 
   const option            m_option;
   const point_store_type& m_point_store;
@@ -293,8 +336,6 @@ class nn_index_optimizer {
   nn_index_type&          m_nn_index;
   ygm::comm&              m_comm;
   self_pointer_type       m_this{this};
-  // Use this point store to store feature vectors in remotes.
-  point_store<id_type, feature_element_type> m_remote_point_store;
 };
 
 }  // namespace saltatlas::dndetail

@@ -77,7 +77,7 @@ void read_points_helper(
 
   ygm::ygm_ptr<point_store<id_t, T, pstore_alloc>> ptr_point_store(
       &local_point_store);
-  local_point_store.clear();
+  local_point_store.reset();
   comm.cf_barrier();
 
   // Reads points
@@ -128,7 +128,7 @@ void read_points_with_id_helper(
     const std::function<int(const id_t &id)> &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
-  local_point_store.clear();
+  local_point_store.reset();
   static auto &ref_point_store = local_point_store;
   comm.cf_barrier();
 
@@ -310,11 +310,20 @@ template <typename id_t, typename dist_t>
 using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
 }  // namespace
 
-/// \brief
-/// \tparam id_type
-/// \tparam distance_type
-/// \param file_path
-/// \param store
+/// \brief Read neighbors from a file.
+/// A neighbor file is a text file and consists of two blocks:
+/// ID block and distance block.
+/// In ID block, each line is a list of IDs of neighbors of a point.
+/// In distance block, each line is a list of distances of neighbors of a point.
+/// i-th point's neighbors are stored in i-th line and distances are stored in
+/// (i+N)-th line in the file, where N is the number of points in the file.
+/// The number of lines in ID block and distance block must be the same.
+/// The number of IDs in each line must be the same.
+/// The number of distances in each line must be the same.
+/// \tparam id_type ID type.
+/// \tparam distance_type Distance type.
+/// \param file_path Path to a neighbor file.
+/// \param store Neighbor table instance.
 template <typename id_type, typename distance_type>
 inline void read_neighbors(const std::string_view                &file_path,
                            neighbors_tbl<id_type, distance_type> &store) {
@@ -383,7 +392,7 @@ inline void read_neighbors(const std::string_view                &file_path,
   // Reads distances.
   std::size_t line_no = 0;
   for (std::string buf; std::getline(ifs, buf);) {
-    const auto distances = dndetail::str_split<id_type>(buf);
+    const auto distances = dndetail::str_split<distance_type>(buf);
     if (distances.size() != num_neighbors_per_entry) {
       std::cerr << "#of neighbors per line are not the same" << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -402,11 +411,7 @@ inline void read_neighbors(const std::string_view                &file_path,
   }
 }
 
-/// \tparam id_type
-/// \tparam distance_type
-/// \param file_path
-/// \param store
-/// \param comm
+/// \brief Reads a neighbor file and distributes them.
 template <typename id_type, typename distance_type>
 inline void read_neighbors(const std::string_view                &file_path,
                            neighbors_tbl<id_type, distance_type> &store,
