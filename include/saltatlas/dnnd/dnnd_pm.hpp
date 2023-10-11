@@ -5,6 +5,10 @@
 
 #pragma once
 
+// DNND does not use multi-threading within an MPI rank.
+// Thus, we disable concurrency in Metall to achieve better performance.
+#define METALL_DISABLE_CONCURRENCY
+
 #include <random>
 #include <string_view>
 
