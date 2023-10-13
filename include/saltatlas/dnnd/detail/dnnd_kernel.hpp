@@ -105,31 +105,37 @@ class dnnd_kernel {
   /// \brief Construct a knn-index, starting from a given initial neighbors.
   /// \param init_knn_index Initial neighbors. The distance values will not
   /// be used.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
   /// \param knn_index k-nn index instance to store the constructed one.
   template <typename init_index_alloc_type, typename index_alloc_type>
   void construct(
       const nn_index<id_type, distance_type, init_index_alloc_type>&
                                                           init_knn_index,
+      const bool                                          recheck,
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
-    priv_init_knn_heap_with_index(init_knn_index);
+    priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
     priv_convert(knn_index);
   }
 
   /// \brief Construct a knn-index, starting from a given initial neighbors.
   /// \param init_knn_index Initial neighbors.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
   /// \param knn_index k-nn index instance to store the constructed one.
   template <typename alloc_type>
   void construct(
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
+      const bool                                               recheck,
       nn_index<id_type, distance_type, alloc_type>&            knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
-    priv_init_knn_heap_with_index(init_knn_index);
+    priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
     priv_convert(knn_index);
   }
@@ -171,14 +177,14 @@ class dnnd_kernel {
 
   template <typename init_index_store_type>
   void priv_init_knn_heap_with_index(
-      const init_index_store_type& init_knn_index) {
+      const init_index_store_type& init_knn_index, const bool recheck) {
     if (m_option.verbose) {
       m_comm.cout0()
           << "\nInitializing the k-NN index using the given initial neighbors."
           << std::endl;
     }
     priv_allocate_knn_heap();
-    priv_init_knn_heap_with_initial_index(init_knn_index);
+    priv_init_knn_heap_with_initial_index(init_knn_index, recheck);
     // Fill the remaining uninitialized space with random values
     priv_fill_knn_heap_with_random_value();
   }
@@ -273,8 +279,8 @@ class dnnd_kernel {
           std::unordered_set<id_type> neighbors;
           // Get the neighbors already in the heap
           if (m_knn_heap_table.count(sid) > 0) {
-            for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
-                      nend = m_knn_heap_table.at(sid).ids_end();
+            for (auto nitr = m_knn_heap_table.at(sid).begin(),
+                      nend = m_knn_heap_table.at(sid).end();
                  nitr != nend; ++nitr) {
               const auto& nid = nitr->first;
               neighbors.insert(nid);
@@ -316,7 +322,8 @@ class dnnd_kernel {
   /// \brief Fills k-NN heap with a given index.
   template <typename alloc>
   void priv_init_knn_heap_with_initial_index(
-      const nn_index<id_type, distance_type, alloc>& init_knn_index) {
+      const nn_index<id_type, distance_type, alloc>& init_knn_index,
+      const bool                                     recheck) {
     for (auto pitr = init_knn_index.points_begin();
          pitr != init_knn_index.points_end(); ++pitr) {
       const auto& sid = pitr->first;
@@ -330,12 +337,16 @@ class dnnd_kernel {
                      sid, nid, tmp_feature);
       }
     }
+    if (!recheck) {
+      priv_make_knn_heap_old();
+    }
     m_comm.barrier();
   }
 
   /// \brief Fills k-NN heap with a given index.
   void priv_init_knn_heap_with_initial_index(
-      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index) {
+      const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
+      const bool                                               recheck) {
     for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.end();
          ++pitr) {
       const auto& sid = pitr->first;
@@ -349,7 +360,20 @@ class dnnd_kernel {
                      sid, nid, tmp_feature);
       }
     }
+    if (!recheck) {
+      priv_make_knn_heap_old();
+    }
     m_comm.barrier();
+  }
+
+  void priv_make_knn_heap_old() {
+    for (auto& item : m_knn_heap_table) {
+      auto& heap = item.second;
+      for (auto nitr = heap.begin(), nend = heap.end(); nitr != nend; ++nitr) {
+        const auto& id = nitr->first;
+        heap.value(id) = false;
+      }
+    }
   }
 
   void priv_allocate_knn_heap() {
@@ -417,8 +441,8 @@ class dnnd_kernel {
       news.clear();
 
       auto& neighbors = sitr->second;
-      for (auto nitr = neighbors.ids_begin(), nend = neighbors.ids_end();
-           nitr != nend; ++nitr) {
+      for (auto nitr = neighbors.begin(), nend = neighbors.end(); nitr != nend;
+           ++nitr) {
         const auto& nid          = nitr->first;
         const bool  new_neighbor = nitr->second;
         if (new_neighbor) {

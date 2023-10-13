@@ -142,13 +142,17 @@ class base_dnnd {
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
   /// \param init_neighbors Neighbor data for initialization.
+  /// \param settled_init_index If true, treat the initial neighbors as 'old'
+  /// ones.
   void construct_index(
       const int k, const double r, const double delta,
       const bool exchange_reverse_neighbors, const std::size_t mini_batch_size,
-      const std::unordered_map<id_type, std::vector<id_type>>& init_neighbors) {
+      const std::unordered_map<id_type, std::vector<id_type>>& init_neighbors,
+      bool settled_init_index) {
     auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
                                    mini_batch_size);
-    kernel.construct(init_neighbors, m_data_core->knn_index);
+    kernel.construct(init_neighbors, settled_init_index,
+                     m_data_core->knn_index);
     m_data_core->index_k = k;
   }
 
@@ -162,15 +166,17 @@ class base_dnnd {
   /// neighbors globally.
   /// \param mini_batch_size Mini batch size.
   /// \param init_index k-NN index for initialization.
+  /// \param settled_init_index If true, treat the initial neighbors as 'old'
+  /// ones.
   template <typename init_index_alloc_type>
-  void construct_index(const int k, const double r, const double delta,
-                       const bool        exchange_reverse_neighbors,
-                       const std::size_t mini_batch_size,
-                       const nn_index<id_type, distance_type,
-                                      init_index_alloc_type>& init_index) {
+  void construct_index(
+      const int k, const double r, const double delta,
+      const bool exchange_reverse_neighbors, const std::size_t mini_batch_size,
+      const nn_index<id_type, distance_type, init_index_alloc_type>& init_index,
+      bool settled_init_index) {
     auto kernel = priv_init_kernel(k, r, delta, exchange_reverse_neighbors,
                                    mini_batch_size);
-    kernel.construct(init_index, m_data_core->knn_index);
+    kernel.construct(init_index, settled_init_index, m_data_core->knn_index);
     m_data_core->index_k = k;
   }
 
@@ -250,7 +256,7 @@ class base_dnnd {
   /// neighbor. The dummy value is just a placeholder so that each neighbor id
   /// and distance pair is stored in the same column.
   bool dump_index(const std::string_view out_file_prefix,
-                  const bool         dump_distance = false) {
+                  const bool             dump_distance = false) {
     return priv_dump_index_distributed_file(out_file_prefix, dump_distance);
   }
 
@@ -299,7 +305,7 @@ class base_dnnd {
   }
 
   bool priv_dump_index_distributed_file(const std::string_view out_file_prefix,
-                                        const bool         dump_distance) {
+                                        const bool             dump_distance) {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();
     const auto ret =
