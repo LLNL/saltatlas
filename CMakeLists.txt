@@ -113,7 +113,7 @@ find_package(hnswlib CONFIG)
 if (NOT hnswlib_FOUND)
     FetchContent_Declare(
         hnswlib
-        GIT_REPOSITORY https://github.com/bwpriest/hnswlib
+        GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
         GIT_TAG feature/cmake_facelift
     )
     FetchContent_GetProperties(hnswlib)
@@ -155,7 +155,7 @@ if (NOT cereal_FOUND)
     # to use this commit for now.
     FetchContent_Declare(
         cereal
-        GIT_REPOSITORY https://github.com/USCiLab/cereal
+        GIT_REPOSITORY https://github.com/USCiLab/cereal.git
         GIT_TAG af0700efb25e7dc7af637b9e6f970dbb94813bff
     )
     FetchContent_GetProperties(cereal)
@@ -202,7 +202,7 @@ find_package(ygm ${SALTATLAS_YGM_VERSION} QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
-        GIT_REPOSITORY https://github.com/LLNL/ygm
+        GIT_REPOSITORY https://github.com/LLNL/ygm.git
         GIT_TAG develop # v${SALTATLAS_YGM_VERSION}
     )
     FetchContent_GetProperties(ygm)
@@ -256,7 +256,7 @@ if (SALTATLAS_USE_HDF5)
     if (NOT saltatlas_h5_io_FOUND)
         FetchContent_Declare(
             saltatlas_h5_io
-            GIT_REPOSITORY https://github.com/LLNL/saltatlas_h5_io
+            GIT_REPOSITORY https://github.com/LLNL/saltatlas_h5_io.git
             GIT_TAG main
         )
         FetchContent_GetProperties(saltatlas_h5_io)
