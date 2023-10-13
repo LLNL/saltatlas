@@ -336,7 +336,7 @@ class dnnd_kernel {
   /// \brief Fills k-NN heap with a given index.
   void priv_init_knn_heap_with_initial_index(
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index) {
-    for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.begin();
+    for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.end();
          ++pitr) {
       const auto& sid = pitr->first;
       for (auto nitr = pitr->second.begin(); nitr != pitr->second.end();
