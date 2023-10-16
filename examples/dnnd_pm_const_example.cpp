@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
   if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return 0;
   }
   if (help) {
     usage(argv[0], comm.cout0());
@@ -145,7 +145,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:S:eb:D:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
