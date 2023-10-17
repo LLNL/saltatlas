@@ -21,6 +21,7 @@ struct option_t {
   std::string              point_file_format;
   std::string              dnnd_init_index_path;
   std::string              dhnsw_init_index_path;
+  bool                     settled_init_index{false};
   std::string              datastore_path;
   std::string              datastore_transfer_path;
   std::string              index_dump_prefix{false};
@@ -41,7 +42,7 @@ int main(int argc, char **argv) {
   if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return 0;
   }
   if (help) {
     usage(argv[0], comm.cout0());
@@ -81,7 +82,7 @@ int main(int argc, char **argv) {
                              opt.dnnd_init_index_path, comm, opt.verbose);
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size,
-                           init_dnnd.get_knn_index());
+                           init_dnnd.get_knn_index(), opt.settled_init_index);
     } else if (!opt.dhnsw_init_index_path.empty()) {
       std::unordered_map<id_type, std::vector<id_type>> init_neighbors;
       comm.cout0() << "Read DHNS index" << std::endl;
@@ -94,7 +95,7 @@ int main(int argc, char **argv) {
 
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size,
-                           init_neighbors);
+                           init_neighbors, opt.settled_init_index);
     } else {
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size);
@@ -137,13 +138,14 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   option.point_file_format.clear();
   option.dnnd_init_index_path.clear();
   option.dhnsw_init_index_path.clear();
+  option.settled_init_index = false;
   option.datastore_path.clear();
   option.datastore_transfer_path.clear();
   option.index_dump_prefix.clear();
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:D:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -183,6 +185,10 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 
       case 'H':
         option.dhnsw_init_index_path = optarg;
+        break;
+
+      case 'S':
+        option.settled_init_index = true;
         break;
 
       case 'b':
@@ -251,7 +257,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
          "new index."
       << "\n\t-H [string] Path to an existing HNSW index directory for"
          " initializing the new index."
-      << "\n"
+      << "\n\t-S If specified, consider the initial neighbors settled ones and "
+         "mark them as 'old' ones."
       << "\n\t-x [string] If specified, transfer index to this path at the end."
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."
@@ -273,7 +280,8 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.exchange_reverse_neighbors << "\nBatch size\t"
                << opt.batch_size << "\nDNND init index path\t"
                << opt.dnnd_init_index_path << "\nDHNSW init index path\t"
-               << opt.dhnsw_init_index_path << "\nDatastore transfer path\t"
+               << opt.dhnsw_init_index_path << "\nSettled init index\t"
+               << opt.settled_init_index << "\nDatastore transfer path\t"
                << opt.datastore_transfer_path
                << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
                << "\nVerbose\t" << opt.verbose << std::endl;

@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
   if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return 0;
   }
   if (help) {
     usage(argv[0], comm.cout0());
