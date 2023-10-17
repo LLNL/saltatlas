@@ -17,7 +17,15 @@
 #define SALTATLAS_DNND_PRUNE_LONG_DISTANCE_MSGS 1
 #endif
 
+#ifndef SALTATLAS_DNND_PROFILE_FEATURE_MSG
+#define SALTATLAS_DNND_PROFILE_FEATURE_MSG 0
+#endif
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+#warning "SALTATLAS_DNND_PROFILE_FEATURE_MSG is enabled."
+#endif
+
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -249,6 +257,10 @@ class dnnd_kernel {
                      << std::endl;
 #endif
     }
+
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+    priv_dump_feature_msg_profile();
+#endif
   }
 
   /// \brief Fill k-NN heap with random values.
@@ -755,6 +767,13 @@ class dnnd_kernel {
                     const std::vector<feature_element_type>& u1_feature,
                     const distance_type&                     u1_max_distance =
                         std::numeric_limits<distance_type>::max()) {
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+      if (local_this->m_feature_msg_src_count.count(u1) == 0) {
+        local_this->m_feature_msg_src_count[u1] = 0;
+      }
+      ++local_this->m_feature_msg_src_count[u1];
+#endif
+
       auto& nn_heap = local_this->m_knn_heap_table.at(u2);
 
       // If u1 is already one of the nearest neighbors,
@@ -885,6 +904,36 @@ class dnnd_kernel {
     m_comm.cf_barrier();
   }
 
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+  void priv_dump_feature_msg_profile() {
+    std::vector<unsigned long> distribution_table(2001, 0);
+    for (const auto& item : m_feature_msg_src_count) {
+      const auto& src = item.first;
+      const auto& cnt = item.second;
+      if (cnt < distribution_table.size()) {
+        ++distribution_table[cnt];
+      } else {
+        ++distribution_table.back();
+      }
+    }
+
+    {
+      std::string path("./feature_msg_count");
+      if (const char* env_p = std::getenv("FCNT_PATH")) {
+        path = env_p;
+      }
+      path += "-" + std::to_string(m_comm.rank());
+
+      std::ofstream ofs(path);
+      for (std::size_t i = 0; i < distribution_table.size(); ++i) {
+        ofs << i << "\t" << distribution_table[i] << '\n';
+      }
+    }
+    m_comm.cf_barrier();
+    m_comm.cout0() << "Dumped feature message profile" << std::endl;
+  }
+#endif
+
   option                  m_option;
   const point_store_type& m_point_store;
   const point_partitioner m_point_partitioner;
@@ -901,6 +950,14 @@ class dnnd_kernel {
   std::size_t m_num_feature_msgs{0};
   std::size_t m_num_distance_msgs{0};
   std::size_t m_num_pruned_distance_msgs{0};
+#endif
+
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  boost::unordered_flat_map<id_type, std::size_t> m_feature_msg_src_count;
+#else
+  boost::unordered_map<id_type, std::size_t> m_feature_msg_src_count;
+#endif
 #endif
 };
 
