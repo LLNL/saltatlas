@@ -25,6 +25,7 @@ struct option_t {
   std::string              datastore_path;
   std::string              datastore_transfer_path;
   std::string              index_dump_prefix{false};
+  bool                     donot_store_dataset{false};
   bool                     verbose{false};
 };
 
@@ -102,6 +103,10 @@ int main(int argc, char **argv) {
     }
     comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
+
+    if (opt.donot_store_dataset) {
+      dnnd.destroy_dataset();
+    }
   }
   comm.cf_barrier();
   comm.cout0() << "\nClosed Metall." << std::endl;
@@ -145,7 +150,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vRh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -197,6 +202,10 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 
       case 'D':
         option.index_dump_prefix = optarg;
+        break;
+
+      case 'R':
+        option.donot_store_dataset = true;
         break;
 
       case 'v':
@@ -265,6 +274,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
          "with this prefix (one file per process). A line starts from the "
          "corresponding source ID followed by the list of neighbor IDs."
+      << "\n\t-R If specified, do not store the dataset with the index."
       << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
@@ -284,5 +294,6 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.settled_init_index << "\nDatastore transfer path\t"
                << opt.datastore_transfer_path
                << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nDon't store dataset\t" << opt.donot_store_dataset
                << "\nVerbose\t" << opt.verbose << std::endl;
 }
