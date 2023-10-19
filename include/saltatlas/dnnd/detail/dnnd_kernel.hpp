@@ -917,12 +917,27 @@ class dnnd_kernel {
       }
     }
 
-    {
+    const auto local_root = *std::min(m_comm.layout().local_ranks().begin(),
+                                      m_comm.layout().local_ranks().end());
+    // Gather values withing node
+    if (m_comm.rank() != local_root) {
+      m_comm.async(
+          local_root,
+          [](const ygm::ygm_ptr<self_type>& local_this, const auto table) {
+            for (std::size_t i = 0; i < table.size(); ++i) {
+              local_this->m_m_feature_msg_src_count[i] += table[i];
+            }
+          },
+          m_this, m_feature_msg_src_count);
+    }
+    m_comm.barrier();
+
+    if (m_comm.rank() == local_root) {
       std::string path("./feature_msg_count");
       if (const char* env_p = std::getenv("FCNT_PATH")) {
         path = env_p;
       }
-      path += "-" + std::to_string(m_comm.rank());
+      path += "-" + std::to_string(m_comm.layout().node_id());
 
       std::ofstream ofs(path);
       for (std::size_t i = 0; i < distribution_table.size(); ++i) {

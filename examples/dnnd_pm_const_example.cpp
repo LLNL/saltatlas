@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
                  << std::endl;
 
     if (opt.donot_store_dataset) {
+      comm.cout0() << "\nDestroying dataset from the data store." << std::endl;
       dnnd.destroy_dataset();
     }
   }
