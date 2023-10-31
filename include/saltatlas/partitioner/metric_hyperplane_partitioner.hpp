@@ -32,10 +32,7 @@ class metric_hyperplane_partitioner {
                                 hnswlib::SpaceInterface<dist_type> &space)
       : m_comm(c), m_space(space) {}
 
-  ~metric_hyperplane_partitioner() {
-    m_comm.cout0("Median time: ", m_median_time);
-    m_comm.barrier();
-  }
+  ~metric_hyperplane_partitioner() { m_comm.barrier(); }
 
   template <class Container>
   void initialize(Container &data, const uint32_t num_partitions) {
@@ -114,7 +111,6 @@ class metric_hyperplane_partitioner {
       std::swap(current_level_points, next_level_points);
     }
 
-    m_comm.cout0("Adding points to HNSW");
     // Add bottom level to hnsw
     // Bottom level only exists implicitly as the split points to the
     // second-to-last layer
@@ -123,8 +119,6 @@ class metric_hyperplane_partitioner {
       m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.first, 2 * i);
       m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.second, 2 * i + 1);
     }
-
-    m_comm.cout0("Partitioner initialization time: ", t.elapsed());
   }
 
   std::vector<index_type> find_point_partitions(
