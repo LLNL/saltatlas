@@ -159,11 +159,12 @@ class dnnd_kernel {
   using knn_heap_table_type =
       boost::unordered_node_map<id_type,
                                 unique_knn_heap<id_type, distance_type, bool>>;
-#elif
+#else
   using knn_heap_table_type =
       std::unordered_map<id_type,
                          unique_knn_heap<id_type, distance_type, bool>>;
 #endif
+
   using neighbor_type = neighbor<id_type, distance_type>;
 #if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
   using adj_lsit_type =
