@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <ygm/detail/meta/functional.hpp>
 #include <ygm/detail/ygm_ptr.hpp>
 
 namespace saltatlas {
@@ -14,26 +15,27 @@ template <typename DistType, typename IndexType, typename Point,
           template <typename, typename, typename> class Partitioner>
 class query_engine_impl {
  public:
-  using dist_t        = DistType;
-  using index_t       = IndexType;
-  using point_t       = Point;
-  using partitioner_t = Partitioner<dist_t, index_t, point_t>;
-  using query_engine_impl_t =
-      query_engine_impl<dist_t, index_t, point_t, Partitioner>;
-  using dhnsw_impl_t     = dhnsw_impl<dist_t, index_t, point_t, Partitioner>;
-  using dist_ngbr_mmap_t = std::multimap<dist_t, index_t>;
-  using dist_ngbr_owner_map_t    = std::map<index_t, int>;
-  using dist_ngbr_features_map_t = std::map<index_t, point_t>;
-  using dist_ngbr_features_mmap_t =
-      std::multimap<dist_t, std::pair<index_t, point_t>>;
+  using dist_type     = DistType;
+  using index_type    = IndexType;
+  using point_type    = Point;
+  using partitioner_type = Partitioner<dist_type, index_type, point_type>;
+  using query_engine_impl_type =
+      query_engine_impl<dist_type, index_type, point_type, Partitioner>;
+  using dhnsw_impl_type =
+      dhnsw_impl<dist_type, index_type, point_type, Partitioner>;
+  using dist_ngbr_mmap_type          = std::multimap<dist_type, index_type>;
+  using dist_ngbr_owner_map_type     = std::map<index_type, int>;
+  using dist_ngbr_features_map_type  = std::map<index_type, point_type>;
+  using dist_ngbr_features_mmap_type =
+      std::multimap<dist_type, std::pair<index_type, point_type>>;
 
-  using query_id_t = uint32_t;
+  using query_id_type = uint32_t;
 
   class query_controller {
    private:
     struct query_locator {
-      int        rank;
-      query_id_t local_id;
+      int           rank;
+      query_id_type local_id;
 
       template <typename Archive>
       void serialize(Archive &ar) {
@@ -47,10 +49,10 @@ class query_engine_impl {
 
     query_controller() = delete;
 
-    query_controller(const point_t &q, const int k, const int max_hops,
+    query_controller(const point_type &q, const int k, const int max_hops,
                      const int voronoi_rank, const int initial_num_queries,
                      const std::vector<std::byte> &packed_callback,
-                     query_id_t id, ygm::ygm_ptr<query_engine_impl_t> e)
+                     query_id_type id, ygm::ygm_ptr<query_engine_impl_type> e)
         : m_query_point(q),
           m_k(k),
           m_max_hops(max_hops),
@@ -65,10 +67,10 @@ class query_engine_impl {
       add_callback(packed_callback);
     };
 
-    query_controller(const point_t &q, const int k, const int max_hops,
+    query_controller(const point_type &q, const int k, const int max_hops,
                      const int voronoi_rank, const int initial_num_queries,
                      const std::vector<std::byte> &packed_callback,
-                     query_id_t id, ygm::ygm_ptr<query_engine_impl_t> e,
+                     query_id_type id, ygm::ygm_ptr<query_engine_impl_type> e,
                      with_features_tag_t features_tag)
         : m_query_point(q),
           m_k(k),
@@ -84,8 +86,48 @@ class query_engine_impl {
       add_callback(packed_callback);
     };
 
+    const point_type get_query_point() const { return m_query_point; }
+    const int     get_k() const { return m_k; }
+    const int     get_max_hops() const { return m_k; }
+    const int get_initial_num_queries() const { return m_initial_num_queries; }
+    const int get_voronoi_rank() const { return m_voronoi_rank; }
+    const int get_num_local_queries() const { return m_queries_spawned; }
+    const int get_num_hops() const { return m_current_hops; }
+    const std::set<index_type> &get_queried_cells() const {
+      return m_queried_cells;
+    }
+    ygm::ygm_ptr<query_engine_impl_type> get_query_engine_ptr() const {
+      return engine;
+    }
+
+    std::vector<point_type> get_queried_representatives() const {
+      std::vector<point_type> to_return;
+
+      auto cells = get_queried_cells();
+
+      for (const auto cell : cells) {
+        auto &rep = get_query_engine_ptr()
+                        ->m_dist_index_impl_ptr->partitioner()
+                        .get_partition_representative(cell);
+        to_return.push_back(rep);
+      }
+
+      return to_return;
+    }
+
+    const point_type find_point_partition_representative(
+        const point_type &features) const {
+      return get_query_engine_ptr()
+          ->m_dist_index_impl_ptr->partitioner()
+          .find_point_partition_representative(features);
+    }
+
+    const point_type find_query_partition_representative() const {
+      return find_point_partition_representative(m_query_point);
+    }
+
     void start_query() {
-      std::vector<index_t> point_partitions =
+      std::vector<index_type> point_partitions =
           engine->m_dist_index_impl_ptr->partitioner().find_point_partitions(
               m_query_point, m_initial_num_queries);
 
@@ -97,10 +139,10 @@ class query_engine_impl {
 
     bool has_returned() const { return m_complete; }
 
-    dist_t const neighbors_max_distance() {
-      dist_t to_return;
+    dist_type const neighbors_max_distance() {
+      dist_type to_return;
       if (m_nearest_neighbors.size() < m_k) {
-        to_return = std::numeric_limits<dist_t>::max();
+        to_return = std::numeric_limits<dist_type>::max();
       } else {
         to_return = (--m_nearest_neighbors.end())->first;
       }
@@ -113,8 +155,8 @@ class query_engine_impl {
     }
 
    private:
-    void update_nearest_neighbors(const dist_ngbr_mmap_t &returned_neighbors,
-                                  const int               owner_rank) {
+    void update_nearest_neighbors(const dist_ngbr_mmap_type &returned_neighbors,
+                                  const int                  owner_rank) {
       ASSERT_RELEASE(owner_rank < engine->m_comm->size());
       if (m_nearest_neighbors.size() > 0) {
         merge_nearest_neighbors(returned_neighbors, owner_rank);
@@ -127,8 +169,8 @@ class query_engine_impl {
       }
     }
 
-    void merge_nearest_neighbors(const dist_ngbr_mmap_t &returned_neighbors,
-                                 const int               owner_rank) {
+    void merge_nearest_neighbors(const dist_ngbr_mmap_type &returned_neighbors,
+                                 const int                  owner_rank) {
       auto returned_neighbor_iter = returned_neighbors.begin();
 
       // Add neighbors while new points are closer than my furthest current
@@ -149,13 +191,13 @@ class query_engine_impl {
       }
     }
 
-    void queue_next_cells(const std::set<index_t> &ngbr_cells) {
+    void queue_next_cells(const std::set<index_type> &ngbr_cells) {
       for (auto &cell : ngbr_cells) {
         queue_next_cell(cell);
       }
     }
 
-    void queue_next_cell(const index_t cell) {
+    void queue_next_cell(const index_type cell) {
       if (m_queried_cells.find(cell) == m_queried_cells.end()) {
         m_next_cells.insert(cell);
       }
@@ -165,7 +207,7 @@ class query_engine_impl {
       // Swapping for new set and spawning queries in separate loop from when
       // they are inserted into m_queried_cells to avoid issues with an incoming
       // async updating these structures
-      std::set<index_t> cells_set;
+      std::set<index_type> cells_set;
       cells_set.swap(m_next_cells);
       m_queries_spawned += cells_set.size();
       for (auto &cell : cells_set) {
@@ -193,58 +235,62 @@ class query_engine_impl {
         cereal::YGMInputArchive iarchive(m_callbacks.data(),
                                          m_callbacks.size());
         engine->deserialize_lambda(iarchive, m_query_point, m_nearest_neighbors,
-                                   engine);
+                                   *this);
 
         engine->m_query_id_recycler.return_id(m_id);
         return;
       } else {
-        auto get_neighbor_features_lambda = [](auto                engine,
-                                               const query_locator locator,
-                                               const index_t       ngbr_index) {
-          auto neighbor_features_response_lambda = [](auto              engine,
-                                                      const query_id_t &id,
-                                                      const index_t  ngbr_index,
-                                                      const point_t &ngbr) {
-            auto &query_controller = engine->m_query_controllers[id];
+        auto get_neighbor_features_lambda =
+            [](auto engine, const query_locator locator,
+               const index_type ngbr_index) {
+          auto neighbor_features_response_lambda =
+              [](auto engine, const query_id_type &id,
+                 const index_type ngbr_index, const point_type &ngbr) {
+                auto &query_controller = engine->m_query_controllers[id];
 
-            query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
-            ASSERT_RELEASE(
-                query_controller.m_nearest_neighbor_features.size() <=
-                query_controller.m_k);
+                query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
+                ASSERT_RELEASE(
+                    query_controller.m_nearest_neighbor_features.size() <=
+                    query_controller.m_k);
 
-            if (query_controller.m_nearest_neighbor_features.size() ==
-                query_controller.m_nearest_neighbors.size()) {
-              dist_ngbr_features_mmap_t nn_mmap;
-              for (const auto &dist_index :
-                   query_controller.m_nearest_neighbors) {
-                const auto &[ngbr_dist, ngbr_index] = dist_index;
-                nn_mmap.insert(std::make_pair(
-                    ngbr_dist,
-                    std::make_pair(
-                        ngbr_index,
-                        query_controller
-                            .m_nearest_neighbor_features[ngbr_index])));
-              }
+                if (query_controller.m_nearest_neighbor_features.size() ==
+                    query_controller.m_nearest_neighbors.size()) {
+                  dist_ngbr_features_mmap_type nn_mmap;
+                  for (const auto &dist_index :
+                       query_controller.m_nearest_neighbors) {
+                    const auto &[ngbr_dist, ngbr_index] = dist_index;
+                    nn_mmap.insert(std::make_pair(
+                        ngbr_dist,
+                        std::make_pair(
+                            ngbr_index,
+                            query_controller
+                                .m_nearest_neighbor_features[ngbr_index])));
+                  }
 
-              cereal::YGMInputArchive iarchive(
-                  query_controller.m_callbacks.data(),
-                  query_controller.m_callbacks.size());
+                  cereal::YGMInputArchive iarchive(
+                      query_controller.m_callbacks.data(),
+                      query_controller.m_callbacks.size());
 
-              // TODO: This is a copy of deserialize_lambda with a
-              // different multimap type to accomodate feature vectors...
-              int64_t iptr;
-              iarchive(iptr);
-              iptr += (int64_t)&reference;
-              void (*fun_ptr)(
-                  const point_t &, const dist_ngbr_features_mmap_t &,
-                  ygm::ygm_ptr<query_engine_impl_t>, cereal::YGMInputArchive &);
-              memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
-              fun_ptr(query_controller.m_query_point, nn_mmap, engine,
-                      iarchive);
+                  // TODO: This is a copy of deserialize_lambda with a
+                  // different multimap type to accomodate feature vectors...
+                  /*
+int64_t iptr;
+iarchive(iptr);
+iptr += (int64_t)&reference;
+void (*fun_ptr)(
+const point_type &, const dist_ngbr_features_mmap_type &,
+const query_controller &, cereal::YGMInputArchive &);
+memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
+fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
+                  */
 
-              engine->m_query_id_recycler.return_id(id);
-            }
-          };
+                  engine->deserialize_lambda_with_features(
+                      iarchive, query_controller.m_query_point, nn_mmap,
+                      query_controller);
+
+                  engine->m_query_id_recycler.return_id(id);
+                }
+              };
 
           const auto &ngbr_pt =
               engine->m_dist_index_impl_ptr->get_point(ngbr_index);
@@ -263,21 +309,22 @@ class query_engine_impl {
       }
     }
 
-    void spawn_cell_query(const index_t cell, const int k,
+    void spawn_cell_query(const index_type cell, const int k,
                           const int voronoi_rank) {
-      auto cell_query_lambda = [](auto engine, const point_t &q,
-                                  const index_t s_cell, const dist_t max_dist,
-                                  const int s_k, const int s_voronoi_rank,
+      auto cell_query_lambda = [](auto engine, const point_type &q,
+                                  const index_type s_cell,
+                                  const dist_type max_dist, const int s_k,
+                                  const int s_voronoi_rank,
                                   const query_locator locator) {
         int local_cell = engine->local_cell_index(s_cell);
 
-        std::priority_queue<std::pair<dist_t, hnswlib::labeltype>>
+        std::priority_queue<std::pair<dist_type, hnswlib::labeltype>>
             nearest_neighbors_pq =
                 engine->m_dist_index_impl_ptr->get_cell_hnsw(s_cell).searchKnn(
                     &q, s_k);
 
-        std::set<index_t> ngbr_cells;
-        dist_ngbr_mmap_t  nearest_neighbors;
+        std::set<index_type> ngbr_cells;
+        dist_ngbr_mmap_type  nearest_neighbors;
 
         // Loop over neighbors until priority queue is empty
         // Cannot stop when dist >= max_dist because priority queue is in
@@ -298,9 +345,9 @@ class query_engine_impl {
 
         // Query found potential closest neighbors
         auto query_response_lambda =
-            [](ygm::ygm_ptr<query_engine_impl_t> engine, const query_id_t id,
-               dist_ngbr_mmap_t nearest_ngbrs, std::set<index_t> new_cells,
-               const int queried_rank) {
+            [](ygm::ygm_ptr<query_engine_impl_type> engine,
+               const query_id_type id, dist_ngbr_mmap_type nearest_ngbrs,
+               std::set<index_type> new_cells, const int queried_rank) {
               // Look up controller for returning query
               auto &query_controller = engine->m_query_controllers[id];
 
@@ -318,7 +365,8 @@ class query_engine_impl {
 
         // Query did not return any potential closest neighbors
         auto empty_query_response_lambda =
-            [](ygm::ygm_ptr<query_engine_impl_t> engine, const query_id_t &id) {
+            [](ygm::ygm_ptr<query_engine_impl_type> engine,
+               const query_id_type                 &id) {
               // Look up controller for returning query
               auto &query_controller = engine->m_query_controllers[id];
 
@@ -343,7 +391,7 @@ class query_engine_impl {
         return;
       };
 
-      dist_t max_distance = neighbors_max_distance();
+      dist_type max_distance = neighbors_max_distance();
 
       int           dest = engine->m_dist_index_impl_ptr->cell_owner(cell);
       query_locator locator{engine->m_comm->rank(), m_id};
@@ -355,7 +403,7 @@ class query_engine_impl {
     bool m_complete = false;  // Could compare m_queries_spawned vs
                               // m_queries_returned instead, but might check
                               // between round finishing and next round starting
-    point_t           m_query_point;
+    point_type           m_query_point;
     int               m_k;
     int               m_max_hops;
     int               m_initial_num_queries;
@@ -363,19 +411,19 @@ class query_engine_impl {
     int               m_queries_spawned;
     int               m_queries_returned;
     int               m_current_hops;
-    std::set<index_t> m_queried_cells;
-    std::set<index_t> m_next_cells;
-    dist_ngbr_mmap_t  m_nearest_neighbors;
+    std::set<index_type> m_queried_cells;
+    std::set<index_type> m_next_cells;
+    dist_ngbr_mmap_type  m_nearest_neighbors;
 
-    dist_ngbr_owner_map_t m_nearest_neighbor_owners;
+    dist_ngbr_owner_map_type m_nearest_neighbor_owners;
 
-    dist_ngbr_features_map_t m_nearest_neighbor_features;
+    dist_ngbr_features_map_type m_nearest_neighbor_features;
 
     std::vector<std::byte> m_callbacks;
 
-    query_id_t m_id;
+    query_id_type m_id;
 
-    ygm::ygm_ptr<query_engine_impl_t> engine;
+    ygm::ygm_ptr<query_engine_impl_type> engine;
 
     bool m_query_with_features{false};
   };
@@ -402,7 +450,7 @@ class query_engine_impl {
     std::vector<T> m_available_ids;
   };
 
-  query_engine_impl(dhnsw_impl_t *g)
+  query_engine_impl(dhnsw_impl_type *g)
       : m_comm(&g->comm()),
         m_dist_index_impl_ptr(g),
         pthis(g->comm().make_ygm_ptr(*this)){};
@@ -412,7 +460,7 @@ class query_engine_impl {
   ygm::comm &comm() { return *m_comm; }
 
   template <typename Callback, typename... CallbackArgs>
-  void query(const point_t &query_pt, const int k, const int max_hops,
+  void query(const point_type &query_pt, const int k, const int max_hops,
              const int voronoi_rank, const int initial_num_queries, Callback c,
              const CallbackArgs &...args) {
     const auto packed_lambda = serialize_lambda(c, args...);
@@ -422,7 +470,7 @@ class query_engine_impl {
   }
 
   template <typename Callback, typename... CallbackArgs>
-  void query_with_features(const point_t &query_pt, const int k,
+  void query_with_features(const point_type &query_pt, const int k,
                            const int max_hops, const int voronoi_rank,
                            const int initial_num_queries, Callback c,
                            const CallbackArgs &...args) {
@@ -437,8 +485,8 @@ class query_engine_impl {
   }
 
  private:
-  void initiate_query(const point_t &q, int k, int max_hops, int voronoi_rank,
-                      int                           initial_num_queries,
+  void initiate_query(const point_type &q, int k, int max_hops,
+                      int voronoi_rank, int initial_num_queries,
                       const std::vector<std::byte> &packed_lambda) {
     // Check arguments
     if (k < 1) {
@@ -472,7 +520,7 @@ class query_engine_impl {
 
       m_query_controllers[id].start_query();
     } else {
-      const query_id_t id = m_query_controllers.size();
+      const query_id_type id = m_query_controllers.size();
 
       m_query_controllers.emplace_back(q, k, max_hops, voronoi_rank,
                                        initial_num_queries, packed_lambda, id,
@@ -483,7 +531,7 @@ class query_engine_impl {
   }
 
   void initiate_query_with_features(
-      const point_t &q, int k, int max_hops, int voronoi_rank,
+      const point_type &q, int k, int max_hops, int voronoi_rank,
       int initial_num_queries, const std::vector<std::byte> &packed_lambda) {
     // Check arguments
     if (k < 1) {
@@ -539,18 +587,17 @@ class query_engine_impl {
         std::forward<const PackArgs>(args)...);
     assert(sizeof(Lambda) == 1);
 
-    void (*fun_ptr)(const point_t &, const dist_ngbr_mmap_t &,
-                    ygm::ygm_ptr<query_engine_impl_t>,
-                    cereal::YGMInputArchive &) =
-        [](const point_t &query_pt, const dist_ngbr_mmap_t &nearest_neighbors,
-           ygm::ygm_ptr<query_engine_impl_t> query_engine_ptr,
-           cereal::YGMInputArchive          &bia) {
+    void (*fun_ptr)(const point_type &, const dist_ngbr_mmap_type &,
+                    const query_controller &, cereal::YGMInputArchive &) =
+        [](const point_type &query_pt,
+           const dist_ngbr_mmap_type &nearest_neighbors,
+           const query_controller &controller, cereal::YGMInputArchive &bia) {
           std::tuple<PackArgs...> ta;
           bia(ta);
           Lambda *pl;
-          auto    t1 =
-              std::make_tuple(query_pt, nearest_neighbors, query_engine_ptr);
-          std::apply(*pl, std::tuple_cat(t1, ta));
+          auto    t1 = std::make_tuple(query_pt, nearest_neighbors);
+          ygm::meta::apply_optional(*pl, std::make_tuple(controller),
+                                    std::tuple_cat(t1, ta));
         };
 
     cereal::YGMOutputArchive oarchive(to_return);  // Create an output archive
@@ -568,19 +615,19 @@ class query_engine_impl {
         std::forward<const PackArgs>(args)...);
     assert(sizeof(Lambda) == 1);
 
-    void (*fun_ptr)(const point_t &, const dist_ngbr_features_mmap_t &,
-                    ygm::ygm_ptr<query_engine_impl_t>,
-                    cereal::YGMInputArchive &) =
-        [](const point_t                    &query_pt,
-           const dist_ngbr_features_mmap_t  &nearest_neighbors,
-           ygm::ygm_ptr<query_engine_impl_t> query_engine_ptr,
-           cereal::YGMInputArchive          &bia) {
+    void (*fun_ptr)(const point_type &, const dist_ngbr_features_mmap_type &,
+                    const query_controller &, cereal::YGMInputArchive &) =
+        [](const point_type                   &query_pt,
+           const dist_ngbr_features_mmap_type &nearest_neighbors,
+           const query_controller &controller, cereal::YGMInputArchive &bia) {
           std::tuple<PackArgs...> ta;
           bia(ta);
-          Lambda *pl;
-          auto    t1 =
-              std::make_tuple(query_pt, nearest_neighbors, query_engine_ptr);
-          std::apply(*pl, std::tuple_cat(t1, ta));
+          Lambda                              *pl;
+          std::tuple<const query_controller &> optional_args =
+              std::make_tuple(controller);
+          auto t1 = std::make_tuple(query_pt, nearest_neighbors);
+          ygm::meta::apply_optional(*pl, std::make_tuple(controller),
+                                    std::tuple_cat(t1, ta));
         };
 
     cereal::YGMOutputArchive oarchive(to_return);  // Create an output archive
@@ -590,26 +637,38 @@ class query_engine_impl {
     return to_return;
   }
 
-  void deserialize_lambda(cereal::YGMInputArchive          &iarchive,
-                          const point_t                    &query_pt,
-                          const dist_ngbr_mmap_t           &nearest_neighbors,
-                          ygm::ygm_ptr<query_engine_impl_t> query_engine_ptr) {
+  void deserialize_lambda(cereal::YGMInputArchive &iarchive,
+                          const point_type           &query_pt,
+                          const dist_ngbr_mmap_type  &nearest_neighbors,
+                          const query_controller  &controller) {
     int64_t iptr;
     iarchive(iptr);
     iptr += (int64_t)&reference;
-    void (*fun_ptr)(const point_t &, const dist_ngbr_mmap_t &,
-                    ygm::ygm_ptr<query_engine_impl_t>,
-                    cereal::YGMInputArchive &);
+    void (*fun_ptr)(const point_type &, const dist_ngbr_mmap_type &,
+                    const query_controller &, cereal::YGMInputArchive &);
     memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
-    fun_ptr(query_pt, nearest_neighbors, query_engine_ptr, iarchive);
+    fun_ptr(query_pt, nearest_neighbors, controller, iarchive);
+  }
+
+  void deserialize_lambda_with_features(
+      cereal::YGMInputArchive &iarchive, const point_type &query_pt,
+      const dist_ngbr_features_mmap_type &nearest_neighbors,
+      const query_controller          &controller) {
+    int64_t iptr;
+    iarchive(iptr);
+    iptr += (int64_t)&reference;
+    void (*fun_ptr)(const point_type &, const dist_ngbr_features_mmap_type &,
+                    const query_controller &, cereal::YGMInputArchive &);
+    memcpy(&fun_ptr, &iptr, sizeof(uint64_t));
+    fun_ptr(query_pt, nearest_neighbors, controller, iarchive);
   }
 
   std::vector<query_controller> m_query_controllers;
-  id_recycler<query_id_t>       m_query_id_recycler;
+  id_recycler<query_id_type>       m_query_id_recycler;
 
   ygm::comm                        *m_comm;
-  ygm::ygm_ptr<dhnsw_impl_t>        m_dist_index_impl_ptr;
-  ygm::ygm_ptr<query_engine_impl_t> pthis;
+  ygm::ygm_ptr<dhnsw_impl_type>        m_dist_index_impl_ptr;
+  ygm::ygm_ptr<query_engine_impl_type> pthis;
 };
 
 }  // namespace dhnsw_detail

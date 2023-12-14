@@ -20,11 +20,22 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+#if __has_include(<boost/unordered/unordered_flat_map.hpp>) \
+&& __has_include(<boost/unordered/unordered_node_map.hpp>) \
+&& defined(BOOST_VERSION) && BOOST_VERSION >= 108200
+#ifndef SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+#define SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER 1
+#endif
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_node_map.hpp>
+#endif
 
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
@@ -35,6 +46,7 @@
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
+#include <saltatlas/dnnd/detail/utilities/ygm.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -83,7 +95,7 @@ class dnnd_kernel {
   void construct(
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_random_values();
     priv_construct_kernel();
@@ -100,7 +112,7 @@ class dnnd_kernel {
                                                           init_knn_index,
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_index(init_knn_index);
     priv_construct_kernel();
@@ -115,7 +127,7 @@ class dnnd_kernel {
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
       nn_index<id_type, distance_type, alloc_type>&            knn_index) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nRunning NN-Descent kernel" << std::endl;
+      m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
     priv_init_knn_heap_with_index(init_knn_index);
     priv_construct_kernel();
@@ -129,15 +141,28 @@ class dnnd_kernel {
 
   // bool is the flag to represent if the neighbor has been selected for the
   // friend checking.
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  using knn_heap_table_type =
+      boost::unordered_node_map<id_type,
+                                unique_knn_heap<id_type, distance_type, bool>>;
+#elif
   using knn_heap_table_type =
       std::unordered_map<id_type,
                          unique_knn_heap<id_type, distance_type, bool>>;
+#endif
   using neighbor_type = neighbor<id_type, distance_type>;
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+  using adj_lsit_type =
+      boost::unordered_node_map<id_type, std::vector<id_type>>;
+#else
   using adj_lsit_type = std::unordered_map<id_type, std::vector<id_type>>;
+#endif
+
+  static constexpr std::size_t k_neighbor_check_local_batch_size_factor = 4;
 
   void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
-      m_comm.cout0() << "Initializing the k-NN index with random neighbors."
+      m_comm.cout0() << "\nInitializing the k-NN index with random neighbors."
                      << std::endl;
     }
     priv_allocate_knn_heap();
@@ -149,7 +174,7 @@ class dnnd_kernel {
       const init_index_store_type& init_knn_index) {
     if (m_option.verbose) {
       m_comm.cout0()
-          << "Initializing the k-NN index using the given initial neighbors."
+          << "\nInitializing the k-NN index using the given initial neighbors."
           << std::endl;
     }
     priv_allocate_knn_heap();
@@ -172,10 +197,15 @@ class dnnd_kernel {
       }
       ygm::timer epoch_timer;
 
+      ygm::timer    gen_timer;
       adj_lsit_type old_table;
       adj_lsit_type new_table;
-      priv_select_old_and_new(old_table, new_table);
+      priv_get_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
+      if (m_option.verbose) {
+        m_comm.cout0() << "Generating friend checking requests took (s)\t"
+                       << gen_timer.elapsed() << std::endl;
+      }
 
       m_cnt_new_neighbors = 0;
       priv_update_neighbors(old_table, new_table);
@@ -218,37 +248,69 @@ class dnnd_kernel {
   /// \brief Fill k-NN heap with random values.
   /// This function can accept already partially filled heap.
   void priv_fill_knn_heap_with_random_value() {
-    std::uniform_int_distribution<id_type> dist(0, m_global_max_id);
-    assert(m_option.k < m_global_max_id);
+    m_comm.cf_barrier();
+    ygm::timer init_timer;
 
-    for (auto itr = m_point_store.begin(); itr != m_point_store.end(); ++itr) {
-      const auto                              sid     = itr->first;
-      const auto&                             feature = itr->second;
-      const std::vector<feature_element_type> tmp_feature(feature.begin(),
-                                                          feature.end());
+    // sqrt(k) is enough?
+    const std::size_t init_k = m_option.k;
 
-      std::unordered_set<id_type> unique_table;
-      if (m_knn_heap_table.count(sid) > 0) {
-        for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
-                  nend = m_knn_heap_table.at(sid).ids_end();
-             nitr != nend; ++nitr) {
-          const auto& nid = nitr->first;
-          unique_table.insert(nid);
-        }
-      }
+    // Initialize the k-nn heap with random values using a batched algorithm to
+    // avoid sending too many messages at once. A single task corresponds to all
+    // works of a single point in the dataset to simplify the implementation.
+    // Thus, the total number of tasks is equal to the number of points in the
+    // dataset. The global batch size is equal to the mini-batch size divided by
+    // init_k as each point sends up to init_k messages for initialization.
+    auto pitr = m_point_store.begin();
+    run_batched_ygm_async(
+        m_point_store.size(),               // #of tasks in local
+        m_option.mini_batch_size / init_k,  // global batch size
+        m_option.verbose, m_comm, [this, &pitr, init_k](auto& comm) {
+          const auto                              sid     = pitr->first;
+          const auto&                             feature = pitr->second;
+          const std::vector<feature_element_type> source_feature(
+              feature.begin(), feature.end());
 
-      while (unique_table.size() < m_option.k) {  // sqrt(k) is enough?
-        id_type nid;
-        while (true) {
-          nid = dist(m_rnd_generator);
-          if (nid != sid && unique_table.count(nid) == 0) break;
-        }
-        unique_table.insert(nid);
-        m_comm.async(m_point_partitioner(nid), distance_calculator{}, m_this,
-                     sid, nid, tmp_feature);
-      }
+          std::unordered_set<id_type> neighbors;
+          // Get the neighbors already in the heap
+          if (m_knn_heap_table.count(sid) > 0) {
+            for (auto nitr = m_knn_heap_table.at(sid).ids_begin(),
+                      nend = m_knn_heap_table.at(sid).ids_end();
+                 nitr != nend; ++nitr) {
+              const auto& nid = nitr->first;
+              neighbors.insert(nid);
+            }
+          }
+
+          // Fill the remaining space with random values
+          while (neighbors.size() < init_k) {
+            id_type nid;
+            // Generate a random id that is not in the neighbor set
+            while (true) {
+              std::uniform_int_distribution<id_type> pid_dist(0,
+                                                              m_global_max_id);
+              assert(m_option.k < m_global_max_id);
+              nid = pid_dist(m_rnd_generator);
+              if (nid != sid && neighbors.count(nid) == 0) break;
+            }
+
+            neighbors.insert(nid);
+            // Visit 'nid' and come back to 'sid' with the distance between
+            // them.
+            m_comm.async(m_point_partitioner(nid), distance_calculator{},
+                         m_this, sid, nid, source_feature);
+          }
+
+          ++pitr;
+          return 1;
+        });
+
+    if (m_option.verbose) {
+      m_comm.cout0() << "Filling initial index took (s)\t"
+                     << init_timer.elapsed() << std::endl;
+      m_comm.cout0() << "#of generated initial neighbors: "
+                     << m_comm.all_reduce_sum(m_knn_heap_table.size() * init_k)
+                     << std::endl;
     }
-    m_comm.barrier();
   }
 
   /// \brief Fills k-NN heap with a given index.
@@ -291,6 +353,9 @@ class dnnd_kernel {
   }
 
   void priv_allocate_knn_heap() {
+    m_comm.cf_barrier();
+    ygm::timer timer;
+
     m_knn_heap_table.clear();
 
     m_knn_heap_table.reserve(m_point_store.size());
@@ -300,6 +365,10 @@ class dnnd_kernel {
     }
 
     m_comm.cf_barrier();
+    if (m_option.verbose) {
+      m_comm.cout0() << "Allocating k-NN heap took (s)\t" << timer.elapsed()
+                     << std::endl;
+    }
   }
 
   struct distance_calculator {
@@ -325,8 +394,8 @@ class dnnd_kernel {
     }
   };
 
-  void priv_select_old_and_new(adj_lsit_type& old_table,
-                               adj_lsit_type& new_table) {
+  void priv_get_old_and_new(adj_lsit_type& old_table,
+                            adj_lsit_type& new_table) {
     priv_select_outgoing_old_and_new(old_table, new_table);
     priv_add_reverse_neighbors(old_table);
     priv_add_reverse_neighbors(new_table);
@@ -360,11 +429,12 @@ class dnnd_kernel {
       }
 
       // Select 'new' items to use for the friend checking.
-      const int num_news_to_select =
+      const int num_news =
           std::min((int)(m_option.r * m_option.k), (int)news.size());
       std::shuffle(news.begin(), news.end(), m_rnd_generator);
-      news.erase(news.begin() + num_news_to_select, news.end());
-      assert(news.size() == num_news_to_select);
+      news.erase(news.begin() + num_news, news.end());
+      assert(news.size() == num_news);
+      // reset their 'new' flags as they have been selected.
       for (const auto& nid : news) {
         neighbors.value(nid) = false;
       }
@@ -377,11 +447,12 @@ class dnnd_kernel {
       r_table = priv_exchange_reverse_neighbors(r_table);
     }
     priv_merge_reversed_table(r_table, table);
+
     priv_remove_duplicates(table);
   }
 
   adj_lsit_type priv_gen_reversed_table(const adj_lsit_type& table) {
-    adj_lsit_type r_table(table.get_allocator());
+    adj_lsit_type r_table;
     for (const auto& elem : table) {
       const auto& source    = elem.first;
       const auto& neighbors = elem.second;
@@ -392,21 +463,24 @@ class dnnd_kernel {
     return r_table;
   }
 
-  void priv_merge_reversed_table(const adj_lsit_type& reversed_table,
-                                 adj_lsit_type&       table) {
-    for (const auto& item : reversed_table) {
-      const auto& source = item.first;
-      auto        r_neighbors(item.second);  // Make a copy on purpose
-
-      const auto num_items =
+  /// Note: this function destroy the contents of reversed_table.
+  void priv_merge_reversed_table(adj_lsit_type& reversed_table,
+                                 adj_lsit_type& table) {
+    for (auto& [source, r_neighbors] : reversed_table) {
+      const auto num_items_to_keep =
           std::min((std::size_t)(m_option.r * m_option.k), r_neighbors.size());
       std::shuffle(r_neighbors.begin(), r_neighbors.end(), m_rnd_generator);
-      r_neighbors.erase(r_neighbors.begin() + num_items, r_neighbors.end());
-      assert(r_neighbors.size() == num_items);
+      r_neighbors.erase(r_neighbors.begin() + num_items_to_keep,
+                        r_neighbors.end());
+      assert(r_neighbors.size() == num_items_to_keep);
 
       table[source].insert(table[source].end(), r_neighbors.begin(),
                            r_neighbors.end());
+      r_neighbors.clear();
+      r_neighbors.shrink_to_fit();
     }
+    reversed_table.clear();
+    reversed_table.rehash(0);
   }
 
   static void priv_remove_duplicates(adj_lsit_type& table) {
@@ -418,40 +492,95 @@ class dnnd_kernel {
     }
   }
 
-  adj_lsit_type priv_exchange_reverse_neighbors(const adj_lsit_type& table) {
+  adj_lsit_type priv_exchange_reverse_neighbors(
+      const adj_lsit_type& reverse_neighbors) {
     // Only one call is allowed at a time within a process.
     static std::mutex           mutex;
     std::lock_guard<std::mutex> guard(mutex);
 
-    adj_lsit_type         received;
-    static adj_lsit_type& ref_received = received;
-    ref_received.clear();
-    ref_received.reserve(m_point_store.size());
-    m_comm.cf_barrier();
-
-    std::vector<id_type> source_table;
-    source_table.reserve(table.size());
-    for (const auto& item : table) {
-      const auto& source = item.first;
-      source_table.push_back(source);
-    }
     // Randomize the source ID's order to avoid updating the same node from
     // many processes at the same time.
-    std::shuffle(source_table.begin(), source_table.end(), m_rnd_generator);
-
-    for (const auto source : source_table) {
-      const auto& neighbors = table.at(source);
-      m_comm.async(
-          m_point_partitioner(source),
-          [](const id_type                              vid,
-             const typename adj_lsit_type::mapped_type& neighbors) {
-            ref_received[vid].insert(ref_received[vid].end(), neighbors.begin(),
-                                     neighbors.end());
-          },
-          source, neighbors);
+    std::vector<id_type> source_ids;
+    std::size_t          num_neighbors_to_send = 0;
+    {
+      source_ids.reserve(reverse_neighbors.size());
+      for (const auto& rns : reverse_neighbors) {
+        source_ids.push_back(rns.first);
+        num_neighbors_to_send += rns.second.size();
+      }
+      std::shuffle(source_ids.begin(), source_ids.end(), m_rnd_generator);
     }
-    m_comm.barrier();
-    return received;
+
+    // Exchange the number of neighbors to send.
+#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
+    static boost::unordered_flat_map<id_type, std::size_t> count_incoming;
+#else
+    static std::unordered_map<id_type, std::size_t> count_incoming;
+#endif
+    {
+      count_incoming.reserve(m_point_store.size());
+      for (auto& item : m_point_store) {
+        count_incoming[item.first] = 0;
+      }
+      m_comm.cf_barrier();
+
+      auto itr = reverse_neighbors.begin();
+      run_batched_ygm_async(
+          reverse_neighbors.size(), m_option.mini_batch_size, false, m_comm,
+          [&itr, this](auto& comm) {
+            const auto& source        = itr->first;
+            const auto  num_neighbors = itr->second.size();
+            comm.async(
+                m_point_partitioner(source),
+                [](const std::size_t id, const std::size_t n) {
+                  count_incoming[id] += n;
+                },
+                source, num_neighbors);
+            ++itr;
+            return 1;
+          });
+      assert(itr == reverse_neighbors.end());
+    }
+
+    // Init the receive buffer.
+    adj_lsit_type         recv_buf;
+    static adj_lsit_type& ref_recv_buf = recv_buf;
+    {
+      ref_recv_buf.clear();
+      ref_recv_buf.reserve(count_incoming.size());
+      for (auto& item : count_incoming) {
+        ref_recv_buf[item.first].reserve(item.second);
+      }
+      count_incoming.clear();
+      count_incoming.rehash(0);
+      m_comm.cf_barrier();
+    }
+
+    // Send reverse neighbors to the corresponding sources.
+    {
+      auto sitr            = source_ids.begin();
+      auto neighbor_sender = [&sitr, &reverse_neighbors,
+                              this](ygm::comm& comm) {
+        const auto& src = *sitr;
+        const auto& rn  = reverse_neighbors.at(src);
+        for (const auto& n : rn) {
+          comm.async(
+              m_point_partitioner(src),
+              [](const id_type vid, const auto& neighbor) {
+                ref_recv_buf[vid].push_back(neighbor);
+              },
+              src, n);
+        }
+        ++sitr;
+        return 1;
+      };
+
+      run_batched_ygm_async(source_ids.size(), m_option.mini_batch_size, false,
+                            m_comm, neighbor_sender);
+      assert(sitr == source_ids.end());
+    }
+
+    return recv_buf;
   }
 
   void priv_update_neighbors(adj_lsit_type& old_table,
@@ -483,6 +612,10 @@ class dnnd_kernel {
     auto task_generator = [this, &srcs, &new_table, &targets](
                               std::size_t& pos_src, std::size_t& pos1,
                               std::size_t& pos2) {
+      static const auto local_batch_size =
+          (m_option.mini_batch_size / m_comm.size()) *
+          k_neighbor_check_local_batch_size_factor;
+
       for (; pos_src < srcs.size(); ++pos_src) {
         const auto& news = new_table.at(srcs[pos_src]);
         for (; pos1 < news.size(); ++pos1) {
@@ -492,8 +625,7 @@ class dnnd_kernel {
             if (u1 >= u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 &&
-                targets.size() >= m_option.mini_batch_size) {
+            if (local_batch_size > 0 && targets.size() >= local_batch_size) {
               ++pos2;
               return false;
             }
@@ -519,6 +651,10 @@ class dnnd_kernel {
   void priv_update_neighbors_old_new(const std::vector<id_type>& new_srcs,
                                      const adj_lsit_type&        old_table,
                                      const adj_lsit_type&        new_table) {
+    static const auto local_batch_size =
+        (m_option.mini_batch_size / m_comm.size()) *
+        k_neighbor_check_local_batch_size_factor;
+
     std::queue<std::pair<id_type, id_type>> targets;
     auto task_generator = [this, &new_srcs, &old_table, &new_table, &targets](
                               std::size_t& pos_src, std::size_t& pos_old,
@@ -535,8 +671,7 @@ class dnnd_kernel {
             if (u1 == u2) continue;
             targets.push(std::make_pair(u1, u2));
             // Send some messages before generating everything first
-            if (m_option.mini_batch_size > 0 &&
-                targets.size() >= m_option.mini_batch_size) {
+            if (local_batch_size > 0 && targets.size() >= local_batch_size) {
               ++pos_old;
               return false;
             }
@@ -674,11 +809,12 @@ class dnnd_kernel {
 
   template <typename allocator>
   void priv_convert(nn_index<id_type, distance_type, allocator>& knn_index) {
-    knn_index.clear();
+    knn_index.reset();
+    knn_index.reserve(m_knn_heap_table.size());
     for (auto& item : m_knn_heap_table) {
-      const auto&                src  = item.first;
-      auto&                      heap = item.second;
-      std::vector<neighbor_type> wk;
+      const auto& src  = item.first;
+      auto&       heap = item.second;
+      knn_index.reserve_neighbors(src, heap.size());
       while (!heap.empty()) {
         knn_index.insert(src, heap.top());
         heap.pop();

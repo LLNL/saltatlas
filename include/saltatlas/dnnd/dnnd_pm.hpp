@@ -5,6 +5,10 @@
 
 #pragma once
 
+// DNND does not use multi-threading within an MPI rank.
+// Thus, we disable concurrency in Metall to achieve better performance.
+#define METALL_DISABLE_CONCURRENCY
+
 #include <random>
 #include <string_view>
 
@@ -72,7 +76,7 @@ class dnnd_pm
           const std::string_view distance_metric_name, ygm::comm& comm,
           const uint64_t rnd_seed = std::random_device{}(),
           const bool     verbose  = false)
-      : base_type(verbose, comm), m_comm(comm) {
+      : base_type(verbose, comm) {
     priv_create(datastore_path, distance_metric_name, rnd_seed);
     base_type::init_data_core(*m_data_core);
     comm.cf_barrier();
@@ -84,7 +88,7 @@ class dnnd_pm
   /// \param verbose If true, enable the verbose mode.
   dnnd_pm(open_t, const std::string_view datastore_path, ygm::comm& comm,
           const bool verbose = false)
-      : base_type(verbose, comm), m_comm(comm) {
+      : base_type(verbose, comm) {
     priv_open(datastore_path);
     base_type::init_data_core(*m_data_core);
     comm.cf_barrier();
@@ -96,7 +100,7 @@ class dnnd_pm
   /// \param verbose If true, enable the verbose mode.
   dnnd_pm(open_read_only_t, const std::string_view datastore_path,
           ygm::comm& comm, const bool verbose = false)
-      : base_type(verbose, comm), m_comm(comm) {
+      : base_type(verbose, comm) {
     priv_open_read_only(datastore_path);
     base_type::init_data_core(*m_data_core);
     comm.cf_barrier();
@@ -180,7 +184,6 @@ class dnnd_pm
     assert(m_data_core);
   }
 
-  ygm::comm                                            m_comm;
   std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
   data_core_type*                                      m_data_core{nullptr};
 };

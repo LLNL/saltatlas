@@ -192,6 +192,7 @@ void usage(ygm::comm& comm) {
         << DEFAULT_NUM_HOPS << "\n"
         << " -n <int>		- Initial number of queries (default is "
         << DEFAULT_NUM_INITIAL_QUERIES << "\n"
+        << " -f <int> 	- ef parameter for hnswlib to use for querying "
         << " -i <string>... 	 - File(s) containing data to build index from "
            "(required)\n"
         << " -q <string>...   - File(s) containing data to query index with "
@@ -203,12 +204,15 @@ void usage(ygm::comm& comm) {
   }
 }
 
-void parse_cmd_line(
-    int argc, char** argv, ygm::comm& comm, std::vector<int>& voronoi_rank_vec,
-    std::vector<int>& num_hops_vec, int& num_seeds, std::vector<int>& k_vec,
-    std::vector<int>& num_initial_queries_vec, int& hnsw_m,
-    int& hnsw_ef_construction, std::vector<std::string>& index_filenames,
-    std::string& query_filename, std::string& ground_truth_filename) {
+void parse_cmd_line(int argc, char** argv, ygm::comm& comm,
+                    std::vector<int>& voronoi_rank_vec,
+                    std::vector<int>& num_hops_vec, int& num_seeds,
+                    std::vector<int>& k_vec,
+                    std::vector<int>& num_initial_queries_vec, int& hnsw_m,
+                    int& hnsw_ef_construction, std::vector<int>& hnsw_ef_vec,
+                    std::vector<std::string>& index_filenames,
+                    std::string&              query_filename,
+                    std::string&              ground_truth_filename) {
   if (comm.rank0()) {
     std::cout << "CMD line:";
     for (int i = 0; i < argc; ++i) {
@@ -223,6 +227,7 @@ void parse_cmd_line(
   bool found_initial_num_queries  = false;
   bool found_hnsw_m               = false;
   bool found_hnsw_ef_construction = false;
+  bool found_hnsw_ef              = false;
 
   int  c;
   bool inserting_index_filenames     = false;
@@ -230,14 +235,16 @@ void parse_cmd_line(
   bool inserting_num_hops            = false;
   bool inserting_k                   = false;
   bool inserting_num_initial_queries = false;
+  bool inserting_hnsw_ef             = false;
   bool prn_help                      = false;
   while (true) {
-    while ((c = getopt(argc, argv, "+vps:kniq:g:m:e:h ")) != -1) {
+    while ((c = getopt(argc, argv, "+vps:kniq:g:m:e:fh ")) != -1) {
       inserting_index_filenames     = false;
       inserting_voronoi_ranks       = false;
       inserting_num_hops            = false;
       inserting_k                   = false;
       inserting_num_initial_queries = false;
+      inserting_hnsw_ef             = false;
       switch (c) {
         case 'h':
           prn_help = true;
@@ -277,6 +284,10 @@ void parse_cmd_line(
           hnsw_ef_construction       = atoi(optarg);
           found_hnsw_ef_construction = true;
           break;
+        case 'f':
+          inserting_hnsw_ef = true;
+          found_hnsw_ef     = true;
+          break;
         default:
           std::cerr << "Unrecognized option: " << c << ", ignore." << std::endl;
           prn_help = true;
@@ -299,6 +310,9 @@ void parse_cmd_line(
     }
     if (inserting_num_initial_queries) {
       num_initial_queries_vec.push_back(atoi(argv[optind]));
+    }
+    if (inserting_hnsw_ef) {
+      hnsw_ef_vec.push_back(atoi(argv[optind]));
     }
 
     ++optind;
@@ -323,6 +337,9 @@ void parse_cmd_line(
   if (!found_hnsw_ef_construction) {
     comm.cout0("Using default hnsw_ef_construction: ",
                DEFAULT_HNSW_EF_CONSTRUCTION);
+  }
+  if (!found_hnsw_ef) {
+    hnsw_ef_vec.push_back(10);
   }
 
   // Detect misconfigured options
@@ -367,13 +384,15 @@ int main(int argc, char** argv) {
   std::vector<int>         num_initial_queries_vec;
   int                      hnsw_m;
   int                      hnsw_ef_construction;
+  std::vector<int>         hnsw_ef_vec;
   std::vector<std::string> index_filenames;
   std::string              query_filename;
   std::string              ground_truth_filename;
 
   parse_cmd_line(argc, argv, world, voronoi_rank_vec, num_hops_vec, num_seeds,
                  k_vec, num_initial_queries_vec, hnsw_m, hnsw_ef_construction,
-                 index_filenames, query_filename, ground_truth_filename);
+                 hnsw_ef_vec, index_filenames, query_filename,
+                 ground_truth_filename);
 
   std::sort(voronoi_rank_vec.begin(), voronoi_rank_vec.end());
   std::sort(num_hops_vec.begin(), num_hops_vec.end());
@@ -442,93 +461,99 @@ int main(int argc, char** argv) {
     for (const auto num_initial_queries : num_initial_queries_vec) {
       for (const auto num_hops : num_hops_vec) {
         for (const auto voronoi_rank : voronoi_rank_vec) {
-          world.cout0("\nVoronoi rank: ", voronoi_rank, "\nHops: ", num_hops,
-                      "\nInitial queries: ", num_initial_queries, "\nk: ", k);
+          for (const auto ef : hnsw_ef_vec) {
+            world.cout0("\nVoronoi rank: ", voronoi_rank, "\nHops: ", num_hops,
+                        "\nInitial queries: ", num_initial_queries, "\nk: ", k,
+                        "\nef: ", ef);
 
-          query_results.clear();
-          total_correct       = 0;
-          total_query_results = 0;
-          total_correct_dist  = 0.0;
-          total_result_dist   = 0.0;
+            dist_index.set_ef(ef);
 
-          world.barrier();
-          t.reset();
+            query_results.clear();
+            total_correct       = 0;
+            total_query_results = 0;
+            total_correct_dist  = 0.0;
+            total_result_dist   = 0.0;
 
-          auto store_results_lambda = [](const point_t& query_point,
-                                         const std::multimap<dist_t, index_t>&
-                                                 nearest_neighbors,
-                                         auto    dist_knn_index,
-                                         index_t query_ID) {
-            std::pair<index_t, std::vector<std::pair<index_t, dist_t>>> results;
-            results.first = query_ID;
+            world.barrier();
+            t.reset();
 
-            for (const auto& dist_ID_pair : nearest_neighbors) {
-              results.second.push_back(
-                  std::make_pair(dist_ID_pair.second, dist_ID_pair.first));
+            auto store_results_lambda =
+                [](const point_t&                        query_point,
+                   const std::multimap<dist_t, index_t>& nearest_neighbors,
+                   index_t                               query_ID) {
+                  std::pair<index_t, std::vector<std::pair<index_t, dist_t>>>
+                      results;
+                  results.first = query_ID;
+
+                  for (const auto& dist_ID_pair : nearest_neighbors) {
+                    results.second.push_back(std::make_pair(
+                        dist_ID_pair.second, dist_ID_pair.first));
+                  }
+
+                  query_results.push_back(results);
+                };
+
+            query_points.for_all([&dist_index, k, num_hops, num_initial_queries,
+                                  voronoi_rank, store_results_lambda](
+                                     const auto& query_index,
+                                     const auto& query_point) {
+              dist_index.query(query_point, k, num_hops, num_initial_queries,
+                               voronoi_rank, store_results_lambda, query_index);
+            });
+
+            world.barrier();
+
+            auto elapsed = t.elapsed();
+            world.cout0("Query time: ", elapsed);
+            world.cout0("\t", num_queries / elapsed, " queries/sec");
+
+            world.cout0("Checking results");
+
+            auto calculate_recall_lambda =
+                [](const auto& id, const auto& truth_vec,
+                   const std::vector<std::pair<index_t, dist_t>>& results) {
+                  std::set<index_t> truth_set;
+
+                  for (int i = 0; i < results.size(); ++i) {
+                    truth_set.insert(truth_vec[i].first);
+                    total_correct_dist += std::sqrt(truth_vec[i].second);
+                  }
+
+                  for (const auto& query_result : results) {
+                    total_correct += truth_set.count(query_result.first);
+                    total_result_dist += std::sqrt(query_result.second);
+                  }
+
+                  total_query_results += results.size();
+                };
+
+            for (const auto& index_nn_vec : query_results) {
+              const auto& [id, nn_vec] = index_nn_vec;
+
+              ground_truth.async_visit(id, calculate_recall_lambda, nn_vec);
             }
 
-            query_results.push_back(results);
-          };
+            world.barrier();
 
-          query_points.for_all([&dist_index, k, num_hops, num_initial_queries,
-                                voronoi_rank,
-                                store_results_lambda](const auto& query_index,
-                                                      const auto& query_point) {
-            dist_index.query(query_point, k, num_hops, num_initial_queries,
-                             voronoi_rank, store_results_lambda, query_index);
-          });
+            size_t global_correct = world.all_reduce_sum(total_correct);
+            size_t global_nearest_ngbrs =
+                world.all_reduce_sum(total_query_results);
+            dist_t global_correct_dist =
+                world.all_reduce_sum(total_correct_dist);
+            dist_t global_result_dist = world.all_reduce_sum(total_result_dist);
 
-          world.barrier();
+            /*
+          world.cout0("Total Correct: ", global_correct,
+                  "\nTotal query results: ", global_nearest_ngbrs);
+                                                            */
+            world.cout0("Recall: ",
+                        ((float)global_correct) / global_nearest_ngbrs);
 
-          auto elapsed = t.elapsed();
-          world.cout0("Query time: ", elapsed);
-          world.cout0("\t", num_queries / elapsed, " queries/sec");
-
-          world.cout0("Checking results");
-
-          auto calculate_recall_lambda =
-              [](const auto& id, const auto& truth_vec,
-                 const std::vector<std::pair<index_t, dist_t>>& results) {
-                std::set<index_t> truth_set;
-
-                for (int i = 0; i < results.size(); ++i) {
-                  truth_set.insert(truth_vec[i].first);
-                  total_correct_dist += std::sqrt(truth_vec[i].second);
-                }
-
-                for (const auto& query_result : results) {
-                  total_correct += truth_set.count(query_result.first);
-                  total_result_dist += std::sqrt(query_result.second);
-                }
-
-                total_query_results += results.size();
-              };
-
-          for (const auto& index_nn_vec : query_results) {
-            const auto& [id, nn_vec] = index_nn_vec;
-
-            ground_truth.async_visit(id, calculate_recall_lambda, nn_vec);
+            world.cout0(
+                "Total correct dist: ", global_correct_dist,
+                "\nTotal result dist: ", global_result_dist,
+                "\nApprox Ratio: ", global_result_dist / global_correct_dist);
           }
-
-          world.barrier();
-
-          size_t global_correct = world.all_reduce_sum(total_correct);
-          size_t global_nearest_ngbrs =
-              world.all_reduce_sum(total_query_results);
-          dist_t global_correct_dist = world.all_reduce_sum(total_correct_dist);
-          dist_t global_result_dist  = world.all_reduce_sum(total_result_dist);
-
-          /*
-        world.cout0("Total Correct: ", global_correct,
-                "\nTotal query results: ", global_nearest_ngbrs);
-                                                          */
-          world.cout0("Recall: ",
-                      ((float)global_correct) / global_nearest_ngbrs);
-
-          world.cout0(
-              "Total correct dist: ", global_correct_dist,
-              "\nTotal result dist: ", global_result_dist,
-              "\nApprox Ratio: ", global_result_dist / global_correct_dist);
         }
       }
     }

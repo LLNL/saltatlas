@@ -65,6 +65,7 @@ def write_train(data, out_file_prefix):
         print('Convert bool to int')
         data = data.astype(int)
         print(data)
+
     with open(out_file_prefix + '-train.txt', 'w') as f:
         for point in data:
             for i, feature in enumerate(point):
@@ -78,7 +79,12 @@ def write_test(data, out_file_prefix):
     print('Write test')
     print(data.shape)
     print(data)
-    with open(out_file_prefix + '-test.txt', 'w') as f:
+    if data.dtype == bool:
+        print('Convert bool to int')
+        data = data.astype(int)
+        print(data)
+
+    with open(out_file_prefix + '-query.txt', 'w') as f:
         for point in data:
             for i, feature in enumerate(point):
                 if i > 0:

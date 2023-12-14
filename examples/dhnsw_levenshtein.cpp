@@ -122,11 +122,10 @@ int main(int argc, char** argv) {
   world.barrier();
 
   auto fuzzy_result_lambda =
-      [](const point_t&                        query_string,
-         const std::multimap<dist_t, index_t>& nearest_neighbors,
-         auto                                  dist_knn_index) {
+      [](const auto& controller, const point_t& query_string,
+         const std::multimap<dist_t, index_t>& nearest_neighbors) {
         for (const auto& result_pair : nearest_neighbors) {
-          dist_knn_index->comm().cout()
+          controller.get_query_engine_ptr()->comm().cout()
               << result_pair.second << " fuzzy dist: " << result_pair.first
               << std::endl;
         }
@@ -140,12 +139,11 @@ int main(int argc, char** argv) {
   world.barrier();
 
   auto fuzzy_result_features_lambda =
-      [](const point_t& query_string,
+      [](const auto& controller, const point_t& query_string,
          const std::multimap<dist_t, std::pair<index_t, point_t>>&
-              nearest_neighbors,
-         auto dist_knn_index) {
+             nearest_neighbors) {
         for (const auto& result_pair : nearest_neighbors) {
-          dist_knn_index->comm().cout()
+          controller.get_query_engine_ptr()->comm().cout()
               << "Point ID: " << result_pair.second.first << ": "
               << result_pair.second.second
               << " fuzzy dist: " << result_pair.first << std::endl;

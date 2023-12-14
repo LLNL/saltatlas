@@ -17,40 +17,38 @@ namespace saltatlas {
 template <typename DistType, typename IndexType, typename Point>
 class metric_hyperplane_partitioner {
  public:
-  using dist_t  = DistType;
-  using index_t = IndexType;
-  using point_t = Point;
+  using dist_type  = DistType;
+  using index_type = IndexType;
+  using point_type = Point;
 
  private:
   struct tree_node {
-    dist_t                      theta;
-    std::pair<point_t, point_t> selectors;
+    dist_type                         theta;
+    std::pair<point_type, point_type> selectors;
   };
 
  public:
-  metric_hyperplane_partitioner(ygm::comm                       &c,
-                                hnswlib::SpaceInterface<dist_t> &space)
+  metric_hyperplane_partitioner(ygm::comm                          &c,
+                                hnswlib::SpaceInterface<dist_type> &space)
       : m_comm(c), m_space(space) {}
 
-  ~metric_hyperplane_partitioner() {
-    m_comm.cout0("Median time: ", m_median_time);
-    m_comm.barrier();
-  }
+  ~metric_hyperplane_partitioner() { m_comm.barrier(); }
 
   template <class Container>
   void initialize(Container &data, const uint32_t num_partitions) {
-    m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_t>>(
+    m_hnsw_ptr = std::make_unique<hnswlib::HierarchicalNSW<dist_type>>(
         &m_space, num_partitions, 16, 200, 3149);
 
-    m_num_partitions = num_partitions;
-    m_num_levels     = log2(num_partitions) + 1;
+    m_num_partitions   = num_partitions;
+    m_num_levels       = log2(num_partitions) + 1;
+    m_first_leaf_index = (((uint32_t)1) << (m_num_levels - 1)) - 1;
 
-    std::vector<std::vector<point_t>> current_level_points(1);
-    std::vector<std::vector<point_t>> next_level_points;
+    std::vector<std::vector<point_type>> current_level_points(1);
+    std::vector<std::vector<point_type>> next_level_points;
 
     // Stores assignments of points to tree nodes, indexed globally (to match
     // m_tree nodes)
-    std::unordered_map<index_t, index_t> point_assignments;
+    std::unordered_map<index_type, index_type> point_assignments;
 
     ygm::timer t{};
 
@@ -66,19 +64,46 @@ class metric_hyperplane_partitioner {
       uint32_t num_level_nodes = ((uint32_t)1) << l;
       next_level_points.resize(2 * num_level_nodes);
 
+      std::vector<std::pair<point_type, point_type>> best_selectors(
+          num_level_nodes);
+      std::vector<dist_type> best_thetas(num_level_nodes,
+                                         std::numeric_limits<dist_type>::max());
+
+      for (int selector_trial = 0; selector_trial < max_selector_trials;
+           ++selector_trial) {
+        std::vector<std::pair<point_type, point_type>> selector_pairs;
+        for (uint32_t node = 0; node < num_level_nodes; ++node) {
+          selector_pairs.push_back(choose_selectors(
+              current_level_points[node],
+              l * max_selector_trials * num_level_nodes +
+                  selector_trial * num_level_nodes + node + 654321));
+        }
+
+        auto node_thetas = calculate_thetas(num_level_nodes, point_assignments,
+                                            data, selector_pairs);
+
+        for (uint32_t node = 0; node < num_level_nodes; ++node) {
+          uint32_t index = ln_to_index(l, node);
+
+          dist_type theta_median =
+              sampled_median(node_thetas[node], 0.01,
+                             l * max_selector_trials * num_level_nodes +
+                                 selector_trial * num_level_nodes + node);
+
+          if (std::abs(theta_median) < std::abs(best_thetas[node])) {
+            best_thetas[node]    = theta_median;
+            best_selectors[node] = selector_pairs[node];
+          }
+        }
+      }
+
+      // Record best thetas and associated selectors
       for (uint32_t node = 0; node < num_level_nodes; ++node) {
         uint32_t index = ln_to_index(l, node);
 
-        std::pair<point_t, point_t> selectors =
-            choose_selectors(current_level_points[node]);
-
-        m_tree[index].selectors = selectors;
+        m_tree[index].selectors = best_selectors[node];
+        m_tree[index].theta     = best_thetas[node];
       }
-
-      auto node_thetas =
-          calculate_thetas(num_level_nodes, point_assignments, data);
-
-      find_split_thetas(node_thetas, l);
 
       assign_points(point_assignments, next_level_points, data);
 
@@ -86,7 +111,6 @@ class metric_hyperplane_partitioner {
       std::swap(current_level_points, next_level_points);
     }
 
-    m_comm.cout0("Adding points to HNSW");
     // Add bottom level to hnsw
     // Bottom level only exists implicitly as the split points to the
     // second-to-last layer
@@ -95,13 +119,11 @@ class metric_hyperplane_partitioner {
       m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.first, 2 * i);
       m_hnsw_ptr->addPoint(&m_tree[tree_index].selectors.second, 2 * i + 1);
     }
-
-    m_comm.cout0("Partitioner initialization time: ", t.elapsed());
   }
 
-  std::vector<index_t> find_point_partitions(const point_t &features,
-                                             const uint32_t num_partitions) {
-    std::vector<index_t> to_return;
+  std::vector<index_type> find_point_partitions(
+      const point_type &features, const uint32_t num_partitions) const {
+    std::vector<index_type> to_return;
     to_return.reserve(num_partitions);
 
     auto search_tree_results = search_tree(features);
@@ -115,7 +137,7 @@ class metric_hyperplane_partitioner {
     size_t i = 0;
     while (to_return.size() < num_partitions) {
       ASSERT_RELEASE(i < hnsw_nearest.size());
-      index_t seed_ID = hnsw_nearest[i].second;
+      index_type seed_ID = hnsw_nearest[i].second;
       ASSERT_RELEASE(seed_ID < m_num_partitions);
       if (seed_ID != to_return[0]) {
         to_return.push_back(seed_ID);
@@ -126,13 +148,32 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint32_t num_partitions() { return m_num_partitions; }
+  std::vector<point_type> find_point_partition_representatives(
+      const point_type &features, const uint32_t num_partitions) const {
+    auto partition_index_vec = find_point_partitions(features, num_partitions);
+    std::vector<point_type> to_return;
+    to_return.reserve(num_partitions);
 
-  std::vector<dist_t> get_thetas() {
-    std::vector<dist_t> to_return;
+    for (const auto partition_index : partition_index_vec) {
+      to_return.push_back(get_partition_representative(partition_index));
+    }
+
+    return to_return;
+  }
+
+  point_type find_point_partition_representative(
+      const point_type &features) const {
+    auto partition_rep_vec = find_point_partition_representatives(features, 1);
+    return partition_rep_vec[0];
+  }
+
+  uint32_t num_partitions() const { return m_num_partitions; }
+
+  std::vector<dist_type> get_thetas() const {
+    std::vector<dist_type> to_return;
 
     for (const auto &node : m_tree) {
-      dist_t seed_dist =
+      dist_type seed_dist =
           m_space.get_dist_func()(&node.selectors.first, &node.selectors.second,
                                   m_space.get_dist_func_param());
       to_return.push_back(node.theta / pow(seed_dist, 2));
@@ -143,19 +184,19 @@ class metric_hyperplane_partitioner {
   }
 
   struct node_statistics {
-    std::vector<dist_t>         thetas;
-    std::pair<point_t, point_t> selectors;
+    std::vector<dist_type>            thetas;
+    std::pair<point_type, point_type> selectors;
 
-    dist_t selector_distance;
+    dist_type selector_distance;
 
-    index_t              index;
-    index_t              parent;
-    std::vector<index_t> children;
+    index_type              index;
+    index_type              parent;
+    std::vector<index_type> children;
   };
 
   template <typename Container>
   std::vector<node_statistics> find_tree_statistics(Container &data) {
-    ygm::container::map<index_t, node_statistics> stats_map;
+    ygm::container::map<index_type, node_statistics> stats_map;
 
     data.for_all([&stats_map, this](const auto &index, const auto &point) {
       auto leaf_index = search_tree(point);
@@ -167,18 +208,56 @@ class metric_hyperplane_partitioner {
 
         auto &node = m_tree[tree_index];
 
-        dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                               m_space.get_dist_func_param());
-        dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                               m_space.get_dist_func_param());
+        dist_type dist1 = m_space.get_dist_func()(
+            &point, &node.selectors.first, m_space.get_dist_func_param());
+        dist_type dist2 = m_space.get_dist_func()(
+            &point, &node.selectors.second, m_space.get_dist_func_param());
 
-        dist_t theta = pow(dist2, 2) - pow(dist1, 2);
+        dist_type theta = pow(dist2, 2) - pow(dist1, 2);
       }
     });
   }
 
+  const point_type &get_partition_representative(const index_type idx) const {
+    // Get global tree index for idx in lowest level of tree
+    auto leaf_index = ln_to_index(m_num_levels - 1, idx);
+
+    if (leaf_index % 2 == 1) {
+      return m_tree[(leaf_index - 1) / 2].selectors.first;
+    } else {
+      return m_tree[(leaf_index - 1) / 2].selectors.second;
+    }
+  }
+
+  void print_tree() const {
+    std::stringstream ss;
+
+    for (int i = 0; i < m_first_leaf_index; ++i) {
+      auto &current_node = m_tree[i];
+      if (i > 0) {
+        auto &parent_node = m_tree[(i - 1) / 2];
+        ss << "Rep: ";
+        if (i % 2 == 1) {
+          ss << parent_node.selectors.first << "\t";
+        } else {
+          ss << parent_node.selectors.second << "\t";
+        }
+      } else {
+        ss << "ROOT\t";
+      }
+
+      ss << "Children: " << current_node.selectors.first << ", "
+         << current_node.selectors.second << "\t";
+      ss << "theta: " << current_node.theta;
+
+      ss << std::endl;
+    }
+
+    m_comm.cout0(ss.str());
+  }
+
  private:
-  uint32_t log2(const uint32_t a) {
+  uint32_t log2(const uint32_t a) const {
     ASSERT_RELEASE(a > 0);
     uint32_t tmp       = a;
     uint32_t to_return = 0;
@@ -189,11 +268,11 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint32_t ln_to_index(const uint32_t level, const uint32_t node) {
+  uint32_t ln_to_index(const uint32_t level, const uint32_t node) const {
     return (((uint32_t)1) << level) - 1 + node;
   }
 
-  std::pair<uint32_t, uint32_t> index_to_ln(const uint32_t index) {
+  std::pair<uint32_t, uint32_t> index_to_ln(const uint32_t index) const {
     uint32_t level = log2(index + 1);
     uint32_t node  = index - (((uint32_t)1) << level) + 1;
 
@@ -201,9 +280,9 @@ class metric_hyperplane_partitioner {
   }
 
   // Done poorly for prototyping...
-  dist_t median(const std::vector<dist_t> &vals, const int rank) {
-    std::vector<dist_t> tmp_vals;
-    auto                tmp_ptr = m_comm.make_ygm_ptr(tmp_vals);
+  dist_type median(const std::vector<dist_type> &vals, const int rank) {
+    std::vector<dist_type> tmp_vals;
+    auto                   tmp_ptr = m_comm.make_ygm_ptr(tmp_vals);
 
     m_comm.async(
         rank,
@@ -216,8 +295,8 @@ class metric_hyperplane_partitioner {
 
     m_comm.barrier();
 
-    dist_t to_return;
-    auto   to_return_ptr = m_comm.make_ygm_ptr(to_return);
+    dist_type to_return;
+    auto      to_return_ptr = m_comm.make_ygm_ptr(to_return);
 
     if (m_comm.rank() == rank) {
       std::sort(tmp_vals.begin(), tmp_vals.end());
@@ -236,19 +315,68 @@ class metric_hyperplane_partitioner {
     return to_return;
   }
 
-  uint64_t search_tree(const point_t &point) {
+  dist_type sampled_median(const std::vector<dist_type> &vals,
+                           const float                   sample_ratio = 0.01,
+                           const int                     seed         = 1234) {
+    std::vector<dist_type>         samples;
+    static std::vector<dist_type> &s_samples = samples;
+    std::vector<dist_type>         local_samples;
+
+    auto insert_lambda = [](const auto &vals) {
+      s_samples.insert(s_samples.end(), vals.begin(), vals.end());
+    };
+
+    std::mt19937_64                       gen(m_comm.rank() ^ seed);
+    std::uniform_int_distribution<size_t> dist(0, vals.size() - 1);
+
+    int num_samples = std::min<int>(
+        vals.size(), static_cast<int>(std::ceil(sample_ratio * vals.size())));
+
+    for (int i = 0; i < num_samples; ++i) {
+      auto index = dist(gen);
+      local_samples.push_back(vals[index]);
+    }
+
+    m_comm.async(0, insert_lambda, local_samples);
+
+    m_comm.barrier();
+
+    dist_type         to_return;
+    static dist_type &s_to_return = to_return;
+
+    if (m_comm.rank() == 0) {
+      std::sort(samples.begin(), samples.end());
+      ASSERT_RELEASE(samples.size() > 0);
+
+      if (samples.size() % 2 == 1) {
+        to_return = samples[samples.size() / 2];
+      } else {
+        auto upper_index = samples.size() / 2;
+        to_return = (samples[upper_index - 1] + samples[upper_index]) / 2;
+      }
+
+      m_comm.async_bcast([](const auto median) { s_to_return = median; },
+                         to_return);
+    }
+
+    m_comm.barrier();
+
+    return to_return;
+  }
+
+  uint64_t search_tree(const point_type &point) const {
     uint64_t tree_index = 0;
     while (tree_index < m_tree.size()) {
       const auto &node = m_tree[tree_index];
 
-      dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                             m_space.get_dist_func_param());
-      dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                             m_space.get_dist_func_param());
+      dist_type dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
+                                                m_space.get_dist_func_param());
+      dist_type dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
+                                                m_space.get_dist_func_param());
 
-      dist_t theta = pow(dist2, 2) - pow(dist1, 2);
+      dist_type theta = pow(dist2, 2) - pow(dist1, 2);
 
-      if (theta < node.theta) {
+      if (theta > node.theta) {
         tree_index = tree_index * 2 + 1;
       } else {
         tree_index = tree_index * 2 + 2;
@@ -278,13 +406,12 @@ class metric_hyperplane_partitioner {
   }
 
   // Selectors are not currently chosen uniformly
-  std::pair<point_t, point_t> choose_selectors(
-      const std::vector<point_t> &node_points) {
-    std::pair<point_t, point_t> to_return;
-    auto                        to_return_ptr = m_comm.make_ygm_ptr(to_return);
+  std::pair<point_type, point_type> choose_selectors(
+      const std::vector<point_type> &node_points, const uint64_t seed = 12345) {
+    std::pair<point_type, point_type> to_return;
+    auto to_return_ptr = m_comm.make_ygm_ptr(to_return);
 
-    std::default_random_engine            gen(m_comm.rank() +
-                                              node_points.size() * m_comm.size() + 10);
+    std::default_random_engine            gen(m_comm.rank() ^ seed);
     std::uniform_real_distribution<float> dist;
 
     // Choose first point
@@ -360,23 +487,24 @@ class metric_hyperplane_partitioner {
 
   // TODO: make point_assignments const
   template <typename Container>
-  std::vector<std::vector<dist_t>> calculate_thetas(
-      uint32_t                              num_nodes,
-      std::unordered_map<index_t, index_t> &point_assignments,
-      Container                            &data) {
-    std::vector<std::vector<dist_t>> thetas(num_nodes);
+  std::vector<std::vector<dist_type>> calculate_thetas(
+      uint32_t                                              num_nodes,
+      std::unordered_map<index_type, index_type>           &point_assignments,
+      Container                                            &data,
+      const std::vector<std::pair<point_type, point_type>> &selector_pairs) {
+    std::vector<std::vector<dist_type>> thetas(num_nodes);
 
-    data.for_all([&point_assignments, &thetas, this](const auto &index,
-                                                     const auto &point) {
+    data.for_all([&point_assignments, &thetas, &selector_pairs, this](
+                     const auto &index, const auto &point) {
       const auto tree_index = point_assignments[index];
-      auto      &node       = this->m_tree[tree_index];
+      auto [level, node]    = index_to_ln(tree_index);
 
-      dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                             m_space.get_dist_func_param());
-      dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                             m_space.get_dist_func_param());
+      dist_type dist1 = m_space.get_dist_func()(
+          &point, &selector_pairs[node].first, m_space.get_dist_func_param());
+      dist_type dist2 = m_space.get_dist_func()(
+          &point, &selector_pairs[node].second, m_space.get_dist_func_param());
 
-      dist_t theta = pow(dist2, 2) - pow(dist1, 2);
+      dist_type theta = pow(dist2, 2) - pow(dist1, 2);
 
       ASSERT_RELEASE(index_to_ln(point_assignments[index]).second <
                      thetas.size());
@@ -387,12 +515,13 @@ class metric_hyperplane_partitioner {
     return thetas;
   }
 
-  void find_split_thetas(const std::vector<std::vector<dist_t>> &thetas,
-                         const uint32_t                          level) {
+  void find_split_thetas(const std::vector<std::vector<dist_type>> &thetas,
+                         const uint32_t                             level) {
     for (int i = 0; i < thetas.size(); ++i) {
       m_comm.barrier();
       ygm::timer t{};
-      auto       theta_median = median(thetas[i], i % m_comm.size());
+      // auto       theta_median = median(thetas[i], i % m_comm.size());
+      auto theta_median = sampled_median(thetas[i], 0.01, i);
       m_median_time += t.elapsed();
 
       auto index = ln_to_index(level, i);
@@ -403,22 +532,23 @@ class metric_hyperplane_partitioner {
   }
 
   template <typename Container>
-  void assign_points(std::unordered_map<index_t, index_t> &point_assignments,
-                     std::vector<std::vector<point_t>>    &next_level_points,
-                     Container                            &data) {
+  void assign_points(
+      std::unordered_map<index_type, index_type> &point_assignments,
+      std::vector<std::vector<point_type>>       &next_level_points,
+      Container                                  &data) {
     data.for_all([&point_assignments, &next_level_points, this](
                      const auto &index, const auto &point) {
       const auto tree_index = point_assignments[index];
       auto      &node       = this->m_tree[tree_index];
 
-      dist_t dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
-                                             m_space.get_dist_func_param());
-      dist_t dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
-                                             m_space.get_dist_func_param());
+      dist_type dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
+                                                m_space.get_dist_func_param());
+      dist_type dist2 = m_space.get_dist_func()(&point, &node.selectors.second,
+                                                m_space.get_dist_func_param());
 
-      dist_t theta = pow(dist2, 2) - pow(dist1, 2);
+      dist_type theta = pow(dist2, 2) - pow(dist1, 2);
 
-      if (theta < node.theta) {
+      if (theta > node.theta) {
         point_assignments[index] = 2 * tree_index + 1;
 
         auto [level, node] = index_to_ln(2 * tree_index + 1);
@@ -436,17 +566,19 @@ class metric_hyperplane_partitioner {
 
   ygm::comm &m_comm;
 
-  hnswlib::SpaceInterface<dist_t> &m_space;
+  hnswlib::SpaceInterface<dist_type> &m_space;
 
   std::vector<tree_node> m_tree;
 
   uint32_t m_num_partitions;
   uint32_t m_num_levels;
-  uint32_t m_max_nonleaf;
+  uint32_t m_first_leaf_index;
 
-  std::unique_ptr<hnswlib::HierarchicalNSW<dist_t>> m_hnsw_ptr;
+  std::unique_ptr<hnswlib::HierarchicalNSW<dist_type>> m_hnsw_ptr;
 
   double m_median_time{0.0};
+
+  int max_selector_trials = 100;
 };
 
 }  // namespace saltatlas
