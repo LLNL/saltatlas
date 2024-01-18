@@ -9,6 +9,7 @@
 // Thus, we disable concurrency in Metall to achieve better performance.
 #define METALL_DISABLE_CONCURRENCY
 
+#include <memory>
 #include <random>
 #include <string_view>
 
@@ -111,6 +112,12 @@ class dnnd_pm
   /// \return Returns true on success; otherwise, false.
   bool snapshot(const std::string_view& destination_path) {
     return m_metall->snapshot(destination_path.data());
+  }
+
+  /// \brief Destroy the dataset from the datastore.
+  void destroy_dataset() {
+    std::destroy_at(&(m_data_core->point_store));
+    base_type::get_comm().cf_barrier();
   }
 
   /// \brief Checks if a datastore can be opened.

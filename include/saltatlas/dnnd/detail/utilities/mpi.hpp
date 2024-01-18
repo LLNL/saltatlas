@@ -10,7 +10,7 @@
 #include <functional>
 #include <iostream>
 #include <vector>
-
+#include <numeric>
 #include <mpi.h>
 
 #define SALTATLAS_DNND_CHECK_MPI(ret)                                         \

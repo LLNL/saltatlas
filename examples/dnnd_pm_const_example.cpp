@@ -21,9 +21,11 @@ struct option_t {
   std::string              point_file_format;
   std::string              dnnd_init_index_path;
   std::string              dhnsw_init_index_path;
+  bool                     settled_init_index{false};
   std::string              datastore_path;
   std::string              datastore_transfer_path;
   std::string              index_dump_prefix{false};
+  bool                     donot_store_dataset{false};
   bool                     verbose{false};
 };
 
@@ -41,7 +43,7 @@ int main(int argc, char **argv) {
   if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
     usage(argv[0], comm.cerr0());
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return 0;
   }
   if (help) {
     usage(argv[0], comm.cout0());
@@ -81,7 +83,7 @@ int main(int argc, char **argv) {
                              opt.dnnd_init_index_path, comm, opt.verbose);
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size,
-                           init_dnnd.get_knn_index());
+                           init_dnnd.get_knn_index(), opt.settled_init_index);
     } else if (!opt.dhnsw_init_index_path.empty()) {
       std::unordered_map<id_type, std::vector<id_type>> init_neighbors;
       comm.cout0() << "Read DHNS index" << std::endl;
@@ -94,13 +96,18 @@ int main(int argc, char **argv) {
 
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size,
-                           init_neighbors);
+                           init_neighbors, opt.settled_init_index);
     } else {
       dnnd.construct_index(opt.index_k, opt.r, opt.delta,
                            opt.exchange_reverse_neighbors, opt.batch_size);
     }
     comm.cout0() << "\nIndex construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
+
+    if (opt.donot_store_dataset) {
+      comm.cout0() << "\nDestroying dataset from the data store." << std::endl;
+      dnnd.destroy_dataset();
+    }
   }
   comm.cf_barrier();
   comm.cout0() << "\nClosed Metall." << std::endl;
@@ -137,13 +144,14 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   option.point_file_format.clear();
   option.dnnd_init_index_path.clear();
   option.dhnsw_init_index_path.clear();
+  option.settled_init_index = false;
   option.datastore_path.clear();
   option.datastore_transfer_path.clear();
   option.index_dump_prefix.clear();
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:eb:D:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vRh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -185,12 +193,20 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
         option.dhnsw_init_index_path = optarg;
         break;
 
+      case 'S':
+        option.settled_init_index = true;
+        break;
+
       case 'b':
         option.batch_size = std::stoul(optarg);
         break;
 
       case 'D':
         option.index_dump_prefix = optarg;
+        break;
+
+      case 'R':
+        option.donot_store_dataset = true;
         break;
 
       case 'v':
@@ -251,13 +267,15 @@ void usage(std::string_view exe_name, cout_type &cout) {
          "new index."
       << "\n\t-H [string] Path to an existing HNSW index directory for"
          " initializing the new index."
-      << "\n"
+      << "\n\t-S If specified, consider the initial neighbors settled ones and "
+         "mark them as 'old' ones."
       << "\n\t-x [string] If specified, transfer index to this path at the end."
       << "\n\t-b [long int] Batch size for the index construction (0 is the "
          "full batch mode)."
       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
          "with this prefix (one file per process). A line starts from the "
          "corresponding source ID followed by the list of neighbor IDs."
+      << "\n\t-R If specified, do not store the dataset with the index."
       << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
@@ -273,8 +291,10 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.exchange_reverse_neighbors << "\nBatch size\t"
                << opt.batch_size << "\nDNND init index path\t"
                << opt.dnnd_init_index_path << "\nDHNSW init index path\t"
-               << opt.dhnsw_init_index_path << "\nDatastore transfer path\t"
+               << opt.dhnsw_init_index_path << "\nSettled init index\t"
+               << opt.settled_init_index << "\nDatastore transfer path\t"
                << opt.datastore_transfer_path
                << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nDon't store dataset\t" << opt.donot_store_dataset
                << "\nVerbose\t" << opt.verbose << std::endl;
 }

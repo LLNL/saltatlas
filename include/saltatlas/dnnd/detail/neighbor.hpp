@@ -163,10 +163,11 @@ class unique_knn_heap {
 
   bool contains(const id_type& id) const { return m_map.count(id); }
 
-  // TODO: make own iterator that can access only ID.
-  typename map_type::const_iterator ids_begin() const { return m_map.begin(); }
+  // Provide only const iterators to prevent the user from modifying the IDs.
+  typename map_type::const_iterator begin() const { return m_map.begin(); }
 
-  typename map_type::const_iterator ids_end() const { return m_map.end(); }
+  // Provide only const iterators to prevent the user from modifying the IDs.
+  typename map_type::const_iterator end() const { return m_map.end(); }
 
   value_type& value(const id_type& id) { return m_map.at(id); }
 
