@@ -38,9 +38,16 @@ template <typename ID, typename FeatureElement,
           typename Allocator = std::allocator<std::byte>>
 class point_store {
  public:
-  using id_type              = ID;
+  /// \brief Type of point ID.
+  using id_type = ID;
+
+  /// \brief Type of feature element.
   using feature_element_type = FeatureElement;
-  using allocator_type       = Allocator;
+
+  /// \brief Type of allocator.
+  using allocator_type = Allocator;
+
+  /// \brief Type of feature vector.
   using feature_vector_type =
       dndetail::feature_vector<FeatureElement, Allocator>;
 
@@ -51,7 +58,10 @@ class point_store {
                              std::pair<const id_type, feature_vector_type>>>;
 
  public:
-  using iterator       = typename point_table_type::iterator;
+  /// \brief Type of iterator.
+  using iterator = typename point_table_type::iterator;
+
+  /// \brief Type of const iterator.
   using const_iterator = typename point_table_type::const_iterator;
 
  public:

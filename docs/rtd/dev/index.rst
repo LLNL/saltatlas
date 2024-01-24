@@ -12,8 +12,13 @@ Here is how to build RTD document using Sphinx on your machine.
   :caption: How to build RTD docs locally
 
   # Install required software
-  brew install doxygen graphviz
-  pip install sphinx breathe sphinx_rtd_theme
+  brew install doxygen graphviz sphinx-doc
+  pip install breathe sphinx_rtd_theme
+
+  # Set PATH and PYTHONPATH, if needed
+  # For example:
+  # export PATH="/opt/homebrew/opt/sphinx-doc/bin:${PATH}"
+  # export PYTHONPATH="/path/to/python/site-packages:${PYTHONPATH}"
 
   git clone https://github.com/LLNL/saltatlas.git
   cd saltatlas

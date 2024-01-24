@@ -71,13 +71,26 @@ class base_dnnd {
   using data_core_type = data_core<Id, FeatureElement, Distance, Allocator>;
 
  public:
-  using id_type              = typename data_core_type::id_type;
+  /// \brief Point ID type.
+  using id_type = typename data_core_type::id_type;
+
+  /// \brief Feature vector element type.
   using feature_element_type = typename data_core_type::feature_element_type;
-  using distance_type        = typename data_core_type::distance_type;
-  using point_store_type     = typename data_core_type::point_store_type;
-  using knn_index_type       = typename data_core_type::knn_index_type;
-  using feature_vector_type  = typename point_store_type::feature_vector_type;
-  using neighbor_type        = typename knn_index_type::neighbor_type;
+
+  /// \brief Distance type.
+  using distance_type = typename data_core_type::distance_type;
+
+  /// \brief Point store type.
+  using point_store_type = typename data_core_type::point_store_type;
+
+  /// \brief KNN index type.
+  using knn_index_type = typename data_core_type::knn_index_type;
+
+  /// \brief Feature vector type.
+  using feature_vector_type = typename point_store_type::feature_vector_type;
+
+  /// \brief Neighbor data type.
+  using neighbor_type = typename knn_index_type::neighbor_type;
 
  private:
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
@@ -87,10 +100,16 @@ class base_dnnd {
       dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
 
  public:
-  using query_store_type    = typename query_kernel_type::query_store_type;
-  using point_partitioner   = typename nn_kernel_type::point_partitioner;
+  /// \brief Query points store type.
+  using query_store_type = typename query_kernel_type::query_store_type;
+
+  /// \brief Data points partitioner.
+  using point_partitioner = typename nn_kernel_type::point_partitioner;
+
+  /// \brief Query result store type.
   using neighbor_store_type = typename query_kernel_type::neighbor_store_type;
 
+  /// \brief Constructor.
   base_dnnd(const bool verbose, ygm::comm& comm)
       : m_data_core(), m_comm(comm), m_verbose(verbose) {
     m_comm.cf_barrier();
@@ -250,7 +269,7 @@ class base_dnnd {
   /// neighbor. The dummy value is just a placeholder so that each neighbor id
   /// and distance pair is stored in the same column.
   bool dump_index(const std::string_view out_file_prefix,
-                  const bool         dump_distance = false) {
+                  const bool             dump_distance = false) {
     return priv_dump_index_distributed_file(out_file_prefix, dump_distance);
   }
 
@@ -299,7 +318,7 @@ class base_dnnd {
   }
 
   bool priv_dump_index_distributed_file(const std::string_view out_file_prefix,
-                                        const bool         dump_distance) {
+                                        const bool             dump_distance) {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();
     const auto ret =
