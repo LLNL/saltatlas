@@ -26,6 +26,7 @@ struct option_t {
   std::string              datastore_transfer_path;
   std::string              index_dump_prefix{false};
   bool                     donot_store_dataset{false};
+  bool                     dump_index_with_distance{false};
   bool                     verbose{false};
 };
 
@@ -127,7 +128,7 @@ int main(int argc, char **argv) {
     // Reopen dnnd in read-only mode
     dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
                       opt.verbose);
-    if (!dnnd.dump_index(opt.index_dump_prefix)) {
+    if (!dnnd.dump_index(opt.index_dump_prefix, opt.dump_index_with_distance)) {
       comm.cerr0() << "\nFailed to dump index." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
@@ -151,7 +152,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:vRh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:z:x:f:p:I:H:Seb:D:RMvh")) != -1) {
     switch (n) {
       case 'k':
         option.index_k = std::stoi(optarg);
@@ -207,6 +208,10 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
 
       case 'R':
         option.donot_store_dataset = true;
+        break;
+
+      case 'M':
+        option.dump_index_with_distance = true;
         break;
 
       case 'v':
@@ -275,6 +280,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
          "with this prefix (one file per process). A line starts from the "
          "corresponding source ID followed by the list of neighbor IDs."
+      << "\n\t-M If specified, dump the k-NN index with distances."
+      << "\n"
       << "\n\t-R If specified, do not store the dataset with the index."
       << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
@@ -295,6 +302,7 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.settled_init_index << "\nDatastore transfer path\t"
                << opt.datastore_transfer_path
                << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nDump index with distance\t" << opt.dump_index_with_distance
                << "\nDon't store dataset\t" << opt.donot_store_dataset
                << "\nVerbose\t" << opt.verbose << std::endl;
 }
