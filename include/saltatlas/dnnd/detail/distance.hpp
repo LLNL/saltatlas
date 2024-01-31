@@ -25,6 +25,7 @@ inline distance_type invalid(const feature_element_type *const,
                              const feature_element_type *const,
                              const std::size_t) {
   assert(false);
+  std::abort();
   return distance_type{};
 }
 
