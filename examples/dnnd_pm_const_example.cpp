@@ -15,7 +15,7 @@ struct option_t {
   double                   r{0.8};
   double                   delta{0.001};
   bool                     exchange_reverse_neighbors{true};
-  std::size_t              batch_size{1ULL << 30};
+  std::size_t              batch_size{1ULL << 29};
   std::string              distance_metric_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
@@ -24,7 +24,7 @@ struct option_t {
   bool                     settled_init_index{false};
   std::string              datastore_path;
   std::string              datastore_transfer_path;
-  std::string              index_dump_prefix{false};
+  std::string              index_dump_prefix;
   bool                     donot_store_dataset{false};
   bool                     dump_index_with_distance{false};
   bool                     verbose{false};
