@@ -161,6 +161,12 @@ class dhnsw_impl {
            (m_comm_rank < m_num_cells % m_comm_size);
   }
 
+  template <typename Function>
+  void for_all_data(Function fn) {
+    m_comm->barrier();
+    std::for_each(m_local_data.begin(), m_local_data.end(), fn);
+  }
+
   inline ygm::comm &comm() { return *m_comm; }
 
   partitioner_type &partitioner() { return m_partitioner; }
