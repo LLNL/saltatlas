@@ -22,6 +22,7 @@ struct option_t {
   bool        remove_long_paths{false};
   std::size_t batch_size{1ULL << 28};
   std::string index_dump_prefix;
+  bool        dump_index_with_distance{false};
   bool        verbose{true};
 };
 
@@ -85,7 +86,7 @@ int main(int argc, char **argv) {
     // Reopen dnnd in read-only mode
     dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
                       opt.verbose);
-    if (!dnnd.dump_index(opt.index_dump_prefix)) {
+    if (!dnnd.dump_index(opt.index_dump_prefix, opt.dump_index_with_distance)) {
       comm.cerr0() << "\nFailed to dump index." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
@@ -104,7 +105,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "i:z:x:um:lb:D:vh")) != -1) {
+  while ((n = ::getopt(argc, argv, "i:z:x:um:lb:D:Mvh")) != -1) {
     switch (n) {
       case 'i':
         opt.original_datastore_path = optarg;
@@ -136,6 +137,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 
       case 'D':
         opt.index_dump_prefix = optarg;
+        break;
+
+      case 'M':
+        opt.dump_index_with_distance = true;
         break;
 
       case 'v':
@@ -179,6 +184,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << "\n\t-D [string] If specified, dump the k-NN index to files starting "
           "with this prefix (one file per process). A line starts from the "
           "corresponding source ID followed by the list of neighbor IDs."
+       << "\n\t-M If specified, dump the k-NN index with distances."
        << "\n"
        << "\n\t-v If specified, turn on the verbose mode."
        << "\n\t-h Show this menu." << std::endl;
@@ -194,5 +200,6 @@ void show_options(const option_t &opt, ygm::comm &comm) {
                << opt.remove_long_paths << "\nBatch size\t" << opt.batch_size
                << "\nDatastore transfer path\t" << opt.datastore_transfer_path
                << "\nk-NN index dump file prefix\t" << opt.index_dump_prefix
+               << "\nDump index with distance\t" << opt.dump_index_with_distance
                << "\nVerbose\t" << opt.verbose << std::endl;
 }
