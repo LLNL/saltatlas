@@ -1,4 +1,4 @@
-// Copyright 2022 Lawrence Livermore National Security, LLC and other
+// Copyright 2020-2024 Lawrence Livermore National Security, LLC and other
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
@@ -23,30 +23,29 @@ namespace saltatlas {
 
 /// \brief Persistent Distributed NNDescent.
 /// \tparam Id Point ID type.
-/// \tparam FeatureElement Feature vector element type.
+/// \tparam PointType Point type.
 /// \tparam Distance Distance type.
-template <typename Id = uint64_t, typename FeatureElement = double,
+template <typename Id = uint64_t, typename PointType = feature_vector<double>,
           typename Distance = double>
-class dnnd_pm
-    : public dndetail::base_dnnd<Id, FeatureElement, Distance,
-                                 metall::manager::allocator_type<std::byte>> {
+class dnnd_pm : public dndetail::base_dnnd<
+                    Id, PointType, Distance,
+                    metall::manager::fallback_allocator<std::byte>> {
  private:
   using base_type =
-      dndetail::base_dnnd<Id, FeatureElement, Distance,
-                          metall::manager::allocator_type<std::byte>>;
+      dndetail::base_dnnd<Id, PointType, Distance,
+                          metall::manager::fallback_allocator<std::byte>>;
   using data_core_type = typename base_type::data_core_type;
 
  public:
-  using id_type              = typename base_type::id_type;
-  using feature_element_type = typename base_type::feature_element_type;
-  using distance_type        = typename base_type::distance_type;
-  using point_store_type     = typename base_type::point_store_type;
-  using knn_index_type       = typename base_type::knn_index_type;
-  using feature_vector_type  = typename base_type::feature_vector_type;
-  using neighbor_type        = typename base_type::neighbor_type;
-  using query_store_type     = typename base_type::query_store_type;
-  using point_partitioner    = typename base_type::point_partitioner;
-  using neighbor_store_type  = typename base_type::neighbor_store_type;
+  using id_type             = typename base_type::id_type;
+  using point_type          = typename base_type::point_type;
+  using distance_type       = typename base_type::distance_type;
+  using point_store_type    = typename base_type::point_store_type;
+  using knn_index_type      = typename base_type::knn_index_type;
+  using neighbor_type       = typename base_type::neighbor_type;
+  using query_store_type    = typename base_type::query_store_type;
+  using point_partitioner   = typename base_type::point_partitioner;
+  using neighbor_store_type = typename base_type::neighbor_store_type;
 
   /// \brief Tag type to create a new graph always.
   struct create_t {};
@@ -69,16 +68,16 @@ class dnnd_pm
   /// \brief Constructor. Create a new persistent index.
   /// \param datastore_path Path to store data.
   /// It is not allowed to contain another index at the path.
-  /// \param distance_metric_name Distance metric name.
+  /// \param distance_name Distance metric name.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
   /// \param verbose If true, enable the verbose mode.
   dnnd_pm(create_t, const std::string_view datastore_path,
-          const std::string_view distance_metric_name, ygm::comm& comm,
+          const std::string_view distance_name, ygm::comm& comm,
           const uint64_t rnd_seed = std::random_device{}(),
           const bool     verbose  = false)
       : base_type(verbose, comm) {
-    priv_create(datastore_path, distance_metric_name, rnd_seed);
+    priv_create(datastore_path, distance_name, rnd_seed);
     base_type::init_data_core(*m_data_core);
     comm.cf_barrier();
   }
@@ -116,7 +115,7 @@ class dnnd_pm
 
   /// \brief Destroy the dataset from the datastore.
   void destroy_dataset() {
-    std::destroy_at(&(m_data_core->point_store));
+    std::destroy_at(&(m_data_core->pstore));
     base_type::get_comm().cf_barrier();
   }
 
@@ -155,13 +154,13 @@ class dnnd_pm
   }
 
   void priv_create(const std::string_view path,
-                   const std::string_view distance_metric_name,
+                   const std::string_view distance_name,
                    const uint64_t         rnd_seed) {
     priv_create_metall(path);
     auto& lmgr  = m_metall->get_local_manager();
     m_data_core = lmgr.construct<data_core_type>(metall::unique_instance)(
-        dndetail::distance::convert_to_metric_id(distance_metric_name),
-        rnd_seed, lmgr.get_allocator());
+        distance::convert_to_distance_id(distance_name), rnd_seed,
+        lmgr.get_allocator());
     assert(m_data_core);
   }
 

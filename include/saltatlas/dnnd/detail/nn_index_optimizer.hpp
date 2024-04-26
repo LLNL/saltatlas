@@ -16,28 +16,29 @@
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
-#include <saltatlas/dnnd/detail/point_store.hpp>
+#include "saltatlas/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
 template <typename PointStore, typename KNNIndex>
 class nn_index_optimizer {
  public:
-  using id_type              = typename PointStore::id_type;
-  using distance_type        = typename KNNIndex::distance_type;
-  using feature_element_type = typename PointStore::feature_element_type;
+  using id_type       = typename PointStore::id_type;
+  using distance_type = typename KNNIndex::distance_type;
+  using point_type    = typename PointStore::point_type;
 
   // Redefine point store type so that autocompletion works when writing code.
-  using point_store_type = point_store<id_type, feature_element_type,
-                                       typename PointStore::allocator_type>;
+  using point_store_type =
+      point_store<id_type, point_type, typename PointStore::hasher,
+                  typename PointStore::equal_to,
+                  typename PointStore::allocator_type>;
   // Redefine index store type so that autocompletion works when writing code.
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
-  using feature_vector_type = typename point_store_type::feature_vector_type;
-  using point_partitioner   = std::function<int(const id_type& id)>;
-  using distance_metric =
-      distance::metric_type<feature_element_type, distance_type>;
+  using point_partitioner = std::function<int(const id_type& id)>;
+  using distance_function_type =
+      saltatlas::distance::distance_function_type<point_type, distance_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   struct option {
@@ -50,13 +51,13 @@ class nn_index_optimizer {
   };
 
   nn_index_optimizer(const option& opt, const point_store_type& point_store,
-                     const point_partitioner& partitioner,
-                     const distance_metric& metric, nn_index_type& nn_index,
-                     ygm::comm& comm)
+                     const point_partitioner&      partitioner,
+                     const distance_function_type& dist_function,
+                     nn_index_type& nn_index, ygm::comm& comm)
       : m_option(opt),
         m_point_store(point_store),
         m_point_partitioner(partitioner),
-        m_distance_metric(metric),
+        m_distance_function(dist_function),
         m_nn_index(nn_index),
         m_comm(comm) {
     m_this.check(m_comm);
@@ -155,8 +156,7 @@ class nn_index_optimizer {
     const std::size_t num_max_neighbors_to_retain =
         m_option.index_k * m_option.pruning_degree_multiplier;
     if (m_option.verbose) {
-      m_comm.cout0() << "\nPruning neighbors"
-                     << "\nEach point keeps up to "
+      m_comm.cout0() << "\nPruning neighbors" << "\nEach point keeps up to "
                      << num_max_neighbors_to_retain << " neighbors"
                      << std::endl;
     }
@@ -329,13 +329,13 @@ class nn_index_optimizer {
     }
   };
 
-  const option            m_option;
-  const point_store_type& m_point_store;
-  const point_partitioner m_point_partitioner;
-  const distance_metric&  m_distance_metric;
-  nn_index_type&          m_nn_index;
-  ygm::comm&              m_comm;
-  self_pointer_type       m_this{this};
+  const option                  m_option;
+  const point_store_type&       m_point_store;
+  const point_partitioner       m_point_partitioner;
+  const distance_function_type& m_distance_function;
+  nn_index_type&                m_nn_index;
+  ygm::comm&                    m_comm;
+  self_pointer_type             m_this{this};
 };
 
 }  // namespace saltatlas::dndetail

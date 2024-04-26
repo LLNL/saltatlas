@@ -12,46 +12,50 @@
 #include <saltatlas/dnnd/detail/utilities/blas.hpp>
 #include <saltatlas/dnnd/detail/utilities/float.hpp>
 
-namespace saltatlas::dndetail::distance {
-template <typename feature_element_type, typename distance_type>
-using metric_type = distance_type(const feature_element_type *const,
-                                  const std::size_t,
-                                  const feature_element_type *const,
-                                  const std::size_t);
+namespace saltatlas::distance {
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type invalid(const feature_element_type *const,
-                             const std::size_t,
-                             const feature_element_type *const,
-                             const std::size_t) {
-  assert(false);
-  std::abort();
+using saltatlas::dndetail::nearly_equal;
+
+enum class id : uint8_t {
+  invalid,
+  l1,
+  l2,
+  sql2,
+  cosine,
+  altcosine,
+  jaccard,
+  altjaccard,
+  levenshtein,
+  custom  // User-defined distance function
+};
+
+template <typename point_type, typename distance_type>
+using distance_function_type =
+    std::function<distance_type(const point_type &, const point_type &)>;
+
+template <typename point_type, typename distance_type>
+inline distance_type invalid(const point_type &, const point_type &) {
+  throw std::runtime_error("Invalid distance function.");
   return distance_type{};
 }
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type l1(const feature_element_type *const f0,
-                        const std::size_t                 len0,
-                        const feature_element_type *const f1,
-                        const std::size_t                 len1) {
-  assert(len0 == len1);
+template <typename point_type, typename distance_type>
+inline distance_type l1(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
   distance_type d = 0;
-  for (std::size_t i = 0; i < len0; ++i) {
-    const auto x = std::abs(f0[i] - f1[i]);
+  for (std::size_t i = 0; i < p0.size(); ++i) {
+    const auto x = std::abs(p0[i] - p1[i]);
     d += x;
   }
   return static_cast<distance_type>(std::sqrt(d));
 }
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type l2(const feature_element_type *const f0,
-                        const std::size_t                 len0,
-                        const feature_element_type *const f1,
-                        const std::size_t                 len1) {
-  assert(len0 == len1);
+template <typename point_type, typename distance_type>
+inline distance_type l2(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
   distance_type d = 0;
-  for (std::size_t i = 0; i < len0; ++i) {
-    const auto x = (f0[i] - f1[i]);
+  for (std::size_t i = 0; i < p0.size(); ++i) {
+    const auto x = (p0[i] - p1[i]);
     d += x * x;
   }
   return static_cast<distance_type>(std::sqrt(d));
@@ -59,49 +63,45 @@ inline distance_type l2(const feature_element_type *const f0,
 
 /// \brief Squared Euclidean distance, which omits the final square root in the
 /// calculation of l2 norm.
-template <typename feature_element_type, typename distance_type>
-inline distance_type sql2(const feature_element_type *const f0,
-                          const std::size_t                 len0,
-                          const feature_element_type *const f1,
-                          const std::size_t                 len1) {
-  assert(len0 == len1);
+template <typename point_type, typename distance_type>
+inline distance_type sql2(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
   distance_type d = 0;
-  for (std::size_t i = 0; i < len0; ++i) {
-    const auto x = (f0[i] - f1[i]);
+  for (std::size_t i = 0; i < p0.size(); ++i) {
+    const auto x = (p0[i] - p1[i]);
     d += x * x;
   }
   return d;
 }
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type cosine(const feature_element_type *const f0,
-                            const std::size_t                 len0,
-                            const feature_element_type *const f1,
-                            const std::size_t                 len1) {
-  assert(len0 == len1);
-  const distance_type n0 = dndetail::blas::inner_product(len0, f0, f0);
-  const distance_type n1 = dndetail::blas::inner_product(len1, f1, f1);
+template <typename point_type, typename distance_type>
+inline distance_type cosine(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
+  const distance_type n0 =
+      dndetail::blas::inner_product(p0.size(), p0.data(), p0.data());
+  const distance_type n1 =
+      dndetail::blas::inner_product(p1.size(), p1.data(), p1.data());
   if (nearly_equal(n0, distance_type(0)) && nearly_equal(n1, distance_type(0)))
     return static_cast<distance_type>(0);
   else if (nearly_equal(n0, distance_type(0)) ||
            nearly_equal(n1, distance_type(0)))
     return static_cast<distance_type>(1);
 
-  const distance_type x = dndetail::blas::inner_product(len0, f0, f1);
+  const distance_type x =
+      dndetail::blas::inner_product(p0.size(), p0.data(), p1.data());
   return static_cast<distance_type>(1.0 - x / std::sqrt(n0 * n1));
 }
 
 /// \brief Alternative cosine distance. The original model is from PyNNDescent.
 /// This function returns the same relative distance orders as the normal
 /// cosine similarity.
-template <typename feature_element_type, typename distance_type>
-inline distance_type alt_cosine(const feature_element_type *const f0,
-                                const std::size_t                 len0,
-                                const feature_element_type *const f1,
-                                const std::size_t                 len1) {
-  assert(len0 == len1);
-  const distance_type n0 = dndetail::blas::inner_product(len0, f0, f0);
-  const distance_type n1 = dndetail::blas::inner_product(len1, f1, f1);
+template <typename point_type, typename distance_type>
+inline distance_type alt_cosine(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
+  const distance_type n0 =
+      dndetail::blas::inner_product(p0.size(), p0.data(), p0.data());
+  const distance_type n1 =
+      dndetail::blas::inner_product(p1.size(), p1.data(), p1.data());
   if (nearly_equal(n0, distance_type(0)) &&
       nearly_equal(n1, distance_type(0))) {
     return static_cast<distance_type>(0);
@@ -111,7 +111,8 @@ inline distance_type alt_cosine(const feature_element_type *const f0,
     return std::numeric_limits<distance_type>::max() / distance_type(2);
   }
 
-  const distance_type x = dndetail::blas::inner_product(len0, f0, f1);
+  const distance_type x =
+      dndetail::blas::inner_product(p0.size(), p0.data(), p1.data());
   if (x < 0 || nearly_equal(x, distance_type(0))) {
     return std::numeric_limits<distance_type>::max() / distance_type(2);
   }
@@ -119,17 +120,14 @@ inline distance_type alt_cosine(const feature_element_type *const f0,
   return static_cast<distance_type>(std::log2(std::sqrt(n0 * n1) / x));
 }
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type jaccard_index(const feature_element_type *const f0,
-                                   const std::size_t                 len0,
-                                   const feature_element_type *const f1,
-                                   const std::size_t                 len1) {
-  assert(len0 == len1);
+template <typename point_type, typename distance_type>
+inline distance_type jaccard_index(const point_type &p0, const point_type &p1) {
+  assert(p0.size() == p1.size());
   std::size_t num_non_zero = 0;
   std::size_t num_equal    = 0;
-  for (std::size_t i = 0; i < len0; ++i) {
-    const bool x_true = !!f0[i];
-    const bool y_true = !!f1[i];
+  for (std::size_t i = 0; i < p0.size(); ++i) {
+    const bool x_true = !!p0[i];
+    const bool y_true = !!p1[i];
     num_non_zero += x_true | y_true;
     num_equal += x_true & y_true;
   }
@@ -144,17 +142,15 @@ inline distance_type jaccard_index(const feature_element_type *const f0,
 /// \brief Alternative Jaccard index. The original model is from PyNNDescent.
 /// This function returns the same relative distance orders as the normal
 /// Jaccard index.
-template <typename feature_element_type, typename distance_type>
-inline distance_type alt_jaccard_index(const feature_element_type *const f0,
-                                       const std::size_t                 len0,
-                                       const feature_element_type *const f1,
-                                       const std::size_t                 len1) {
-  assert(len0 == len1);
+template <typename point_type, typename distance_type>
+inline distance_type alt_jaccard_index(const point_type &p0,
+                                       const point_type &p1) {
+  assert(p0.size() == p1.size());
   std::size_t num_non_zero = 0;
   std::size_t num_equal    = 0;
-  for (std::size_t i = 0; i < len0; ++i) {
-    const bool x_true = !!f0[i];
-    const bool y_true = !!f1[i];
+  for (std::size_t i = 0; i < p0.size(); ++i) {
+    const bool x_true = !!p0[i];
+    const bool y_true = !!p1[i];
     num_non_zero += x_true | y_true;
     num_equal += x_true & y_true;
   }
@@ -166,11 +162,10 @@ inline distance_type alt_jaccard_index(const feature_element_type *const f0,
         -std::log2(distance_type(num_equal) / distance_type(num_non_zero)));
 }
 
-template <typename feature_element_type, typename distance_type>
-inline distance_type levenshtein(const feature_element_type *const s0,
-                                 const std::size_t                 m,
-                                 const feature_element_type *const s1,
-                                 const std::size_t                 n) {
+template <typename point_type, typename distance_type>
+inline distance_type levenshtein(const point_type &p0, const point_type &p1) {
+  const auto m = p0.size();
+  const auto n = p1.size();
   if (m == 0) {
     return n;
   }
@@ -190,7 +185,7 @@ inline distance_type levenshtein(const feature_element_type *const s0,
     dist_row[0] = i;
     for (size_t j = 1; j < m + 1; ++j) {
       next_diag              = dist_row[j];
-      bool substitution_cost = (s0[j - 1] != s1[i - 1]);
+      bool substitution_cost = (p0[j - 1] != p1[i - 1]);
 
       dist_row[j] =
           std::min(1 + dist_row[j],
@@ -202,89 +197,80 @@ inline distance_type levenshtein(const feature_element_type *const s0,
   return static_cast<distance_type>(dist_row[m]);
 }
 
-enum class metric_id : uint8_t {
-  invalid,
-  l1,
-  l2,
-  sql2,
-  cosine,
-  altcosine,
-  jaccard,
-  altjaccard,
-  levenshtein
-};
-
-inline metric_id convert_to_metric_id(const std::string_view &metric_name) {
-  if (metric_name == "l1") {
-    return metric_id::l1;
-  } else if (metric_name == "l2") {
-    return metric_id::l2;
-  } else if (metric_name == "sql2") {
-    return metric_id::sql2;
-  } else if (metric_name == "cosine") {
-    return metric_id::cosine;
-  } else if (metric_name == "altcosine") {
-    return metric_id::altcosine;
-  } else if (metric_name == "jaccard") {
-    return metric_id::jaccard;
-  } else if (metric_name == "altjaccard") {
-    return metric_id::altjaccard;
-  } else if (metric_name == "levenshtein") {
-    return metric_id::levenshtein;
+inline distance::id convert_to_distance_id(
+    const std::string_view &distance_name) {
+  if (distance_name == "l1") {
+    return distance::id::l1;
+  } else if (distance_name == "l2") {
+    return distance::id::l2;
+  } else if (distance_name == "sql2") {
+    return distance::id::sql2;
+  } else if (distance_name == "cosine") {
+    return distance::id::cosine;
+  } else if (distance_name == "altcosine") {
+    return distance::id::altcosine;
+  } else if (distance_name == "jaccard") {
+    return distance::id::jaccard;
+  } else if (distance_name == "altjaccard") {
+    return distance::id::altjaccard;
+  } else if (distance_name == "levenshtein") {
+    return distance::id::levenshtein;
   }
-  return metric_id::invalid;
+  return distance::id::invalid;
 }
 
-inline std::string convert_to_metric_name(const metric_id &id) {
+inline std::string convert_to_distance_name(const distance::id &id) {
   switch (id) {
-    case metric_id::l1:
+    case distance::id::l1:
       return "l1";
-    case metric_id::l2:
+    case distance::id::l2:
       return "l2";
-    case metric_id::sql2:
+    case distance::id::sql2:
       return "sql2";
-    case metric_id::cosine:
+    case distance::id::cosine:
       return "cosine";
-    case metric_id::altcosine:
+    case distance::id::altcosine:
       return "altcosine";
-    case metric_id::jaccard:
+    case distance::id::jaccard:
       return "jaccard";
-    case metric_id::altjaccard:
+    case distance::id::altjaccard:
       return "altjaccard";
-    case metric_id::levenshtein:
+    case distance::id::levenshtein:
       return "levenshtein";
+    case distance::id::custom:
+      return "custom";
     default:
       return "invalid";
   }
 }
 
-template <typename feature_element_type, typename distance_type>
-inline metric_type<feature_element_type, distance_type> &metric(
-    const metric_id &id) {
-  if (id == metric_id::l1) {
-    return l1<feature_element_type, distance_type>;
-  } else if (id == metric_id::l2) {
-    return l2<feature_element_type, distance_type>;
-  } else if (id == metric_id::sql2) {
-    return sql2<feature_element_type, distance_type>;
-  } else if (id == metric_id::cosine) {
-    return cosine<feature_element_type, distance_type>;
-  } else if (id == metric_id::altcosine) {
-    return alt_cosine<feature_element_type, distance_type>;
-  } else if (id == metric_id::jaccard) {
-    return jaccard_index<feature_element_type, distance_type>;
-  } else if (id == metric_id::altjaccard) {
-    return alt_jaccard_index<feature_element_type, distance_type>;
-  } else if (id == metric_id::levenshtein) {
-    return levenshtein<feature_element_type, distance_type>;
+template <typename point_type, typename distance_type>
+inline distance_function_type<point_type, distance_type> distance_function(
+    const distance::id &id) {
+  if (id == distance::id::l1) {
+    return l1<point_type, distance_type>;
+  } else if (id == distance::id::l2) {
+    return l2<point_type, distance_type>;
+  } else if (id == distance::id::sql2) {
+    return sql2<point_type, distance_type>;
+  } else if (id == distance::id::cosine) {
+    return cosine<point_type, distance_type>;
+  } else if (id == distance::id::altcosine) {
+    return alt_cosine<point_type, distance_type>;
+  } else if (id == distance::id::jaccard) {
+    return jaccard_index<point_type, distance_type>;
+  } else if (id == distance::id::altjaccard) {
+    return alt_jaccard_index<point_type, distance_type>;
+  } else if (id == distance::id::levenshtein) {
+    return levenshtein<point_type, distance_type>;
   }
-  return invalid<feature_element_type, distance_type>;
+  return invalid<point_type, distance_type>;
 }
 
-template <typename feature_element_type, typename distance_type>
-inline metric_type<feature_element_type, distance_type> &metric(
-    const std::string_view metric_name) {
-  return metric<feature_element_type, distance_type>(
-      convert_to_metric_id(metric_name));
+template <typename point_type, typename distance_type>
+inline distance_function_type<point_type, distance_type> distance_function(
+    const std::string_view distance_name) {
+  return distance_function<point_type, distance_type>(
+      convert_to_distance_id(distance_name));
 }
-}  // namespace saltatlas::dndetail::distance
+}  // namespace saltatlas::distance

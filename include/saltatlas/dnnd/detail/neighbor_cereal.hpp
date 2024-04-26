@@ -6,8 +6,8 @@
 #pragma once
 
 #include <cereal/cereal.hpp>
+
 #include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <ygm/detail/ygm_cereal_archive.hpp>
 
 namespace cereal {
 /// \brief Save function for sending saltatlas::dndetail::neighbor using cereal.

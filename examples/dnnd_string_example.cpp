@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Lawrence Livermore National Security, LLC and other
+// Copyright 2020-2024 Lawrence Livermore National Security, LLC and other
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
@@ -17,6 +17,7 @@
 #include <saltatlas/dnnd/data_reader.hpp>
 #include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/dnnd_pm.hpp>
+#include <saltatlas/dnnd/feature_vector.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
 // #include "dnnd_example_common.hpp"
@@ -24,12 +25,13 @@
 using id_type              = uint32_t;
 using feature_element_type = char;
 using distance_type        = float;
+using feature_vector_type  = saltatlas::feature_vector<feature_element_type>;
 
-using dnnd_type = saltatlas::dnnd<id_type, feature_element_type, distance_type>;
+using dnnd_type = saltatlas::dnnd<id_type, feature_vector_type, distance_type>;
 using neighbor_type = typename dnnd_type::neighbor_type;
 
 using dnnd_pm_type =
-    saltatlas::dnnd_pm<id_type, feature_element_type, distance_type>;
+    saltatlas::dnnd_pm<id_type, feature_vector_type, distance_type>;
 using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
 int main(int argc, char **argv) {
@@ -46,7 +48,7 @@ int main(int argc, char **argv) {
   double                   epsilon{0.1};
   double                   mu{0.2};
   std::size_t              batch_size{0};
-  std::string              distance_metric_name{"levenshtein"};
+  std::string              distance_name{"levenshtein"};
   std::vector<std::string> point_file_paths{
       "./examples/datasets/point_string.txt"};
   std::string query_file_path{"./examples/datasets/query_string.txt"};
@@ -56,7 +58,7 @@ int main(int argc, char **argv) {
   std::string query_result_file_path{"query-results"};
   bool        verbose{true};
 
-  dnnd_type dnnd(distance_metric_name, comm, std::random_device{}(), verbose);
+  dnnd_type dnnd(distance_name, comm, std::random_device{}(), verbose);
   comm.cf_barrier();
 
   comm.cout0() << "<<Read Points>>" << std::endl;

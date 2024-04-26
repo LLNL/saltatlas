@@ -13,14 +13,15 @@
 
 #if SALTATLAS_DNND_USE_METALL_CONTAINER
 #include <metall/container/vector.hpp>
+#include <ygm/detail/cereal_boost_container.hpp>
 #else
 #include <vector>
 #endif
 
 #include <memory>
-#include <saltatlas/dnnd/detail/utilities/allocator.hpp>
+#include "saltatlas/dnnd/detail/utilities/allocator.hpp"
 
-namespace saltatlas::dndetail {
+namespace saltatlas {
 
 namespace {
 namespace container =
@@ -31,8 +32,14 @@ namespace container =
 #endif
 }  // namespace
 
+/// \brief Feature vector type.
 template <typename Element, typename Allocator = std::allocator<Element>>
-using feature_vector =
-    container::vector<Element, other_allocator<Allocator, Element>>;
+using feature_vector = container::vector<Element, Allocator>;
 
-}  // namespace saltatlas::dndetail
+#if SALTATLAS_DNND_USE_METALL_CONTAINER
+/// \brief Feature vector type with persistent memory support.
+template <typename Element,
+          typename Allocator = metall::manager::fallback_allocator<Element>>
+using pm_feature_vector = container::vector<Element, Allocator>;
+#endif
+}  // namespace saltatlas
