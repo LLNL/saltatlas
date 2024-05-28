@@ -197,13 +197,13 @@ endif ()
 #
 # YGM
 #
-set(SALTATLAS_YGM_VERSION 0.5)
+set(SALTATLAS_YGM_VERSION v0.7-dev)
 find_package(ygm ${SALTATLAS_YGM_VERSION} QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
-        GIT_REPOSITORY https://github.com/KIwabuchi/ygm.git
-        GIT_TAG feature/cereal_boost_vector
+        GIT_REPOSITORY https://github.com/LLNL/ygm.git
+        GIT_TAG ${SALTATLAS_YGM_VERSION}
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
