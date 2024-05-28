@@ -44,6 +44,8 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_pm_const_example)
     add_saltatlas_example(dnnd_pm_optimize_example)
     add_saltatlas_example(dnnd_pm_query_example)
+    add_saltatlas_example(dnnd_simple_example)
+    add_saltatlas_example(dnnd_simple_custom_point_example)
 
     add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example float)
     add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example float)
