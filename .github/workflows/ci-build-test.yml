@@ -1,0 +1,14 @@
+name: CI Test
+
+on: [push, pull_request]
+
+jobs:
+  basic_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: build
+        run: |
+          mkdir build && cd build
+          cmake ../ -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
+          make -j
