@@ -3,11 +3,13 @@ name: CI Test
 on: [push, pull_request]
 
 jobs:
-  basic_build:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: build
+      - name: Install OpenMPI
+        run: sudo apt-get install openmpi-bin libopenmpi-dev
+      - name: Build w/o HDF5 w/ Metall
         run: |
           mkdir build && cd build
           cmake ../ -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
