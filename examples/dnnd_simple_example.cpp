@@ -27,26 +27,32 @@ int main(int argc, char** argv) {
   g.load_points(paths.begin(), paths.end(), "wsv");
 
   // ----- NNG build and NN search APIs ----- //
-  // Build KNNG, only for DNND?
-  int    k     = 10;
-  double rho   = 0.8;
-  double delta = 0.001;
-  g.build(k, rho, delta);
+  int k = 4;
+  g.build(k);
 
   bool make_graph_undirected = true;
   g.optimize(make_graph_undirected);
 
   // Run queries
   std::vector<point_type> queries;
-  int                     num_to_search = 10;
-  double                  epsilon       = 0.1;
-  const auto              results =
-      g.query(queries.begin(), queries.end(), num_to_search, 0.1);
+  if (comm.rank() == 0) {
+    queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
+  }
+  int        num_to_search = 4;
+  const auto results = g.query(queries.begin(), queries.end(), num_to_search);
+
+  if (comm.rank() == 0) {
+    std::cout << "Neighbours (id, distance):";
+    for (const auto& [nn_id, nn_dist] : results[0]) {
+      std::cout << " " << nn_id << " (" << nn_dist << ")";
+    }
+    std::cout << std::endl;
+  }
 
   // Point Data Accessors
-  id_t id = 0;
-  if (g.contains_local(id)) {
-    auto p0 = g.get_local_point(id);
+  id_t pid = 0;
+  if (g.contains_local(pid)) {
+    auto p0 = g.get_local_point(pid);
     std::cout << "Point 0 : ";
     for (const auto& v : p0) {
       std::cout << v << " ";
@@ -54,6 +60,7 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
   }
 
+  // Point Data Accessors, another API
   for (const auto& [id, point] : g.local_points()) {
     comm.cout0() << "Point " << id << " : ";
     for (const auto& v : point) {
@@ -63,7 +70,6 @@ int main(int argc, char** argv) {
   }
 
   // Dump a KNNG to files
-  // If 'aggregate' is true, dump all data to a single file in rank 0.
   g.dump_graph("./knng");
 
   return 0;

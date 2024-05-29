@@ -125,11 +125,11 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
         base_type::get_point_partitioner(), base_type::get_comm(), false);
   }
 
-  void build(const int k, const double rho, const double delta) {
+  void build(const int k, const double rho = 0.8, const double delta = 0.001) {
     base_type::construct_index(k, rho, delta, false, 1 << 28);
   }
 
-  void optimize(const bool   make_index_undirected     = false,
+  void optimize(const bool   make_index_undirected     = true,
                 const double pruning_degree_multiplier = 1.5) {
     base_type::optimize_index(make_index_undirected, pruning_degree_multiplier,
                               false);
@@ -137,7 +137,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
 
   template <typename query_iterator>
   auto query(query_iterator queries_begin, query_iterator queries_end,
-             const int k, const double epsilon) {
+             const int k, const double epsilon = 0.1) {
     std::vector<point_type> queries(queries_begin, queries_end);
     return base_type::query_batch(queries, k, epsilon, 0.0, 1 << 28);
   }
