@@ -16,10 +16,10 @@
 #include <ygm/comm.hpp>
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/string_cast.hpp>
 #include <saltatlas/dnnd/detail/utilities/ygm.hpp>
+#include "saltatlas/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -30,12 +30,12 @@ namespace saltatlas::dndetail {
 /// \param sorted_file_names This list must be sorted correctly. All points ID
 /// in i-th file are less than the IDs in (i+k)-th files, where i >= 0 and k
 /// >= 1.
-template <typename id_t, typename T, typename pstore_alloc,
-          typename parser_func>
+template <typename id_t, typename point_t, typename H, typename E,
+          typename pstore_alloc, typename parser_func>
 void read_points_helper(
     const std::vector<std::string> &sorted_file_names, parser_func parser,
-    point_store<id_t, T, pstore_alloc>       &local_point_store,
-    const std::function<int(const id_t &id)> &point_partitioner,
+    point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   // Counts #of points each process to read.
   std::size_t count_points = 0;
@@ -75,7 +75,7 @@ void read_points_helper(
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
 
-  ygm::ygm_ptr<point_store<id_t, T, pstore_alloc>> ptr_point_store(
+  ygm::ygm_ptr<point_store<id_t, point_t, H, E, pstore_alloc>> ptr_point_store(
       &local_point_store);
   local_point_store.reset();
   comm.cf_barrier();
@@ -96,9 +96,9 @@ void read_points_helper(
     while (std::getline(ifs, line_buf)) {
       const auto id = count_points + id_offset;
 
-      std::vector<T> feature;
-      const auto     ret = parser(line_buf, feature);
-      if (!ret || feature.empty()) {
+      point_t    point;
+      const auto ret = parser(line_buf, point);
+      if (!ret || point.empty()) {
         std::cerr << "Invalid line " << line_buf << std::endl;
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
       }
@@ -106,10 +106,12 @@ void read_points_helper(
       // Send to the corresponding process
       comm.async(
           point_partitioner(id),
-          [](auto, const id_t id, const auto &feature, auto ptr_point_store) {
-            ptr_point_store->set(id, feature.begin(), feature.end());
+          [](auto, const id_t id, const auto &point, auto ptr_point_store) {
+            auto &p = (*ptr_point_store)[id];
+            p.clear();
+            p.insert(p.begin(), point.begin(), point.end());
           },
-          id, feature, ptr_point_store);
+          id, point, ptr_point_store);
 
       ++count_points;
     }
@@ -120,12 +122,12 @@ void read_points_helper(
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files contains ID at the first column,
 /// and each column is separated by 'delimiter'.
-template <typename id_t, typename T, typename pstore_alloc,
-          typename parser_func>
+template <typename id_t, typename point_t, typename H, typename E,
+          typename pstore_alloc, typename parser_func>
 void read_points_with_id_helper(
     const std::vector<std::string> &file_names, parser_func parser,
-    point_store<id_t, T, pstore_alloc>       &local_point_store,
-    const std::function<int(const id_t &id)> &point_partitioner,
+    point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
   local_point_store.reset();
@@ -143,25 +145,23 @@ void read_points_with_id_helper(
 
     std::string line_buf;
     while (std::getline(ifs, line_buf)) {
-      id_t           id{};
-      std::vector<T> feature;
-      const auto     ret = parser(line_buf, id, feature);
-      if (!ret || feature.empty()) {
+      id_t       id{};
+      point_t    point;
+      const auto ret = parser(line_buf, id, point);
+      if (!ret) {
         std::cerr << "Invalid line " << line_buf << std::endl;
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
       }
 
       // Send to the corresponding rank
-      auto receiver = [](auto, const id_t id, const auto &sent_feature) {
+      auto receiver = [](auto, const id_t id, const auto &sent_point) {
         if (ref_point_store.contains(id)) {
           std::cerr << "Duplicate ID " << id << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        auto &feature = ref_point_store.feature_vector(id);
-        feature.insert(feature.begin(), sent_feature.begin(),
-                       sent_feature.end());
+        ref_point_store[id]= sent_point;
       };
-      comm.async(point_partitioner(id), receiver, id, feature);
+      comm.async(point_partitioner(id), receiver, id, point);
     }
   }
   comm.barrier();
@@ -170,22 +170,24 @@ void read_points_with_id_helper(
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files contains ID at the first column,
 /// and each column is separated by 'delimiter'.
-template <typename id_t, typename T, typename pstore_alloc>
+template <typename id_t, typename point_t, typename H, typename E,
+          typename pstore_alloc>
 void read_points_with_id(
     const std::vector<std::string> &file_names, const char delimiter,
-    point_store<id_t, T, pstore_alloc>       &local_point_store,
-    const std::function<int(const id_t &id)> &point_partitioner,
+    point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto parser = [delimiter](const std::string &input, id_t &id,
-                                  std::vector<T> &feature) {
+                                  point_t &point) {
     std::string buf;
     bool        first = true;
-    feature.clear();
+    point.clear();
     for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
-      if (first)
+      if (first) {
         id = str_cast<id_t>(buf);
-      else
-        feature.push_back(str_cast<T>(buf));
+      } else {
+        point.push_back(str_cast<typename point_t::value_type>(buf));
+      }
       first = false;
     }
     return true;
@@ -201,22 +203,24 @@ void read_points_with_id(
 /// \warning
 /// This function uses static variables internally. Each process must call this
 /// function only once at a time.
-template <typename id_type, typename T, typename pstore_alloc>
+template <typename id_type, typename point_t, typename H, typename E,
+          typename pstore_alloc>
 void read_points_with_id(
-    const std::vector<std::string>              &file_names,
-    point_store<id_type, T, pstore_alloc>       &local_point_store,
-    const std::function<int(const id_type &id)> &point_partitioner,
+    const std::vector<std::string>                    &file_names,
+    point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, id_type &id,
-                         std::vector<T> &feature) {
+                         point_t &point) {
     std::string buf;
     bool        first = true;
-    feature.clear();
+    point.clear();
     for (std::stringstream ss(input); ss >> buf;) {
-      if (first)
+      if (first) {
         id = str_cast<id_type>(buf);
-      else
-        feature.push_back(str_cast<T>(buf));
+      } else {
+        point.push_back(str_cast<typename point_t::value_type>(buf));
+      }
       first = false;
     }
     return true;
@@ -229,15 +233,17 @@ void read_points_with_id(
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files do not contain ID and each column is separated by
 /// 'delimiter'.
-template <typename id_type, typename T, typename pstore_alloc>
-void read_points(const std::vector<std::string>              &file_names,
-                 const char                                   delimiter,
-                 point_store<id_type, T, pstore_alloc>       &local_point_store,
-                 const std::function<int(const id_type &id)> &point_partitioner,
-                 ygm::comm &comm, const bool verbose) {
-  const auto parser = [delimiter](const std::string &input,
-                                  std::vector<T>    &feature) {
-    feature = str_split<T>(input, delimiter);
+template <typename id_type, typename point_t, typename H, typename E,
+          typename pstore_alloc>
+void read_points(
+    const std::vector<std::string> &file_names, const char delimiter,
+    point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_type &id)>       &point_partitioner,
+    ygm::comm &comm, const bool verbose) {
+  const auto parser = [delimiter](const std::string &input, point_t &point) {
+    const auto buf = str_split<typename point_t::value_type>(input, delimiter);
+    point.clear();
+    point.insert(point.begin(), buf.begin(), buf.end());
     return true;
   };
 
@@ -248,13 +254,17 @@ void read_points(const std::vector<std::string>              &file_names,
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files do not contain ID and each column is separated by
 /// whitespace.
-template <typename id_t, typename T, typename pstore_alloc>
-void read_points(const std::vector<std::string>           &file_names,
-                 point_store<id_t, T, pstore_alloc>       &local_point_store,
-                 const std::function<int(const id_t &id)> &point_partitioner,
-                 ygm::comm &comm, const bool verbose) {
-  const auto parser = [](const std::string &input, std::vector<T> &feature) {
-    feature = str_split<T>(input);
+template <typename id_type, typename point_t, typename H, typename E,
+          typename pstore_alloc>
+void read_points(
+    const std::vector<std::string>                    &file_names,
+    point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_t &id)>          &point_partitioner,
+    ygm::comm &comm, const bool verbose) {
+  const auto parser = [](const std::string &input, point_t &point) {
+    const auto buf = str_split<typename point_t::value_type>(input);
+    point.clear();
+    point.insert(point.begin(), buf.begin(), buf.end());
     return true;
   };
 
@@ -264,15 +274,16 @@ void read_points(const std::vector<std::string>           &file_names,
 }  // namespace saltatlas::dndetail
 
 namespace saltatlas {
-template <typename id_type, typename feature_element_type,
-          typename point_store_allocator_type>
+
+/// \brief Read points (feature vectors) using multiple processes.
+template <typename id_type, typename point_t, typename H, typename E,
+          typename PA>
 inline void read_points(
     const std::vector<std::string> &point_file_names,
     const std::string_view &format, const bool verbose,
-    const std::function<int(const id_type &id)>       &point_partitioner,
-    dndetail::point_store<id_type, feature_element_type,
-                          point_store_allocator_type> &local_point_store,
-    ygm::comm                                         &comm) {
+    const std::function<int(const id_type &id)> &point_partitioner,
+    point_store<id_type, point_t, H, E, PA>     &local_point_store,
+    ygm::comm                                   &comm) {
   if (format == "wsv") {
     if (verbose)
       comm.cout0() << "Read WSV format (whitespace separated, no ID) files"
@@ -426,13 +437,13 @@ inline void read_neighbors(const std::string_view                &file_path,
 /// \brief Reads a file that contain queries.
 /// Each line is the feature vector of a query point.
 /// Can read the white space separated format (without ID).
-/// \tparam feature_element_type Feature element type.
+/// \tparam point_t Point type.
 /// \param query_file_path Path to a query file.
 /// \param queries Buffer to store read queries.
-template <typename feature_element_type>
-inline void read_query(
-    const std::string_view                         &query_file_path,
-    std::vector<std::vector<feature_element_type>> &queries) {
+template <typename point_t>
+inline void read_query(const std::string_view &query_file_path,
+                       std::function<point_t(const std::string &)> parser,
+                       std::vector<point_t>                       &queries) {
   if (query_file_path.empty()) return;
 
   std::ifstream ifs(query_file_path.data());
@@ -442,20 +453,32 @@ inline void read_query(
   }
 
   for (std::string line; std::getline(ifs, line);) {
-    queries.push_back(dndetail::str_split<feature_element_type>(line));
+    queries.push_back(parser(line));
   }
 }
 
+/// \brief read_query function for reading feature vectors.
+template <typename point_t>
+inline void read_query(const std::string_view &query_file_path,
+                       std::vector<point_t>   &queries) {
+  read_query<point_t>(
+      query_file_path,
+      [](const std::string &line) {
+        auto data = dndetail::str_split<typename point_t::value_type>(line);
+        return point_t(data.begin(), data.end());
+      },
+      queries);
+}
+
 /// \brief
-/// \tparam feature_element_type
+/// \tparam point_t
 /// \param query_file_path
 /// \param queries
 /// \param comm
-template <typename feature_element_type>
+template <typename point_t>
 inline void read_query(const std::string_view &query_file_path,
-                       std::vector<std::vector<feature_element_type>> &queries,
-                       ygm::comm                                      &comm) {
-  std::vector<std::vector<feature_element_type>> global_store;
+                       std::vector<point_t> &queries, ygm::comm &comm) {
+  std::vector<point_t> global_store;
   if (comm.rank0()) {
     read_query(query_file_path, global_store);
   }

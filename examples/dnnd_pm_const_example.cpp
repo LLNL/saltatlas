@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Lawrence Livermore National Security, LLC and other
+// Copyright 2020-2024 Lawrence Livermore National Security, LLC and other
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
@@ -16,7 +16,7 @@ struct option_t {
   double                   delta{0.001};
   bool                     exchange_reverse_neighbors{true};
   std::size_t              batch_size{1ULL << 29};
-  std::string              distance_metric_name;
+  std::string              distance_name;
   std::vector<std::string> point_file_names;
   std::string              point_file_format;
   std::string              dnnd_init_index_path;
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
 
   {
     dnnd_pm_type dnnd(dnnd_pm_type::create, opt.datastore_path,
-                      opt.distance_metric_name, comm, std::random_device{}(),
+                      opt.distance_name, comm, std::random_device{}(),
                       opt.verbose);
 
     comm.cout0() << "\n<<Read Points>>" << std::endl;
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
 }
 
 inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
-  option.distance_metric_name.clear();
+  option.distance_name.clear();
   option.point_file_names.clear();
   option.point_file_format.clear();
   option.dnnd_init_index_path.clear();
@@ -171,7 +171,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
         break;
 
       case 'f':
-        option.distance_metric_name = optarg;
+        option.distance_name = optarg;
         break;
 
       case 'z':
@@ -231,7 +231,7 @@ inline bool parse_options(int argc, char **argv, option_t &option, bool &help) {
     option.point_file_names.emplace_back(argv[index]);
   }
 
-  if (option.datastore_path.empty() || option.distance_metric_name.empty() ||
+  if (option.datastore_path.empty() || option.distance_name.empty() ||
       option.point_file_format.empty() || option.point_file_names.empty()) {
     return false;
   }
@@ -285,18 +285,15 @@ void usage(std::string_view exe_name, cout_type &cout) {
       << "\n\t-D [string] If specified, dump the k-NN index to files starting "
          "with this prefix (one file per process). A line starts from the "
          "corresponding source ID followed by the list of neighbor IDs."
-      << "\n\t-M If specified, dump the k-NN index with distances."
-      << "\n"
-      << "\n\t-R If specified, do not store the dataset with the index."
-      << "\n"
+      << "\n\t-M If specified, dump the k-NN index with distances." << "\n"
+      << "\n\t-R If specified, do not store the dataset with the index." << "\n"
       << "\n\t-v If specified, turn on the verbose mode."
       << "\n\t-h Show this menu." << std::endl;
 }
 
 void show_options(const option_t &opt, ygm::comm &comm) {
-  comm.cout0() << "\nOptions:"
-               << "\nDatastore path\t" << opt.datastore_path
-               << "\nDistance metric name\t" << opt.distance_metric_name
+  comm.cout0() << "\nOptions:" << "\nDatastore path\t" << opt.datastore_path
+               << "\nDistance metric name\t" << opt.distance_name
                << "\nPoint file format\t" << opt.point_file_format << "\nk\t"
                << opt.index_k << "\nr\t" << opt.r << "\ndelta\t" << opt.delta
                << "\nExchange reverse neighbors\t"

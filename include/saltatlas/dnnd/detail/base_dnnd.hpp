@@ -1,4 +1,4 @@
-// Copyright 2022 Lawrence Livermore National Security, LLC and other
+// Copyright 2020-2024 Lawrence Livermore National Security, LLC and other
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
@@ -19,65 +19,66 @@
 #include <saltatlas/dnnd/detail/dnnd_kernel.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/nn_index_optimizer.hpp>
-#include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
+#include <saltatlas/dnnd/feature_vector.hpp>
+#include "saltatlas/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
 /// \brief The class the holds member variables of base_dnnd class.
 /// \tparam Id Point ID type.
-/// \tparam FeatureElement Feature Vector's element type.
+/// \tparam Point Point type.
 /// \tparam Distance Distance type.
 /// \tparam Allocator Allocator type.
-template <typename Id, typename FeatureElement, typename Distance,
-          typename Allocator>
+template <typename Id, typename Point, typename Distance, typename Allocator>
 struct data_core {
-  using id_type              = Id;
-  using feature_element_type = FeatureElement;
-  using distance_type        = Distance;
-  using allocator_type       = Allocator;
-  using point_store_type =
-      dndetail::point_store<id_type, feature_element_type, allocator_type>;
+  using id_type          = Id;
+  using point_type       = Point;
+  using distance_type    = Distance;
+  using allocator_type   = Allocator;
+  using point_store_type = point_store<id_type, point_type, std::hash<id_type>,
+                                       std::equal_to<>, allocator_type>;
   using knn_index_type =
       dndetail::nn_index<id_type, distance_type, allocator_type>;
 
-  data_core(const dndetail::distance::metric_id _metric_id,
-            const uint64_t                      _rnd_seed,
-            const allocator_type                allocator = allocator_type())
-      : metric_id(_metric_id),
+  data_core(const saltatlas::distance::id _distance_id,
+            const uint64_t                _rnd_seed,
+            const allocator_type          allocator = allocator_type())
+      : distance_id(_distance_id),
         rnd_seed(_rnd_seed),
-        point_store(allocator),
+        pstore(allocator),
         knn_index(allocator) {}
 
-  dndetail::distance::metric_id metric_id;
-  uint64_t                      rnd_seed;
-  point_store_type              point_store;
-  knn_index_type                knn_index;
-  std::size_t                   index_k{0};
+  saltatlas::distance::id distance_id;
+  uint64_t                rnd_seed;
+  point_store_type        pstore;
+  knn_index_type          knn_index;
+  std::size_t             index_k{0};
 };
 
 /// \brief Base class of the Distributed NNDescent.
 /// \tparam Id Point ID type.
-/// \tparam FeatureElement Feature vector element type.
+/// \tparam PointType Point type.
 /// \tparam Distance Distance type.
-template <typename Id = uint64_t, typename FeatureElement = double,
+template <typename Id = uint64_t, typename PointType = feature_vector<double>,
           typename Distance  = double,
           typename Allocator = std::allocator<std::byte>>
 class base_dnnd {
  private:
-  using self_type = base_dnnd<Id, FeatureElement, Distance, Allocator>;
+  using self_type = base_dnnd<Id, PointType, Distance, Allocator>;
 
  protected:
-  using data_core_type = data_core<Id, FeatureElement, Distance, Allocator>;
+  using data_core_type = data_core<Id, PointType, Distance, Allocator>;
 
  public:
-  using id_type              = typename data_core_type::id_type;
-  using feature_element_type = typename data_core_type::feature_element_type;
-  using distance_type        = typename data_core_type::distance_type;
-  using point_store_type     = typename data_core_type::point_store_type;
-  using knn_index_type       = typename data_core_type::knn_index_type;
-  using feature_vector_type  = typename point_store_type::feature_vector_type;
-  using neighbor_type        = typename knn_index_type::neighbor_type;
+  using id_type          = typename data_core_type::id_type;
+  using point_type       = typename data_core_type::point_type;
+  using distance_type    = typename data_core_type::distance_type;
+  using point_store_type = typename data_core_type::point_store_type;
+  using knn_index_type   = typename data_core_type::knn_index_type;
+  using neighbor_type    = typename knn_index_type::neighbor_type;
+  using distance_function_type =
+      distance::distance_function_type<point_type, distance_type>;
 
  private:
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
@@ -96,14 +97,21 @@ class base_dnnd {
     m_comm.cf_barrier();
   }
 
+  ~base_dnnd() noexcept = default;
+
+  base_dnnd(const base_dnnd&)                = delete;
+  base_dnnd& operator=(const base_dnnd&)     = delete;
+  base_dnnd(base_dnnd&&) noexcept            = default;
+  base_dnnd& operator=(base_dnnd&&) noexcept = default;
+
   /// \brief Return a reference to the point store instance.
   /// \return  A reference to the point store instance.
-  point_store_type& get_point_store() { return m_data_core->point_store; }
+  point_store_type& get_point_store() { return m_data_core->pstore; }
 
   /// \brief Return a reference to the point store instance.
   /// \return  A reference to the point store instance.
   const point_store_type& get_point_store() const {
-    return m_data_core->point_store;
+    return m_data_core->pstore;
   }
 
   /// \brief Return a reference to a knn index instance.
@@ -199,14 +207,12 @@ class base_dnnd {
         .pruning_degree_multiplier = pruning_degree_multiplier,
         .remove_long_paths         = remove_long_paths,
         .verbose                   = m_verbose};
-    nn_index_optimizer_type optimizer{
-        opt,
-        m_data_core->point_store,
-        get_point_partitioner(),
-        dndetail::distance::metric<feature_element_type, distance_type>(
-            m_data_core->metric_id),
-        m_data_core->knn_index,
-        m_comm};
+    nn_index_optimizer_type optimizer{opt,
+                                      m_data_core->pstore,
+                                      get_point_partitioner(),
+                                      m_distance_function,
+                                      m_data_core->knn_index,
+                                      m_comm};
     optimizer.run();
   }
 
@@ -220,10 +226,10 @@ class base_dnnd {
   /// Specifically, k nearest neighbor data of the i-th query is stored in the
   /// i-th inner vector. Each inner vector contains pairs of a neighbor ID and a
   /// distance to the neighbor from the query point.
-  neighbor_store_type query_batch(
-      const std::vector<std::vector<feature_element_type>>& queries,
-      const int k, const double epsilon, const double mu,
-      const std::size_t batch_size) {
+  neighbor_store_type query_batch(const std::vector<point_type>& queries,
+                                  const int k, const double epsilon,
+                                  const double      mu,
+                                  const std::size_t batch_size) {
     typename query_kernel_type::option option{.k          = k,
                                               .epsilon    = epsilon,
                                               .mu         = mu,
@@ -231,11 +237,9 @@ class base_dnnd {
                                               .rnd_seed = m_data_core->rnd_seed,
                                               .verbose  = m_verbose};
 
-    query_kernel_type kernel(
-        option, m_data_core->point_store, get_point_partitioner(),
-        dndetail::distance::metric<feature_element_type, distance_type>(
-            m_data_core->metric_id),
-        m_data_core->knn_index, m_comm);
+    query_kernel_type kernel(option, m_data_core->pstore,
+                             get_point_partitioner(), m_distance_function,
+                             m_data_core->knn_index, m_comm);
 
     neighbor_store_type query_result;
     kernel.query_batch(queries, query_result);
@@ -256,13 +260,13 @@ class base_dnnd {
   /// neighbor. The dummy value is just a placeholder so that each neighbor id
   /// and distance pair is stored in the same column.
   bool dump_index(const std::string_view out_file_prefix,
-                  const bool             dump_distance = false) {
+                  const bool             dump_distance = false) const {
     return priv_dump_index_distributed_file(out_file_prefix, dump_distance);
   }
 
   /// \brief Returns the distance metric name.
-  std::string get_distance_metric_name() const {
-    return dndetail::distance::convert_to_metric_name(m_data_core->metric_id);
+  std::string get_distance_name() const {
+    return distance::convert_to_distance_name(m_data_core->distance_id);
   }
 
   /// \brief Returns YGM communicator.
@@ -270,15 +274,24 @@ class base_dnnd {
 
  protected:
   /// \brief Initialize the internal data core instance.
-  /// The internal data core instance must be uninitialized when this function
-  /// is called.
   /// \param data_core A data core instance.
-  void init_data_core(data_core_type& data_core) {
+  void init_data_core(data_core_type&               data_core,
+                      const distance_function_type& distance_function) {
     if (m_data_core) {
       m_comm.cerr0() << "Data core is already initialized." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
     m_data_core = &data_core;
+
+    m_distance_function = distance_function;
+  }
+
+  /// \brief init_data_core for using a pre-defined distance function.
+  /// The data core argument must contain a valid distance function ID.
+  void init_data_core(data_core_type& data_core) {
+    init_data_core(data_core,
+                   distance::distance_function<point_type, distance_type>(
+                       data_core.distance_id));
   }
 
  private:
@@ -295,17 +308,14 @@ class base_dnnd {
         .rnd_seed                   = m_data_core->rnd_seed,
         .verbose                    = m_verbose};
 
-    nn_kernel_type kernel(
-        option, m_data_core->point_store, get_point_partitioner(),
-        dndetail::distance::metric<feature_element_type, distance_type>(
-            m_data_core->metric_id),
-        m_comm);
+    nn_kernel_type kernel(option, m_data_core->pstore, get_point_partitioner(),
+                          m_distance_function, m_comm);
 
     return kernel;
   }
 
   bool priv_dump_index_distributed_file(const std::string_view out_file_prefix,
-                                        const bool             dump_distance) {
+                                        const bool dump_distance) const {
     std::stringstream file_name;
     file_name << out_file_prefix << "-" << m_comm.rank();
     const auto ret =
@@ -317,6 +327,7 @@ class base_dnnd {
   ygm::comm&              m_comm;
   bool                    m_verbose{false};
   ygm::ygm_ptr<self_type> m_self{this};
+  distance_function_type  m_distance_function;
 };
 
 }  // namespace saltatlas::dndetail

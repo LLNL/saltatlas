@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Lawrence Livermore National Security, LLC and other
+// Copyright 2020-2024 Lawrence Livermore National Security, LLC and other
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
@@ -24,10 +24,10 @@ int main(int argc, char **argv) {
   double                   mu{0.0};
   bool                     exchange_reverse_neighbors{true};
   bool                     make_index_undirected{true};
-  double                   pruning_degree_multiplier{0.0}; // No pruning
+  double                   pruning_degree_multiplier{0.0};  // No pruning
   bool                     remove_long_paths{false};
-  std::size_t              batch_size{1ULL << 31};
-  std::string              distance_metric_name{"l2"};
+  std::size_t              batch_size{1ULL << 29};
+  std::string              distance_name{"l2"};
   std::vector<std::string> point_file_paths{
       "./examples/datasets/point_5-4.txt"};
   std::string query_file_path{"./examples/datasets/query_5-4.txt"};
@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
   std::string query_result_file_path{"query-results"};
   bool        verbose{true};
 
-  dnnd_type dnnd(distance_metric_name, comm, std::random_device{}(), verbose);
+  dnnd_type dnnd(distance_name, comm, std::random_device{}(), verbose);
   comm.cf_barrier();
 
   comm.cout0() << "<<Read Points>>" << std::endl;
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
                       remove_long_paths);
 
   comm.cout0() << "\n<<Query>>" << std::endl;
-  dnnd_pm_type::query_store_type queries;
+  std::vector<dnnd_type::point_type> queries;
   saltatlas::read_query(query_file_path, queries, comm);
 
   comm.cout0() << "Executing queries" << std::endl;
@@ -64,7 +64,8 @@ int main(int argc, char **argv) {
   comm.cout0() << "\nRecall scores" << std::endl;
   show_query_recall_score(query_results, ground_truth_file_path, comm);
 
-  comm.cout0() << "\nDump query results to " << query_result_file_path << std::endl;
+  comm.cout0() << "\nDump query results to " << query_result_file_path
+               << std::endl;
   saltatlas::utility::gather_and_dump_neighbors(query_results,
                                                 query_result_file_path, comm);
 

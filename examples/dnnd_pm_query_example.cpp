@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
     dnnd_pm_type dnnd(dnnd_pm_type::open_read_only, opt.datastore_path, comm,
                       opt.verbose);
 
-    dnnd_pm_type::query_store_type queries;
+    std::vector<dnnd_pm_type::point_type> queries;
     saltatlas::read_query(opt.query_file_path, queries, comm);
 
     comm.cout0() << "Executing queries" << std::endl;

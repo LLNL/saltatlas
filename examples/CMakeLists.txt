@@ -39,6 +39,7 @@ endfunction()
 
 if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_example)
+    add_saltatlas_example(dnnd_custom_point_example)
     add_saltatlas_example(dnnd_string_example)
     add_saltatlas_example(dnnd_pm_const_example)
     add_saltatlas_example(dnnd_pm_optimize_example)

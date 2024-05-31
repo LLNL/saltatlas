@@ -17,10 +17,10 @@
 #include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
-#include <saltatlas/dnnd/detail/point_store.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include <saltatlas/dnnd/detail/utilities/general.hpp>
 #include <saltatlas/dnnd/detail/utilities/mpi.hpp>
+#include "saltatlas/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -31,49 +31,50 @@ class dknn_batch_query_kernel {
       "ID types do not match.");
 
  public:
-  using id_type              = typename PointStore::id_type;
-  using distance_type        = typename KNNIndex::distance_type;
-  using feature_element_type = typename PointStore::feature_element_type;
+  using id_type       = typename PointStore::id_type;
+  using distance_type = typename KNNIndex::distance_type;
+  using point_type    = typename PointStore::point_type;
 
   // Redefine point store type so that autocompletion works when writing code.
-  using point_store_type = point_store<id_type, feature_element_type,
-                                       typename PointStore::allocator_type>;
+  using point_store_type =
+      point_store<id_type, point_type, typename PointStore::hasher,
+                  typename PointStore::equal_to,
+                  typename PointStore::allocator_type>;
   // Redefine index store type so that autocompletion works when writing code.
   using nn_index_type =
       nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
 
   using point_partitioner = std::function<int(const id_type& id)>;
-  using distance_metric =
-      distance::metric_type<feature_element_type, distance_type>;
+  using distance_function_type =
+      distance::distance_function_type<point_type, distance_type>;
   using neighbor_type = typename nn_index_type::neighbor_type;
 
   // These data stores are allocated on DRAM
-  using query_store_type    = std::vector<std::vector<feature_element_type>>;
+  using query_store_type    = std::vector<point_type>;
   using neighbor_store_type = std::vector<std::vector<neighbor_type>>;
 
   struct option {
     int         k{4};
     double      epsilon{0.1};
-    double      mu{0.2};
+    double      mu{0.0};
     std::size_t batch_size{0};
     uint64_t    rnd_seed{128};
     bool        verbose{false};
   };
 
-  dknn_batch_query_kernel(const option&            opt,
-                          const point_store_type&  point_store,
-                          const point_partitioner& partitioner,
-                          const distance_metric&   metric,
+  dknn_batch_query_kernel(const option&                 opt,
+                          const point_store_type&       point_store,
+                          const point_partitioner&      partitioner,
+                          const distance_function_type& distance_function,
                           const nn_index_type& nn_index, ygm::comm& comm)
       : m_option(opt),
         m_point_store(point_store),
         m_point_partitioner(partitioner),
-        m_distance_metric(metric),
+        m_distance_function(distance_function),
         m_nn_index(nn_index),
         m_comm(comm),
         m_rnd_generator(m_option.rnd_seed + m_comm.rank()) {
-    m_global_max_id = m_comm.all_reduce_max(m_point_store.max_id());
-    m_comm.cf_barrier();
+    priv_find_max_id();
     m_self.check(m_comm);
   }
 
@@ -89,7 +90,15 @@ class dknn_batch_query_kernel {
   using self_pointer_type   = ygm::ygm_ptr<self_type>;
   using knn_heap_type       = unique_knn_heap<id_type, distance_type>;
   using knn_heap_table_type = std::unordered_map<std::size_t, knn_heap_type>;
-  using internal_query_store_type = point_store<id_type, feature_element_type>;
+  using internal_query_store_type = point_store<id_type, point_type>;
+
+  void priv_find_max_id() {
+    m_global_max_id = 0;
+    for (const auto& [id, _] : m_point_store) {
+      m_global_max_id = std::max(m_global_max_id, id);
+    }
+    m_global_max_id = m_comm.all_reduce_max(m_global_max_id);
+  }
 
   id_type priv_all_gather_query(const query_store_type& queries) {
     const std::size_t max_num_queries = m_comm.all_reduce_max(queries.size());
@@ -101,9 +110,9 @@ class dknn_batch_query_kernel {
         m_comm.async(
             r,
             [](const ygm::ygm_ptr<self_type>& dst_self, const id_type id,
-               const auto& q) {
+               const point_type& q) {
               assert(!dst_self->m_query_store.contains(id));
-              dst_self->m_query_store.set(id, q.begin(), q.end());
+              dst_self->m_query_store[id] = q;
             },
             m_self, i + offset, queries[i]);
       }
@@ -185,7 +194,7 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "#of remaining queries\t" << num_global_remains
                        << std::endl;
       }
-    } // end of all queries
+    }  // end of all queries
     if (m_comm.all_reduce_sum(num_local_remains) > 0) {
       m_comm.cout0() << "Logic error!! Not all queries have been processed"
                      << std::endl;
@@ -247,14 +256,10 @@ class dknn_batch_query_kernel {
     void operator()(const self_pointer_type& local_this,
                     const int query_owner_rank, const std::size_t query_no,
                     const id_type trg_id, const distance_type& max_distance) {
-      const auto& query_feature =
-          local_this->m_query_store.feature_vector(query_no);
+      const auto& query_point = local_this->m_query_store[query_no];
       assert(local_this->m_point_store.contains(trg_id));
-      const auto& trg_feature =
-          local_this->m_point_store.feature_vector(trg_id);
-      const auto d = local_this->m_distance_metric(
-          query_feature.data(), query_feature.size(), trg_feature.data(),
-          trg_feature.size());
+      const auto& trg_point = local_this->m_point_store[trg_id];
+      const auto  d = local_this->m_distance_function(query_point, trg_point);
       if (d >= max_distance) return;
 
       local_this->comm().async(query_owner_rank, neighbor_updator{}, local_this,
@@ -301,17 +306,17 @@ class dknn_batch_query_kernel {
     }
   };
 
-  option                    m_option;
-  const point_store_type&   m_point_store;
-  const point_partitioner   m_point_partitioner;
-  const distance_metric&    m_distance_metric;
-  const nn_index_type&      m_nn_index;
-  ygm::comm&                m_comm;
-  self_pointer_type         m_self{this};
-  knn_heap_table_type       m_knn_heap_table;
-  id_type                   m_global_max_id{0};
-  internal_query_store_type m_query_store;
-  std::mt19937              m_rnd_generator;
+  option                        m_option;
+  const point_store_type&       m_point_store;
+  const point_partitioner       m_point_partitioner;
+  const distance_function_type& m_distance_function;
+  const nn_index_type&          m_nn_index;
+  ygm::comm&                    m_comm;
+  self_pointer_type             m_self{this};
+  knn_heap_table_type           m_knn_heap_table;
+  id_type                       m_global_max_id{0};
+  internal_query_store_type     m_query_store;
+  std::mt19937                  m_rnd_generator;
   std::unordered_map<std::size_t, std::unordered_set<id_type>> m_visited;
 };
 

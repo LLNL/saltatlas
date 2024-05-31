@@ -197,13 +197,12 @@ endif ()
 #
 # YGM
 #
-set(SALTATLAS_YGM_VERSION 0.5)
-find_package(ygm ${SALTATLAS_YGM_VERSION} QUIET CONFIG)
+find_package(ygm 0.7 QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
         GIT_REPOSITORY https://github.com/LLNL/ygm.git
-        GIT_TAG develop # v${SALTATLAS_YGM_VERSION}
+        GIT_TAG v0.7-dev
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
