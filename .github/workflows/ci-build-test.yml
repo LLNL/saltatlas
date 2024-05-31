@@ -12,5 +12,5 @@ jobs:
       - name: Build w/o HDF5 w/ Metall
         run: |
           mkdir build && cd build
-          cmake ../ -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
+          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
           make -j
