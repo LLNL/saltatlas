@@ -78,7 +78,7 @@ class dnnd_pm : public dndetail::base_dnnd<
           const bool     verbose  = false)
       : base_type(verbose, comm) {
     priv_create(datastore_path, distance_name, rnd_seed);
-    base_type::init_data_core(*m_data_core);
+    base_type::set_data_core(*m_data_core);
     comm.cf_barrier();
   }
 
@@ -90,7 +90,7 @@ class dnnd_pm : public dndetail::base_dnnd<
           const bool verbose = false)
       : base_type(verbose, comm) {
     priv_open(datastore_path);
-    base_type::init_data_core(*m_data_core);
+    base_type::set_data_core(*m_data_core);
     comm.cf_barrier();
   }
 
@@ -102,7 +102,7 @@ class dnnd_pm : public dndetail::base_dnnd<
           ygm::comm& comm, const bool verbose = false)
       : base_type(verbose, comm) {
     priv_open_read_only(datastore_path);
-    base_type::init_data_core(*m_data_core);
+    base_type::set_data_core(*m_data_core);
     comm.cf_barrier();
   }
 

@@ -74,7 +74,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
        const bool     verbose  = false)
       : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
     m_data_core.distance_id = did;
-    base_type::init_data_core(m_data_core);
+    base_type::set_data_core(m_data_core);
   }
 
   /// \brief Constructor.
@@ -86,7 +86,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
       : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
-    base_type::init_data_core(m_data_core, distance_func);
+    base_type::set_data_core(m_data_core, distance_func);
   }
 
   /// \brief Add points to the internal point store.
