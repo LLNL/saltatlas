@@ -3,8 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-#ifndef SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_
-#define SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_
+#pragma once
 
 #include <filesystem>
 #include <string_view>
@@ -25,21 +24,33 @@ namespace saltatlas {
 template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
           typename Distance = double>
-class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
+class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change to use composition model rather than inheritance
  private:
   using base_type      = dndetail::base_dnnd<Id, Point, Distance>;
   using data_core_type = typename base_type::data_core_type;
+  /// \brief Point store type.
+  using point_store_type = typename base_type::point_store_type;
+  /// \brief k-NN index type.
+  using knn_index_type = typename base_type::knn_index_type;
+  /// \brief Point partitioner type.
+  using point_partitioner = typename base_type::point_partitioner;
 
  public:
-  using id_type                = typename base_type::id_type;
-  using distance_type          = typename base_type::distance_type;
-  using point_store_type       = typename base_type::point_store_type;
-  using knn_index_type         = typename base_type::knn_index_type;
-  using point_type             = typename base_type::point_type;
-  using neighbor_type          = typename base_type::neighbor_type;
-  using query_store_type       = typename base_type::query_store_type;
-  using point_partitioner      = typename base_type::point_partitioner;
-  using neighbor_store_type    = typename base_type::neighbor_store_type;
+  /// \brief Point ID type.
+  using id_type = typename base_type::id_type;
+  /// \brief Distance type.
+  using distance_type = typename base_type::distance_type;
+  /// \brief Point type.
+  using point_type = typename base_type::point_type;
+  /// \brief Neighbor type (contains a neighbor ID and the distance to the
+  /// neighbor).
+  using neighbor_type = typename base_type::neighbor_type;
+  /// \brief Query result store type. Specifically,
+  /// std::vector<std::vector<neighbor_type>>.
+  using neighbor_store_type = typename base_type::neighbor_store_type;
+  /// \brief Distance function type.
+  /// Specifically, std::function<distance_type(const point_type &, const
+  /// point_type &)>.
   using distance_function_type = typename base_type::distance_function_type;
   using iterator_proxy_type =
       dndetail::iterator_proxy<typename point_store_type::const_iterator>;
@@ -62,7 +73,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
        const bool     verbose  = false)
       : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
     m_data_core.distance_id = did;
-    base_type::init_data_core(m_data_core);
+    base_type::set_data_core(m_data_core);
   }
 
   /// \brief Constructor.
@@ -74,9 +85,16 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
       : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
-    base_type::init_data_core(m_data_core, distance_func);
+    base_type::set_data_core(m_data_core, distance_func);
   }
 
+  /// \brief Add points to the internal point store.
+  /// \tparam id_iterator Iterator type for point IDs.
+  /// \tparam point_iterator Iterator type for points.
+  /// \param ids_begin Iterator to the beginning of point IDs.
+  /// \param ids_end Iterator to the end of point IDs.
+  /// \param points_begin Iterator to the beginning of points.
+  /// \param points_end Iterator to the end of points.
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
@@ -88,6 +106,14 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
     }
   }
 
+  /// \brief Load points from files and add to the internal point store.
+  /// \tparam paths_iterator Iterator type for file paths.
+  /// \param paths_begin Iterator to the beginning of file paths.
+  /// \param paths_end Iterator to the end of file paths.
+  /// \param file_format File format. Supported formats are 'csv' (CSV),
+  /// 'csv-id' (CSV with IDs in the first column), 'wsv' (whitespace-separated
+  /// values), and 'wsv-id' (whitespace-separated values with IDs in the first
+  /// column).
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
                    const std::string_view file_format) {
@@ -105,6 +131,13 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
                            base_type::get_point_store(), base_type::get_comm());
   }
 
+  /// \brief Load points from files and add to the internal point store.
+  /// This function assumes that there is one point per line.
+  /// \tparam paths_iterator Iterator type for file paths.
+  /// \param paths_begin Iterator to the beginning of file paths.
+  /// \param paths_end Iterator to the end of file paths.
+  /// \param line_parser A function that parses a line and returns a pair of
+  /// point ID and point data.
   template <typename paths_iterator>
   void load_points(
       paths_iterator paths_begin, paths_iterator paths_end,
@@ -125,43 +158,88 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
         base_type::get_point_partitioner(), base_type::get_comm(), false);
   }
 
+  /// \brief Build a KNNG.
+  /// \param k Number of neighbors per point.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
   void build(const int k, const double rho = 0.8, const double delta = 0.001) {
     base_type::construct_index(k, rho, delta, false, 1 << 28);
   }
 
+  /// \brief Apply optimizations to an already constructed KNNG aiming at
+  /// improving the query quality and performance.
+  /// \param make_index_undirected If true, make the index undirected.
+  /// \param make_index_undirected If true, make the graph undirected.
+  /// \param pruning_degree_multiplier
+  /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
+  /// where k is the number of neighbors each point in the index has.
+  /// if this value is less than 0, there is no pruning.
   void optimize(const bool   make_index_undirected     = true,
                 const double pruning_degree_multiplier = 1.5) {
     base_type::optimize_index(make_index_undirected, pruning_degree_multiplier,
                               false);
   }
 
+  /// \brief Query nearest neighbors of given points.
+  /// This function assumes that the query points are already distributed.
+  /// Query results are returned to the MPI rank that submitted the queries.
+  /// \tparam query_iterator Iterator type for query points.
+  /// \param queries_begin Iterator to the beginning of query points.
+  /// \param queries_end Iterator to the end of query points.
+  /// \param k The number of nearest neighbors to search for each point.
+  /// \param epsilon The epsilon parameter in the search.
+  /// \return Computed k nearest neighbors of the given points.
+  /// Returned as an adjacency list (vector of vectors).
+  /// Specifically, k nearest neighbor data of the i-th query is stored in the
+  /// i-th inner vector. Each inner vector contains pairs of a neighbor ID and a
+  /// distance to the neighbor from the query point.
   template <typename query_iterator>
-  auto query(query_iterator queries_begin, query_iterator queries_end,
-             const int k, const double epsilon = 0.1) {
+  neighbor_store_type query(query_iterator queries_begin,
+                            query_iterator queries_end, const int k,
+                            const double epsilon = 0.1) {
     std::vector<point_type> queries(queries_begin, queries_end);
     return base_type::query_batch(queries, k, epsilon, 0.0, 1 << 28);
   }
 
+  /// \brief Dump the k-NN index to distributed files.
+  /// \param out_file_prefix File path prefix.
+  /// \param dump_distance If true, also dump distances
+  /// \details For each neighbor list, the following lines are dumped:
+  /// ```
+  /// source_id neighbor_id_1 neighbor_id_2 ...
+  /// 0.0 distance_1 distance_2 ...
+  /// ```
+  /// Each item is separated by a tab. The first line is the source id and
+  /// neighbor ids. The second line is the dummy value and distances to each
+  /// neighbor. The dummy value is just a placeholder so that each neighbor id
+  /// and distance pair is stored in the same column.
   void dump_graph(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
     base_type::dump_index(path.string(), dump_distance);
   }
 
+  /// \brief Check if the local point store contains a point with the given ID.
+  /// \param id Point ID.
   bool contains_local(const id_type id) const {
     return base_type::get_point_store().contains(id);
   }
 
+  /// \brief Get a point with the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
     return base_type::get_point_store().at(id);
   }
 
+  /// \brife Returns an iterator that points to the beginning of the locally
+  /// stored points.
   auto local_points_begin() const {
     return base_type::get_point_store().begin();
   }
 
+  /// \brief Returns an iterator that points to the end of the locally stored
+  /// points.
   auto local_points_end() const { return base_type::get_point_store().end(); }
 
-  // API for using for_each
+  // API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
     return iterator_proxy_type(local_points_begin(), local_points_end());
   }
@@ -171,5 +249,3 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
 };
 
 }  // namespace saltatlas
-
-#endif  // SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_

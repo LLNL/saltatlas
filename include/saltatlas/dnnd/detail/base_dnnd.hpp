@@ -50,7 +50,7 @@ struct data_core {
         knn_index(allocator) {}
 
   saltatlas::distance::id distance_id;
-  uint64_t                rnd_seed;
+  uint64_t                rnd_seed;  // TODO: does not have to hold?
   point_store_type        pstore;
   knn_index_type          knn_index;
   std::size_t             index_k{0};
@@ -122,6 +122,7 @@ class base_dnnd {
   /// \return A point partitioner instance.
   point_partitioner get_point_partitioner() const {
     const int size = m_comm.size();
+    // TODO: hash id?
     return [size](const id_type& id) { return id % size; };
   };
 
@@ -275,8 +276,8 @@ class base_dnnd {
  protected:
   /// \brief Initialize the internal data core instance.
   /// \param data_core A data core instance.
-  void init_data_core(data_core_type&               data_core,
-                      const distance_function_type& distance_function) {
+  void set_data_core(data_core_type&               data_core,
+                     const distance_function_type& distance_function) {
     if (m_data_core) {
       m_comm.cerr0() << "Data core is already initialized." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -286,12 +287,12 @@ class base_dnnd {
     m_distance_function = distance_function;
   }
 
-  /// \brief init_data_core for using a pre-defined distance function.
+  /// \brief set_data_core for using a pre-defined distance function.
   /// The data core argument must contain a valid distance function ID.
-  void init_data_core(data_core_type& data_core) {
-    init_data_core(data_core,
-                   distance::distance_function<point_type, distance_type>(
-                       data_core.distance_id));
+  void set_data_core(data_core_type& data_core) {
+    set_data_core(data_core,
+                  distance::distance_function<point_type, distance_type>(
+                      data_core.distance_id));
   }
 
  private:
@@ -323,11 +324,10 @@ class base_dnnd {
     return ret;
   }
 
-  data_core_type*         m_data_core{nullptr};
-  ygm::comm&              m_comm;
-  bool                    m_verbose{false};
-  ygm::ygm_ptr<self_type> m_self{this};
-  distance_function_type  m_distance_function;
+  data_core_type* m_data_core{nullptr};
+  ygm::comm&      m_comm;
+  bool m_verbose{false};  // TODO: make this changeable after construction
+  distance_function_type m_distance_function;
 };
 
 }  // namespace saltatlas::dndetail

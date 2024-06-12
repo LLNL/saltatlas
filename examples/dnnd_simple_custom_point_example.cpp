@@ -3,6 +3,13 @@
 //
 // SPDX-License-Identifier: MIT
 
+/// \brief A simple example of using DNND's simple API with a custom point type
+/// and custom distance function.
+/// It is recommended to see the examples/dnnd_simple_example.cpp beforehand.
+/// Usage:
+///     cd build
+///     mpirun -n 2 ./example/dnnd_simple_custom_point_example
+
 #include <iostream>
 #include <vector>
 
@@ -39,6 +46,7 @@ int main(int argc, char** argv) {
 
   // Add points
   {
+    // Assuming ids and points are stored in vectors
     std::vector<id_t>        ids;
     std::vector<graph_point> points;
     g.add_points(ids.begin(), ids.end(), points.begin(), points.end());
