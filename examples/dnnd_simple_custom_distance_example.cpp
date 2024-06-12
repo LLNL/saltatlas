@@ -3,10 +3,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-/// \brief A simple example of using the DNND's simple API.
+/// \brief A simple example of using DNND's simple with a custom distance function.
+/// It is recommended to see the examples/dnnd_simple_example.cpp beforehand.
 /// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_simple_example
+///     mpirun -n 2 ./example/dnnd_simple_custom_distance_example
 
 #include <iostream>
 #include <vector>
@@ -19,22 +20,25 @@
 using id_t   = uint32_t;
 using dist_t = double;
 
-// ----- Point Type ----- //
+// Point Type
 using point_type = saltatlas::feature_vector<float>;
+
+// Custom distance function
+// The distance function should have the signature as follows:
+// distance_type(const point_type& a, const point_type& b);
+dist_t custom_distance(const point_type& p1, const point_type& p2) {
+  // A simple (squared) L2 distance example
+  dist_t dist = 0.0;
+  for (size_t i = 0; i < p1.size(); ++i) {
+    dist += (p1[i] - p2[i]) * (p1[i] - p2[i]);
+  }
+  return dist;
+}
 
 int main(int argc, char** argv) {
   ygm::comm comm(&argc, &argv);
 
-  // Create a DNND object
-  // Use the squared L2 distance function
-  saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::distance::id::sql2,
-                                              comm);
-
-    // Load points from file(s)
-  // The file format is assumed to be whitespace-separated values (wsv)
-  // One point per line. Each feature value is separated by a whitespace.
-  // DNND assigns an ID to each point in the order they are loaded,
-  // i.e., ID is the line number starting from 0.
+  saltatlas::dnnd<id_t, point_type, dist_t> g(custom_distance, comm);
   std::vector<std::filesystem::path>        paths{
       "../examples/datasets/point_5-4.txt"};
   g.load_points(paths.begin(), paths.end(), "wsv");
@@ -54,7 +58,6 @@ int main(int argc, char** argv) {
   int        num_to_search = 4;
   const auto results = g.query(queries.begin(), queries.end(), num_to_search);
 
-  // Show the query results
   if (comm.rank() == 0) {
     std::cout << "Neighbours (id, distance):";
     for (const auto& [nn_id, nn_dist] : results[0]) {
@@ -62,29 +65,6 @@ int main(int argc, char** argv) {
     }
     std::cout << std::endl;
   }
-
-  // Point Data Accessors
-  id_t pid = 0;
-  if (g.contains_local(pid)) {
-    auto p0 = g.get_local_point(pid);
-    std::cout << "Point 0 : ";
-    for (const auto& v : p0) {
-      std::cout << v << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  // Point Data Accessors, another API
-  for (const auto& [id, point] : g.local_points()) {
-    comm.cout0() << "Point " << id << " : ";
-    for (const auto& v : point) {
-      comm.cout0() << v << " ";
-    }
-    comm.cout0() << std::endl;
-  }
-
-  // Dump a KNNG to files
-  g.dump_graph("./knng");
 
   return 0;
 }

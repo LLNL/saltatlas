@@ -3,8 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-#ifndef SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_
-#define SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_
+#pragma once
 
 #include <filesystem>
 #include <string_view>
@@ -25,7 +24,7 @@ namespace saltatlas {
 template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
           typename Distance = double>
-class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
+class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change to use composition model rather than inheritance
  private:
   using base_type      = dndetail::base_dnnd<Id, Point, Distance>;
   using data_core_type = typename base_type::data_core_type;
@@ -250,5 +249,3 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> {
 };
 
 }  // namespace saltatlas
-
-#endif  // SALTATLAS_INCLUDE_SALTATLAS_DNND_DNND_SIMPLE_HPP_
