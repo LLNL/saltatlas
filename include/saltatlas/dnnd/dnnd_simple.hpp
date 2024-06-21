@@ -24,7 +24,7 @@ namespace saltatlas {
 template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
           typename Distance = double>
-class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change to use composition model rather than inheritance
+class dnnd {
  private:
   using base_type      = dndetail::base_dnnd<Id, Point, Distance>;
   using data_core_type = typename base_type::data_core_type;
@@ -71,9 +71,9 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   dnnd(const distance::id& did, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
+      : m_base(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
     m_data_core.distance_id = did;
-    base_type::set_data_core(m_data_core);
+    m_base.set_data_core(m_data_core);
   }
 
   /// \brief Constructor.
@@ -84,8 +84,8 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   dnnd(const distance_function_type& distance_func, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
-    base_type::set_data_core(m_data_core, distance_func);
+      : m_base(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
+    m_base.set_data_core(m_data_core, distance_func);
   }
 
   /// \brief Add points to the internal point store.
@@ -98,7 +98,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
-    point_store_type& pstore = base_type::get_point_store();
+    point_store_type& pstore = m_base.get_point_store();
     pstore.reserve(std::distance(ids_begin, ids_end));
     for (auto id = ids_begin; id != ids_end; ++id) {
       pstore[*id] = *points_begin;
@@ -127,8 +127,8 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
       point_file_paths.push_back(path->string());
     }
     saltatlas::read_points(point_file_paths, file_format, false,
-                           base_type::get_point_partitioner(),
-                           base_type::get_point_store(), base_type::get_comm());
+                           m_base.get_point_partitioner(),
+                           m_base.get_point_store(), m_base.get_comm());
   }
 
   /// \brief Load points from files and add to the internal point store.
@@ -154,8 +154,8 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
     };
 
     saltatlas::dndetail::read_points_with_id_helper(
-        point_file_paths, parser_wrapper, base_type::get_point_store(),
-        base_type::get_point_partitioner(), base_type::get_comm(), false);
+        point_file_paths, parser_wrapper, m_base.get_point_store(),
+        m_base.get_point_partitioner(), m_base.get_comm(), false);
   }
 
   /// \brief Build a KNNG.
@@ -163,7 +163,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   void build(const int k, const double rho = 0.8, const double delta = 0.001) {
-    base_type::construct_index(k, rho, delta, false, 1 << 28);
+    m_base.construct_index(k, rho, delta, false, 1 << 28);
   }
 
   /// \brief Apply optimizations to an already constructed KNNG aiming at
@@ -176,8 +176,8 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   /// if this value is less than 0, there is no pruning.
   void optimize(const bool   make_index_undirected     = true,
                 const double pruning_degree_multiplier = 1.5) {
-    base_type::optimize_index(make_index_undirected, pruning_degree_multiplier,
-                              false);
+    m_base.optimize_index(make_index_undirected, pruning_degree_multiplier,
+                          false);
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -198,7 +198,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
     std::vector<point_type> queries(queries_begin, queries_end);
-    return base_type::query_batch(queries, k, epsilon, 0.0, 1 << 28);
+    return m_base.query_batch(queries, k, epsilon, 0.0, 1 << 28);
   }
 
   /// \brief Dump the k-NN index to distributed files.
@@ -215,29 +215,27 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   /// and distance pair is stored in the same column.
   void dump_graph(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
-    base_type::dump_index(path.string(), dump_distance);
+    m_base.dump_index(path.string(), dump_distance);
   }
 
   /// \brief Check if the local point store contains a point with the given ID.
   /// \param id Point ID.
   bool contains_local(const id_type id) const {
-    return base_type::get_point_store().contains(id);
+    return m_base.get_point_store().contains(id);
   }
 
   /// \brief Get a point with the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
-    return base_type::get_point_store().at(id);
+    return m_base.get_point_store().at(id);
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
   /// stored points.
-  auto local_points_begin() const {
-    return base_type::get_point_store().begin();
-  }
+  auto local_points_begin() const { return m_base.get_point_store().begin(); }
 
   /// \brief Returns an iterator that points to the end of the locally stored
   /// points.
-  auto local_points_end() const { return base_type::get_point_store().end(); }
+  auto local_points_end() const { return m_base.get_point_store().end(); }
 
   // API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
@@ -246,6 +244,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
 
  private:
   data_core_type m_data_core;
+  base_type      m_base;
 };
 
 }  // namespace saltatlas

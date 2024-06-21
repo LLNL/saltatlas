@@ -67,10 +67,9 @@ class base_dnnd {
  private:
   using self_type = base_dnnd<Id, PointType, Distance, Allocator>;
 
- protected:
+ public:
   using data_core_type = data_core<Id, PointType, Distance, Allocator>;
 
- public:
   using id_type          = typename data_core_type::id_type;
   using point_type       = typename data_core_type::point_type;
   using distance_type    = typename data_core_type::distance_type;
@@ -273,7 +272,6 @@ class base_dnnd {
   /// \brief Returns YGM communicator.
   ygm::comm& get_comm() const { return m_comm; }
 
- protected:
   /// \brief Initialize the internal data core instance.
   /// \param data_core A data core instance.
   void set_data_core(data_core_type&               data_core,
