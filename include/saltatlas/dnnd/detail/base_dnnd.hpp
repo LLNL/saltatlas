@@ -23,6 +23,11 @@
 #include <saltatlas/dnnd/feature_vector.hpp>
 #include "saltatlas/point_store.hpp"
 
+// Ideas:
+// Do not use data_core anymore?
+// Does not have to keep distance_id
+// Use base_dnnd as a driver (only static functions)?
+
 namespace saltatlas::dndetail {
 
 /// \brief The class the holds member variables of base_dnnd class.
@@ -272,10 +277,11 @@ class base_dnnd {
   /// \brief Returns YGM communicator.
   ygm::comm& get_comm() const { return m_comm; }
 
+ private:
   /// \brief Initialize the internal data core instance.
   /// \param data_core A data core instance.
-  void set_data_core(data_core_type&               data_core,
-                     const distance_function_type& distance_function) {
+  void priv_set_data_core(data_core_type&               data_core,
+                          const distance_function_type& distance_function) {
     if (m_data_core) {
       m_comm.cerr0() << "Data core is already initialized." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -287,13 +293,12 @@ class base_dnnd {
 
   /// \brief set_data_core for using a pre-defined distance function.
   /// The data core argument must contain a valid distance function ID.
-  void set_data_core(data_core_type& data_core) {
-    set_data_core(data_core,
-                  distance::distance_function<point_type, distance_type>(
-                      data_core.distance_id));
+  void priv_set_data_core(data_core_type& data_core) {
+    priv_set_data_core(data_core,
+                       distance::distance_function<point_type, distance_type>(
+                           data_core.distance_id));
   }
 
- private:
   nn_kernel_type priv_init_kernel(const int k, const double r,
                                   const double      delta,
                                   const bool        exchange_reverse_neighbors,
@@ -322,8 +327,8 @@ class base_dnnd {
     return ret;
   }
 
-  data_core_type* m_data_core{nullptr};
-  ygm::comm&      m_comm;
+  data_core_type* m_data_core;
+  ygm::comm*      m_comm;
   bool m_verbose{false};  // TODO: make this changeable after construction
   distance_function_type m_distance_function;
 };
