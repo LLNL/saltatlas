@@ -6,6 +6,13 @@
 #pragma once
 
 #include <algorithm>
+#include <iostream>
+#include <string>
+#include <algorithm>
+#include <memory>
+#include <utility>
+#include <string_view>
+#include <fstream>
 
 #if __has_include(<metall/container/unordered_map.hpp>) \
   && __has_include(<metall/container/vector.hpp>)
