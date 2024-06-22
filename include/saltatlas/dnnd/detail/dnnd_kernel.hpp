@@ -201,7 +201,7 @@ class dnnd_kernel {
           << std::endl;
     }
     priv_allocate_knn_heap();
-    priv_init_knn_heap_with_initial_index(init_knn_index, recheck);
+    priv_fill_knn_heap_with_initial_index(init_knn_index, recheck);
     // Fill the remaining uninitialized space with random values
     priv_fill_knn_heap_with_random_value();
   }
@@ -340,7 +340,7 @@ class dnnd_kernel {
 
   /// \brief Fills k-NN heap with a given index.
   template <typename alloc>
-  void priv_init_knn_heap_with_initial_index(
+  void priv_fill_knn_heap_with_initial_index(
       const nn_index<id_type, distance_type, alloc>& init_knn_index,
       const bool                                     recheck) {
     for (auto pitr = init_knn_index.points_begin();
@@ -361,7 +361,7 @@ class dnnd_kernel {
   }
 
   /// \brief Fills k-NN heap with a given index.
-  void priv_init_knn_heap_with_initial_index(
+  void priv_fill_knn_heap_with_initial_index(
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
       const bool                                               recheck) {
     for (auto pitr = init_knn_index.begin(); pitr != init_knn_index.end();

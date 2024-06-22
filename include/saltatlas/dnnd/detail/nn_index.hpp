@@ -6,13 +6,12 @@
 #pragma once
 
 #include <algorithm>
-#include <iostream>
-#include <string>
-#include <algorithm>
-#include <memory>
-#include <utility>
-#include <string_view>
 #include <fstream>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 
 #if __has_include(<metall/container/unordered_map.hpp>) \
   && __has_include(<metall/container/vector.hpp>)
@@ -69,6 +68,20 @@ class nn_index {
  public:
   explicit nn_index(const allocator_type &allocator = allocator_type{})
       : m_index(allocator) {}
+
+  nn_index(const nn_index &) = default;
+  nn_index(nn_index &&)      = default;
+
+  nn_index &operator=(const nn_index &) = default;
+  nn_index &operator=(nn_index &&)      = default;
+
+  // allocator-aware copy constructor
+  nn_index(const nn_index &other, const allocator_type &allocator)
+      : m_index(other.m_index, allocator) {}
+
+  // allocator-aware move constructor
+  nn_index(nn_index &&other, const allocator_type &allocator)
+      : m_index(std::move(other.m_index), allocator) {}
 
   void insert(const id_type &source, const neighbor_type &neighbor) {
     m_index[source].push_back(neighbor);

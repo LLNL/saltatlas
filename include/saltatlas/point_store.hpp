@@ -64,11 +64,8 @@ class point_store {
   using const_iterator = typename point_table_type::const_iterator;
 
  public:
-  /// \brief Default constructor.
-  point_store() = default;
-
   /// \brief Constructor.
-  explicit point_store(const allocator_type &allocator)
+  explicit point_store(const allocator_type &allocator = allocator_type{})
       : m_points_table(allocator) {}
 
   /// \brief Constructor.
