@@ -42,8 +42,12 @@ namespace container =
 #endif
 }  // namespace
 
+// Forward declaration
 template <typename IdType = uint64_t, typename DistanceType = double,
           typename Allocator = std::allocator<std::byte>>
+class nn_index;
+
+template <typename IdType, typename DistanceType, typename Allocator>
 class nn_index {
  public:
   using id_type        = IdType;
@@ -130,6 +134,14 @@ class nn_index {
   auto neighbors_end(const id_type &source) const {
     assert(m_index.count(source) > 0);
     return m_index.at(source).end();
+  }
+
+  void merge(nn_index<IdType, DistanceType, Allocator> &other) {
+    for (const auto &[source, neighbors] : other.m_index) {
+      for (const auto &neighbor : neighbors) {
+        insert(source, neighbor);
+      }
+    }
   }
 
   std::size_t num_points() const { return m_index.size(); }
