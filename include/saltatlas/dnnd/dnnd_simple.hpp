@@ -9,12 +9,13 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string>
 #include <string_view>
-#include <sstream>
 
 #include <ygm/comm.hpp>
 
+#include "saltatlas/dnnd/data_reader.hpp"
 #include "saltatlas/dnnd/detail/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
@@ -23,7 +24,6 @@
 #include "saltatlas/dnnd/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
 #include "saltatlas/point_store.hpp"
-#include "saltatlas/dnnd/data_reader.hpp"
 
 namespace saltatlas {
 
@@ -143,10 +143,7 @@ class dnnd {
             typename std::iterator_traits<paths_iterator>::value_type,
             std::filesystem::path>,
         "paths_iterator must be an iterator of std::filesystem::path");
-    std::vector<std::string> point_file_paths;
-    for (auto path = paths_begin; path != paths_end; ++path) {
-      point_file_paths.push_back(path->string());
-    }
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
     saltatlas::read_points(point_file_paths, file_format, false,
                            priv_get_point_partitioner(), m_pstore, m_comm);
   }
@@ -163,7 +160,7 @@ class dnnd {
       paths_iterator paths_begin, paths_iterator paths_end,
       const std::function<std::pair<id_type, point_type>(const std::string&)>&
           line_parser) {
-    std::vector<std::string> point_file_paths(paths_begin, paths_end);
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
 
     const auto parser_wrapper = [&line_parser](const std::string& line,
                                                id_type& id, point_type& point) {
@@ -182,12 +179,13 @@ class dnnd {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
-  void build(const int k, const double rho = 0.8, const double delta = 0.001) {
+  void build(const int k, const double rho = 0.8, const double delta = 0.001,
+             const std::size_t batch_size = 1 << 26) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
                                            .exchange_reverse_neighbors = true,
-                                           .mini_batch_size = 1 << 26,
+                                           .mini_batch_size = batch_size,
                                            .rnd_seed        = m_rnd_seed,
                                            .verbose         = m_verbose};
 
@@ -269,7 +267,7 @@ class dnnd {
                   const bool                   dump_distance = false) const {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
-    const auto ret = m_knn_index.dump(file_name.str(), dump_distance);
+    m_knn_index.dump(file_name.str(), dump_distance);
   }
 
   /// \brief Check if the local point store contains a point with the given ID.
@@ -292,6 +290,15 @@ class dnnd {
   // API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
     return iterator_proxy_type(local_points_begin(), local_points_end());
+  }
+
+  /// \brief Get the number of locally stored points.
+  std::size_t num_local_points() const { return m_pstore.size(); }
+
+  /// \brief Get the number of points.
+  /// This function performs an all-reduce operation, which is not cheap.
+  std::size_t num_points() const {
+    return m_comm.all_reduce_sum(m_pstore.size());
   }
 
  private:

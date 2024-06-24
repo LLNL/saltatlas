@@ -30,12 +30,12 @@ int main(int argc, char** argv) {
   saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::distance::id::sql2,
                                               comm);
 
-    // Load points from file(s)
+  // Load points from file(s)
   // The file format is assumed to be whitespace-separated values (wsv)
   // One point per line. Each feature value is separated by a whitespace.
   // DNND assigns an ID to each point in the order they are loaded,
   // i.e., ID is the line number starting from 0.
-  std::vector<std::filesystem::path>        paths{
+  std::vector<std::filesystem::path> paths{
       "../examples/datasets/point_5-4.txt"};
   g.load_points(paths.begin(), paths.end(), "wsv");
 

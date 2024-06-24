@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -33,7 +34,8 @@ namespace saltatlas::dndetail {
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc, typename parser_func>
 void read_points_helper(
-    const std::vector<std::string> &sorted_file_names, parser_func parser,
+    const std::vector<std::filesystem::path>       &sorted_file_names,
+    parser_func                                     parser,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -125,7 +127,7 @@ void read_points_helper(
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc, typename parser_func>
 void read_points_with_id_helper(
-    const std::vector<std::string> &file_names, parser_func parser,
+    const std::vector<std::filesystem::path> &file_names, parser_func parser,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -159,7 +161,7 @@ void read_points_with_id_helper(
           std::cerr << "Duplicate ID " << id << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        ref_point_store[id]= sent_point;
+        ref_point_store[id] = sent_point;
       };
       comm.async(point_partitioner(id), receiver, id, point);
     }
@@ -173,7 +175,7 @@ void read_points_with_id_helper(
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc>
 void read_points_with_id(
-    const std::vector<std::string> &file_names, const char delimiter,
+    const std::vector<std::filesystem::path> &file_names, const char delimiter,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -206,7 +208,7 @@ void read_points_with_id(
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
 void read_points_with_id(
-    const std::vector<std::string>                    &file_names,
+    const std::vector<std::filesystem::path>          &file_names,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -236,7 +238,7 @@ void read_points_with_id(
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
 void read_points(
-    const std::vector<std::string> &file_names, const char delimiter,
+    const std::vector<std::filesystem::path> &file_names, const char delimiter,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -257,7 +259,7 @@ void read_points(
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
 void read_points(
-    const std::vector<std::string>                    &file_names,
+    const std::vector<std::filesystem::path>          &file_names,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>          &point_partitioner,
     ygm::comm &comm, const bool verbose) {
@@ -279,8 +281,8 @@ namespace saltatlas {
 template <typename id_type, typename point_t, typename H, typename E,
           typename PA>
 inline void read_points(
-    const std::vector<std::string> &point_file_names,
-    const std::string_view &format, const bool verbose,
+    const std::vector<std::filesystem::path> &point_file_names,
+    const std::filesystem::path &format, const bool verbose,
     const std::function<int(const id_type &id)> &point_partitioner,
     point_store<id_type, point_t, H, E, PA>     &local_point_store,
     ygm::comm                                   &comm) {
@@ -336,9 +338,9 @@ using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
 /// \param file_path Path to a neighbor file.
 /// \param store Neighbor table instance.
 template <typename id_type, typename distance_type>
-inline void read_neighbors(const std::string_view                &file_path,
+inline void read_neighbors(const std::filesystem::path           &file_path,
                            neighbors_tbl<id_type, distance_type> &store) {
-  std::ifstream ifs(file_path.data());
+  std::ifstream ifs(file_path);
   if (!ifs.is_open()) {
     std::cerr << "Failed to open: " << file_path << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -424,7 +426,7 @@ inline void read_neighbors(const std::string_view                &file_path,
 
 /// \brief Reads a neighbor file and distributes them.
 template <typename id_type, typename distance_type>
-inline void read_neighbors(const std::string_view                &file_path,
+inline void read_neighbors(const std::filesystem::path           &file_path,
                            neighbors_tbl<id_type, distance_type> &store,
                            ygm::comm                             &comm) {
   neighbors_tbl<id_type, distance_type> global_store;
@@ -441,12 +443,12 @@ inline void read_neighbors(const std::string_view                &file_path,
 /// \param query_file_path Path to a query file.
 /// \param queries Buffer to store read queries.
 template <typename point_t>
-inline void read_query(const std::string_view &query_file_path,
+inline void read_query(const std::filesystem::path &query_file_path,
                        std::function<point_t(const std::string &)> parser,
                        std::vector<point_t>                       &queries) {
   if (query_file_path.empty()) return;
 
-  std::ifstream ifs(query_file_path.data());
+  std::ifstream ifs(query_file_path);
   if (!ifs.is_open()) {
     std::cerr << "Failed to open " << query_file_path << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -459,8 +461,8 @@ inline void read_query(const std::string_view &query_file_path,
 
 /// \brief read_query function for reading feature vectors.
 template <typename point_t>
-inline void read_query(const std::string_view &query_file_path,
-                       std::vector<point_t>   &queries) {
+inline void read_query(const std::filesystem::path &query_file_path,
+                       std::vector<point_t>        &queries) {
   read_query<point_t>(
       query_file_path,
       [](const std::string &line) {
@@ -476,7 +478,7 @@ inline void read_query(const std::string_view &query_file_path,
 /// \param queries
 /// \param comm
 template <typename point_t>
-inline void read_query(const std::string_view &query_file_path,
+inline void read_query(const std::filesystem::path &query_file_path,
                        std::vector<point_t> &queries, ygm::comm &comm) {
   std::vector<point_t> global_store;
   if (comm.rank0()) {

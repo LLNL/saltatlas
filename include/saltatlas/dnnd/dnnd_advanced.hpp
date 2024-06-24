@@ -211,7 +211,7 @@ class dnnd {
             typename std::iterator_traits<paths_iterator>::value_type,
             std::filesystem::path>,
         "paths_iterator must be an iterator of std::filesystem::path");
-    std::vector<std::string> point_file_paths;
+    std::vector<std::filesystem::path> point_file_paths;
     for (auto path = paths_begin; path != paths_end; ++path) {
       point_file_paths.push_back(path->string());
     }
@@ -231,7 +231,7 @@ class dnnd {
       paths_iterator paths_begin, paths_iterator paths_end,
       const std::function<std::pair<id_type, point_type>(const std::string&)>&
           line_parser) {
-    std::vector<std::string> point_file_paths(paths_begin, paths_end);
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
 
     const auto parser_wrapper = [&line_parser](const std::string& line,
                                                id_type& id, point_type& point) {
