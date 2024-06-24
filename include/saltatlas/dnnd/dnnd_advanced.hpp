@@ -404,6 +404,9 @@ class dnnd {
     return query_result;
   }
 
+  /// \brief Query nearest neighbors of given points.
+  /// This function runs queries on multiple indices in such a way that the
+  /// indices are merged before the queries are run.
   template <typename index_id_iterator, typename query_iterator>
   neighbor_store_type query(index_id_iterator      index_ids_begin,
                             index_id_iterator      index_ids_end,
@@ -425,8 +428,7 @@ class dnnd {
     }
 
     query_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
-                             distance_function, tmp_index,
-                             m_comm);
+                             distance_function, tmp_index, m_comm);
 
     query_store_type    queries(queries_begin, queries_end);
     neighbor_store_type query_result;
