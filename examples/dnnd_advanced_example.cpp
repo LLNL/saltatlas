@@ -38,33 +38,77 @@ dist_t custom_distance(const point_type& p1, const point_type& p2) {
 int main(int argc, char** argv) {
   ygm::comm comm(&argc, &argv);
 
-  saltatlas::dnnd<id_t, point_type, dist_t> g(comm);
-  std::vector<std::filesystem::path>        paths{
-      "../examples/datasets/point_5-4.txt"};
-  g.load_points(paths.begin(), paths.end(), "wsv");
+  {
+    saltatlas::dnnd<id_t, point_type, dist_t> g(comm);
+    std::vector<std::filesystem::path>        paths{
+        "../examples/datasets/point_5-4.txt"};
+    g.load_points(paths.begin(), paths.end(), "wsv");
 
-  // ----- NNG build and NN search APIs ----- //
-  int        k  = 4;
-  const auto id = g.build(custom_distance, k);
+    // ----- NNG build and NN search APIs ----- //
+    int        k  = 4;
+    const auto id = g.build(custom_distance, k);
 
-  bool make_graph_undirected = true;
-  g.optimize(id, custom_distance, make_graph_undirected);
+    bool make_graph_undirected = true;
+    g.optimize(id, custom_distance, make_graph_undirected);
 
-  // Run queries
-  std::vector<point_type> queries;
-  if (comm.rank() == 0) {
-    queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
-  }
-  int        num_to_search = 4;
-  const auto results       = g.query(id, custom_distance, queries.begin(),
-                                     queries.end(), num_to_search);
-
-  if (comm.rank() == 0) {
-    std::cout << "Neighbours (id, distance):";
-    for (const auto& [nn_id, nn_dist] : results[0]) {
-      std::cout << " " << nn_id << " (" << nn_dist << ")";
+    // Run queries
+    std::vector<point_type> queries;
+    if (comm.rank() == 0) {
+      queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
     }
-    std::cout << std::endl;
+    int        num_to_search = 4;
+    const auto results       = g.query(id, custom_distance, queries.begin(),
+                                       queries.end(), num_to_search);
+
+    if (comm.rank() == 0) {
+      std::cout << "Neighbours (id, distance):";
+      for (const auto& [nn_id, nn_dist] : results[0]) {
+        std::cout << " " << nn_id << " (" << nn_dist << ")";
+      }
+      std::cout << std::endl;
+    }
+  }
+
+  std::filesystem::path datastorepath = "/tmp/dnnd-knng";
+  std::error_code       ec;
+  std::filesystem::remove_all(datastorepath, ec);
+  comm.cf_barrier();
+  {
+    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::create_only,
+                                                datastorepath, comm);
+    std::vector<std::filesystem::path>        paths{
+        "../examples/datasets/point_5-4.txt"};
+    g.load_points(paths.begin(), paths.end(), "wsv");
+    const auto id = g.build(custom_distance, 2);
+    comm.cout0() << "Created" << std::endl;
+  }
+
+  {
+    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_only,
+                                                datastorepath, comm);
+    if (g.contains_local(0)) g.get_local_point(0);
+    comm.cf_barrier();
+    g.update(0, custom_distance, 4);
+    comm.cout0() << "Updated" << std::endl;
+
+    g.build(custom_distance, 4);
+  }
+
+  {
+    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_read_only,
+                                                datastorepath, comm);
+    std::vector<point_type> queries;
+    if (comm.rank() == 0) {
+      queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
+    }
+    comm.cout0() << "Query 1" << std::endl;
+    g.query(0, custom_distance, queries.begin(), queries.end(), 4);
+
+
+    comm.cout0() << "Query 2" << std::endl;
+    std::vector<std::size_t> ids{0, 1};
+    g.query(ids.begin(), ids.end(), custom_distance, queries.begin(),
+            queries.end(), 4);
   }
 
   return 0;

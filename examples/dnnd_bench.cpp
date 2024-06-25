@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
   }
 
   if (!opt.query_file_path.empty()) {
+    comm.cout0() << "\n<<Query>>" << std::endl;
     std::vector<dnnd_type::point_type> queries;
     saltatlas::read_query(opt.query_file_path, queries, comm);
 

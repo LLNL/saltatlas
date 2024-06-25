@@ -14,7 +14,7 @@
 #include <string_view>
 
 #include <metall/container/vector.hpp>
-#include <metall/metall.hpp>
+#include <metall/utility/metall_mpi_adaptor.hpp>
 #include <ygm/comm.hpp>
 
 #include "saltatlas/dnnd/data_reader.hpp"
@@ -29,6 +29,26 @@
 #include "saltatlas/point_store.hpp"
 
 namespace saltatlas {
+
+/// \brief Tag type to create the Metall datastore always.
+/// The existing Metall datastore with the same name is over written.
+struct create_only_t {};
+
+/// \brief Tag to create the Metall datastore always.
+/// The existing Metall datastore with the same name is over written.
+[[maybe_unused]] static constexpr create_only_t create_only{};
+
+/// \brief Tag type to open an already created Metall datastore.
+struct open_only_t {};
+
+/// \brief Tag to open an already created Metall datastore.
+[[maybe_unused]] static constexpr open_only_t open_only{};
+
+/// \brief Tag type to open an already created Metall datastore as read only.
+struct open_read_only_t {};
+
+/// \brief Tag to open an already created segment as read only.
+[[maybe_unused]] static constexpr open_read_only_t open_read_only{};
 
 /// \brief Distributed NNDescent simple version.
 /// \tparam Id Point ID type.
@@ -47,11 +67,13 @@ class dnnd {
   using point_type = Point;
 
  private:
-  template <typename T>
-  using allocator_type = metall::manager::fallback_allocator<T>;
+  using mmanager = metall::utility::metall_mpi_adaptor::manager_type;
 
   template <typename T>
-  using scp_allocator_type = metall::manager::scoped_fallback_allocator_type<T>;
+  using allocator_type = mmanager::fallback_allocator<T>;
+
+  template <typename T>
+  using scp_allocator_type = mmanager::scoped_fallback_allocator_type<T>;
 
   /// \brief Point store type.
   using point_store_type =
@@ -99,26 +121,6 @@ class dnnd {
   /// std::vector<std::vector<neighbor_type>>.
   using neighbor_store_type = typename query_kernel_type::neighbor_store_type;
 
-  /// \brief Tag type to create the Metall datastore always.
-  /// The existing Metall datastore with the same name is over written.
-  struct create_only_t {};
-
-  /// \brief Tag to create the Metall datastore always.
-  /// The existing Metall datastore with the same name is over written.
-  [[maybe_unused]] static constexpr create_only_t create_only{};
-
-  /// \brief Tag type to open an already created Metall datastore.
-  struct open_only_t {};
-
-  /// \brief Tag to open an already created Metall datastore.
-  [[maybe_unused]] static constexpr open_only_t open_only{};
-
-  /// \brief Tag type to open an already created Metall datastore as read only.
-  struct open_read_only_t {};
-
-  /// \brief Tag to open an already created segment as read only.
-  [[maybe_unused]] static constexpr open_read_only_t open_read_only{};
-
   /// \brief Constructor.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
@@ -136,44 +138,48 @@ class dnnd {
        ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
        const bool verbose = false)
       : m_comm(comm), m_rnd_seed(rnd_seed), m_verbose(verbose) {
-    m_metall_manager = std::make_unique<metall::manager>(
-        metall::create_only, datastore_path.string());
-    m_pstore = m_metall_manager->construct<point_store_type>(
-        metall::unique_instance)(m_metall_manager->get_allocator<>());
-    m_knn_index_list = m_metall_manager->construct<knn_index_container>(
-        metall::unique_instance)(m_metall_manager->get_allocator<>());
-    m_index_k_list = m_metall_manager->construct<size_container>(
-        metall::unique_instance)(m_metall_manager->get_allocator<>());
+    m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
+        metall::create_only, datastore_path.string(), m_comm.get_mpi_comm(),
+        true);
+    auto& localm = m_metall->get_local_manager();
+    m_pstore     = localm.construct<point_store_type>(metall::unique_instance)(
+        localm.get_allocator<>());
+    m_knn_index_list = localm.construct<knn_index_container>(
+        metall::unique_instance)(localm.get_allocator<>());
+    m_index_k_list = localm.construct<size_container>(metall::unique_instance)(
+        localm.get_allocator<>());
   }
 
   dnnd(open_only_t, const std::filesystem::path& datastore_path,
        ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
        const bool verbose = false)
       : m_comm(comm), m_rnd_seed(rnd_seed), m_verbose(verbose) {
-    m_metall_manager = std::make_unique<metall::manager>(
-        metall::open_only, datastore_path.string());
-    m_pstore =
-        m_metall_manager->find<point_store_type>(metall::unique_instance).first;
+    m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
+        metall::open_only, datastore_path.string(), m_comm.get_mpi_comm());
+    auto& localm = m_metall->get_local_manager();
+    m_pstore     = localm.find<point_store_type>(metall::unique_instance).first;
+    assert(m_pstore);
     m_knn_index_list =
-        m_metall_manager->find<knn_index_container>(metall::unique_instance)
-            .first;
-    m_index_k_list =
-        m_metall_manager->find<size_container>(metall::unique_instance).first;
+        localm.find<knn_index_container>(metall::unique_instance).first;
+    assert(m_knn_index_list);
+    m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
+    assert(m_index_k_list);
   }
 
   dnnd(open_read_only_t, const std::filesystem::path& datastore_path,
        ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
        const bool verbose = false)
       : m_comm(comm), m_rnd_seed(rnd_seed), m_verbose(verbose) {
-    m_metall_manager = std::make_unique<metall::manager>(
-        metall::open_read_only, datastore_path.string());
-    m_pstore =
-        m_metall_manager->find<point_store_type>(metall::unique_instance).first;
+    m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
+        metall::open_read_only, datastore_path.string(), m_comm.get_mpi_comm());
+    auto& localm = m_metall->get_local_manager();
+    m_pstore     = localm.find<point_store_type>(metall::unique_instance).first;
+    assert(m_pstore);
     m_knn_index_list =
-        m_metall_manager->find<knn_index_container>(metall::unique_instance)
-            .first;
-    m_index_k_list =
-        m_metall_manager->find<size_container>(metall::unique_instance).first;
+        localm.find<knn_index_container>(metall::unique_instance).first;
+    assert(m_knn_index_list);
+    m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
+    assert(m_index_k_list);
   }
 
   /// \brief Add points to the internal point store.
@@ -333,9 +339,7 @@ class dnnd {
 
     nn_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
                           dfunc, m_comm);
-    // TODO: implement more efficient update
-    kernel.construct(m_index_k_list->at(index_id),
-                     m_index_k_list->at(index_id));
+    kernel.update(m_knn_index_list->at(index_id));
     m_index_k_list->at(index_id) = k;
   }
 
@@ -421,8 +425,8 @@ class dnnd {
                                               .rnd_seed   = m_rnd_seed,
                                               .verbose    = m_verbose};
 
-    auto tmp_index = m_knn_index_list->at(*index_ids_begin);
-    for (auto index_id = index_ids_begin + 1; index_id != index_ids_end;
+    knn_index_type tmp_index;
+    for (auto index_id = index_ids_begin; index_id != index_ids_end;
          ++index_id) {
       tmp_index.merge(m_knn_index_list->at(*index_id));
     }
@@ -495,13 +499,13 @@ class dnnd {
     };
   };
 
-  ygm::comm&                       m_comm;
-  uint64_t                         m_rnd_seed;
-  bool                             m_verbose;
-  std::unique_ptr<metall::manager> m_metall_manager{nullptr};
-  point_store_type*                m_pstore{nullptr};
-  knn_index_container*             m_knn_index_list{nullptr};
-  size_container*                  m_index_k_list{nullptr};
+  ygm::comm&                                           m_comm;
+  uint64_t                                             m_rnd_seed;
+  bool                                                 m_verbose;
+  std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
+  point_store_type*                                    m_pstore{nullptr};
+  knn_index_container* m_knn_index_list{nullptr};
+  size_container*      m_index_k_list{nullptr};
 };
 
 }  // namespace saltatlas
