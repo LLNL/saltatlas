@@ -579,13 +579,12 @@ class dnnd_kernel {
     }
 
     // Init the receive buffer.
-    adj_lsit_type         recv_buf;
-    static adj_lsit_type& ref_recv_buf = recv_buf;
+    adj_lsit_type recv_buf;
     {
-      ref_recv_buf.clear();
-      ref_recv_buf.reserve(count_incoming.size());
+      recv_buf.clear();
+      recv_buf.reserve(count_incoming.size());
       for (auto& item : count_incoming) {
-        ref_recv_buf[item.first].reserve(item.second);
+        recv_buf[item.first].reserve(item.second);
       }
       count_incoming.clear();
       count_incoming.rehash(0);
@@ -594,18 +593,19 @@ class dnnd_kernel {
 
     // Send reverse neighbors to the corresponding sources.
     {
-      auto sitr            = source_ids.begin();
-      auto neighbor_sender = [&sitr, &reverse_neighbors,
+      auto                        sitr = source_ids.begin();
+      ygm::ygm_ptr<adj_lsit_type> ptr_recv_buf(&recv_buf);
+      auto neighbor_sender = [&sitr, &reverse_neighbors, &ptr_recv_buf,
                               this](ygm::comm& comm) {
         const auto& src = *sitr;
         const auto& rn  = reverse_neighbors.at(src);
         for (const auto& n : rn) {
           comm.async(
               m_point_partitioner(src),
-              [](const id_type vid, const auto& neighbor) {
-                ref_recv_buf[vid].push_back(neighbor);
+              [](const id_type vid, const auto& neighbor, auto ptr_recv_buf) {
+                (*ptr_recv_buf)[vid].push_back(neighbor);
               },
-              src, n);
+              src, n, ptr_recv_buf);
         }
         ++sitr;
         return 1;
