@@ -183,8 +183,8 @@ void build_index(
 
   dist_index.comm().cout0("Distributing data across ranks");
 
-  auto add_point_lambda = [&dist_index, &bag_data](const auto &index,
-                                                   const auto &point) {
+  auto add_point_lambda = [&dist_index, &bag_data](const auto &index_point) {
+    const auto &[index, point] = index_point;
     dist_index.queue_data_point_insertion(index, point);
   };
 

@@ -52,11 +52,12 @@ class metric_hyperplane_partitioner {
 
     ygm::timer t{};
 
-    data.for_all([&current_level_points, &point_assignments](
-                     const auto &id, const auto &point) {
-      current_level_points[0].push_back(point);
-      point_assignments[id] = 0;
-    });
+    data.for_all(
+        [&current_level_points, &point_assignments](const auto &id_point) {
+          const auto &[id, point] = id_point;
+          current_level_points[0].push_back(point);
+          point_assignments[id] = 0;
+        });
 
     m_tree.resize((1 << m_num_levels - 1) - 1);
 
@@ -198,8 +199,9 @@ class metric_hyperplane_partitioner {
   std::vector<node_statistics> find_tree_statistics(Container &data) {
     ygm::container::map<index_type, node_statistics> stats_map;
 
-    data.for_all([&stats_map, this](const auto &index, const auto &point) {
-      auto leaf_index = search_tree(point);
+    data.for_all([&stats_map, this](const auto &index_point) {
+      const auto &[index, point] = index_point;
+      auto leaf_index            = search_tree(point);
 
       auto search_path = reconstruct_search_path(leaf_index);
 
@@ -494,10 +496,11 @@ class metric_hyperplane_partitioner {
       const std::vector<std::pair<point_type, point_type>> &selector_pairs) {
     std::vector<std::vector<dist_type>> thetas(num_nodes);
 
-    data.for_all([&point_assignments, &thetas, &selector_pairs, this](
-                     const auto &index, const auto &point) {
-      const auto tree_index = point_assignments[index];
-      auto [level, node]    = index_to_ln(tree_index);
+    data.for_all([&point_assignments, &thetas, &selector_pairs,
+                  this](const auto &index_point) {
+      const auto &[index, point] = index_point;
+      const auto tree_index      = point_assignments[index];
+      auto [level, node]         = index_to_ln(tree_index);
 
       dist_type dist1 = m_space.get_dist_func()(
           &point, &selector_pairs[node].first, m_space.get_dist_func_param());
@@ -536,10 +539,11 @@ class metric_hyperplane_partitioner {
       std::unordered_map<index_type, index_type> &point_assignments,
       std::vector<std::vector<point_type>>       &next_level_points,
       Container                                  &data) {
-    data.for_all([&point_assignments, &next_level_points, this](
-                     const auto &index, const auto &point) {
-      const auto tree_index = point_assignments[index];
-      auto      &node       = this->m_tree[tree_index];
+    data.for_all([&point_assignments, &next_level_points,
+                  this](const auto &index_point) {
+      const auto &[index, point] = index_point;
+      const auto tree_index      = point_assignments[index];
+      auto      &node            = this->m_tree[tree_index];
 
       dist_type dist1 = m_space.get_dist_func()(&point, &node.selectors.first,
                                                 m_space.get_dist_func_param());

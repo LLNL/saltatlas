@@ -295,7 +295,8 @@ int main(int argc, char** argv) {
   fuzzy_partitioner.print_tree();
 
   world.cout0("Distributing data to local HNSWs");
-  bag_data.for_all([&dist_index, &world](const auto& id, const auto& line) {
+  bag_data.for_all([&dist_index, &world](const auto& id_line) {
+    const auto& [id, line] = id_line;
     dist_index.queue_data_point_insertion(id, line);
   });
 
