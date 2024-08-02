@@ -95,7 +95,7 @@ class dhnsw_impl {
                                          const point_type &v) {
     index_vec_type point_partitions =
         partitioner().find_point_partitions(v, m_max_voronoi_rank);
-    ASSERT_RELEASE(point_partitions[0] < m_num_cells);
+    YGM_ASSERT_RELEASE(point_partitions[0] < m_num_cells);
     add_data_point_to_insertion_queue(index, v, point_partitions);
   }
 
@@ -103,7 +103,7 @@ class dhnsw_impl {
                                          const point_type     &v,
                                          const index_vec_type &closest_seeds) {
     auto insertion_cell = closest_seeds[0];
-    ASSERT_RELEASE(insertion_cell < m_num_cells);
+    YGM_ASSERT_RELEASE(insertion_cell < m_num_cells);
     m_comm->async(
         cell_owner(insertion_cell),
         [](auto mbox, ygm::ygm_ptr<dhnsw_impl> pthis, index_type index,
@@ -118,11 +118,11 @@ class dhnsw_impl {
   }
 
   void initialize_hnsw() {
-    ASSERT_RELEASE(m_constructed_index == false);
+    YGM_ASSERT_RELEASE(m_constructed_index == false);
 
     // Initialize HNSW structures
     for (int i = 0; i < num_local_cells(); ++i) {
-      ASSERT_RELEASE(m_cell_add_vec[i].size() > 0);
+      YGM_ASSERT_RELEASE(m_cell_add_vec[i].size() > 0);
 
       hnswlib::HierarchicalNSW<dist_type> *hnsw =
           new hnswlib::HierarchicalNSW<dist_type>(
@@ -187,7 +187,7 @@ class dhnsw_impl {
   }
 
   const point_type &get_point(index_type index) {
-    ASSERT_RELEASE(m_local_data.count(index) > 0);
+    YGM_ASSERT_RELEASE(m_local_data.count(index) > 0);
     return m_local_data[index];
   }
 

@@ -9,6 +9,7 @@
 #include <hnswlib/hnswlib.h>
 
 #include <ygm/comm.hpp>
+#include <ygm/container/detail/flatten_proxy.hpp>
 
 namespace saltatlas {
 
@@ -37,8 +38,9 @@ class voronoi_partitioner {
     seed_features.resize(num_partitions);
     auto seed_features_ptr = m_comm.make_ygm_ptr(seed_features);
 
-    data.for_all([&seed_ids, &seed_features, &seed_features_ptr, this](
-                     const auto &id, const auto &point) {
+    data.for_all([&seed_ids, &seed_features, &seed_features_ptr,
+                  this](const auto &id_point) {
+      const auto &[id, point] = id_point;
       auto lower_iter = std::lower_bound(seed_ids.begin(), seed_ids.end(), id);
 
       if ((lower_iter != seed_ids.end()) && (*lower_iter == id)) {
@@ -59,7 +61,7 @@ class voronoi_partitioner {
   }
 
   std::vector<index_type> find_point_partitions(const point_type &features,
-                                             const uint32_t num_partitions) {
+                                                const uint32_t num_partitions) {
     std::vector<index_type> to_return(num_partitions);
 
     std::priority_queue<std::pair<float, hnswlib::labeltype>> nearest_seeds_pq =
@@ -68,7 +70,7 @@ class voronoi_partitioner {
     uint32_t i = num_partitions;
     while (nearest_seeds_pq.size() > 0) {
       index_type seed_ID = nearest_seeds_pq.top().second;
-      to_return[--i]  = seed_ID;
+      to_return[--i]     = seed_ID;
       nearest_seeds_pq.pop();
     }
 
@@ -95,10 +97,10 @@ class voronoi_partitioner {
     }
   }
 
-  void select_random_seed_ids(const uint32_t        num_seeds,
-                              const uint64_t        num_points,
+  void select_random_seed_ids(const uint32_t           num_seeds,
+                              const uint64_t           num_points,
                               std::vector<index_type> &seed_ids) {
-    std::mt19937                           rng(123);
+    std::mt19937                              rng(123);
     std::uniform_int_distribution<index_type> uni(0, num_points - 1);
 
     for (uint32_t i = 0; i < num_seeds; ++i) {

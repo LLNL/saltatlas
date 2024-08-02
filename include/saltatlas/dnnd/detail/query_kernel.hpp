@@ -109,7 +109,7 @@ class dknn_batch_query_kernel {
       for (std::size_t i = 0; i < queries.size(); ++i) {
         m_comm.async(
             r,
-            [](const ygm::ygm_ptr<self_type>& dst_self, const id_type id,
+            [](ygm::ygm_ptr<self_type> dst_self, const id_type id,
                const point_type& q) {
               assert(!dst_self->m_query_store.contains(id));
               dst_self->m_query_store[id] = q;
