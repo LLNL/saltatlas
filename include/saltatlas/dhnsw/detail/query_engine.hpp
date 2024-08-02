@@ -15,17 +15,17 @@ template <typename DistType, typename IndexType, typename Point,
           template <typename, typename, typename> class Partitioner>
 class query_engine_impl {
  public:
-  using dist_type     = DistType;
-  using index_type    = IndexType;
-  using point_type    = Point;
+  using dist_type        = DistType;
+  using index_type       = IndexType;
+  using point_type       = Point;
   using partitioner_type = Partitioner<dist_type, index_type, point_type>;
   using query_engine_impl_type =
       query_engine_impl<dist_type, index_type, point_type, Partitioner>;
   using dhnsw_impl_type =
       dhnsw_impl<dist_type, index_type, point_type, Partitioner>;
-  using dist_ngbr_mmap_type          = std::multimap<dist_type, index_type>;
-  using dist_ngbr_owner_map_type     = std::map<index_type, int>;
-  using dist_ngbr_features_map_type  = std::map<index_type, point_type>;
+  using dist_ngbr_mmap_type         = std::multimap<dist_type, index_type>;
+  using dist_ngbr_owner_map_type    = std::map<index_type, int>;
+  using dist_ngbr_features_map_type = std::map<index_type, point_type>;
   using dist_ngbr_features_mmap_type =
       std::multimap<dist_type, std::pair<index_type, point_type>>;
 
@@ -87,8 +87,8 @@ class query_engine_impl {
     };
 
     const point_type get_query_point() const { return m_query_point; }
-    const int     get_k() const { return m_k; }
-    const int     get_max_hops() const { return m_k; }
+    const int        get_k() const { return m_k; }
+    const int        get_max_hops() const { return m_k; }
     const int get_initial_num_queries() const { return m_initial_num_queries; }
     const int get_voronoi_rank() const { return m_voronoi_rank; }
     const int get_num_local_queries() const { return m_queries_spawned; }
@@ -157,7 +157,7 @@ class query_engine_impl {
    private:
     void update_nearest_neighbors(const dist_ngbr_mmap_type &returned_neighbors,
                                   const int                  owner_rank) {
-      ASSERT_RELEASE(owner_rank < engine->m_comm->size());
+      YGM_ASSERT_RELEASE(owner_rank < engine->m_comm->size());
       if (m_nearest_neighbors.size() > 0) {
         merge_nearest_neighbors(returned_neighbors, owner_rank);
       } else {
@@ -240,16 +240,16 @@ class query_engine_impl {
         engine->m_query_id_recycler.return_id(m_id);
         return;
       } else {
-        auto get_neighbor_features_lambda =
-            [](auto engine, const query_locator locator,
-               const index_type ngbr_index) {
+        auto get_neighbor_features_lambda = [](auto                engine,
+                                               const query_locator locator,
+                                               const index_type    ngbr_index) {
           auto neighbor_features_response_lambda =
               [](auto engine, const query_id_type &id,
                  const index_type ngbr_index, const point_type &ngbr) {
                 auto &query_controller = engine->m_query_controllers[id];
 
                 query_controller.m_nearest_neighbor_features[ngbr_index] = ngbr;
-                ASSERT_RELEASE(
+                YGM_ASSERT_RELEASE(
                     query_controller.m_nearest_neighbor_features.size() <=
                     query_controller.m_k);
 
@@ -302,7 +302,7 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
 
         query_locator locator{engine->m_comm->rank(), m_id};
         for (const auto &[idx, owner_rank] : m_nearest_neighbor_owners) {
-          ASSERT_RELEASE(owner_rank < engine->m_comm->size());
+          YGM_ASSERT_RELEASE(owner_rank < engine->m_comm->size());
           engine->m_comm->async(owner_rank, get_neighbor_features_lambda,
                                 engine->pthis, locator, idx);
         }
@@ -314,7 +314,7 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
       auto cell_query_lambda = [](auto engine, const point_type &q,
                                   const index_type s_cell,
                                   const dist_type max_dist, const int s_k,
-                                  const int s_voronoi_rank,
+                                  const int           s_voronoi_rank,
                                   const query_locator locator) {
         int local_cell = engine->local_cell_index(s_cell);
 
@@ -404,13 +404,13 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
                               // m_queries_returned instead, but might check
                               // between round finishing and next round starting
     point_type           m_query_point;
-    int               m_k;
-    int               m_max_hops;
-    int               m_initial_num_queries;
-    int               m_voronoi_rank;
-    int               m_queries_spawned;
-    int               m_queries_returned;
-    int               m_current_hops;
+    int                  m_k;
+    int                  m_max_hops;
+    int                  m_initial_num_queries;
+    int                  m_voronoi_rank;
+    int                  m_queries_spawned;
+    int                  m_queries_returned;
+    int                  m_current_hops;
     std::set<index_type> m_queried_cells;
     std::set<index_type> m_next_cells;
     dist_ngbr_mmap_type  m_nearest_neighbors;
@@ -436,7 +436,7 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
     bool has_id_available() { return m_available_ids.size() > 0; }
 
     T get_id() {
-      ASSERT_RELEASE(m_available_ids.size() > 0);
+      YGM_ASSERT_RELEASE(m_available_ids.size() > 0);
 
       T id = m_available_ids.back();
       m_available_ids.pop_back();
@@ -589,7 +589,7 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
 
     void (*fun_ptr)(const point_type &, const dist_ngbr_mmap_type &,
                     const query_controller &, cereal::YGMInputArchive &) =
-        [](const point_type &query_pt,
+        [](const point_type          &query_pt,
            const dist_ngbr_mmap_type &nearest_neighbors,
            const query_controller &controller, cereal::YGMInputArchive &bia) {
           std::tuple<PackArgs...> ta;
@@ -637,10 +637,10 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
     return to_return;
   }
 
-  void deserialize_lambda(cereal::YGMInputArchive &iarchive,
-                          const point_type           &query_pt,
-                          const dist_ngbr_mmap_type  &nearest_neighbors,
-                          const query_controller  &controller) {
+  void deserialize_lambda(cereal::YGMInputArchive   &iarchive,
+                          const point_type          &query_pt,
+                          const dist_ngbr_mmap_type &nearest_neighbors,
+                          const query_controller    &controller) {
     int64_t iptr;
     iarchive(iptr);
     iptr += (int64_t)&reference;
@@ -653,7 +653,7 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
   void deserialize_lambda_with_features(
       cereal::YGMInputArchive &iarchive, const point_type &query_pt,
       const dist_ngbr_features_mmap_type &nearest_neighbors,
-      const query_controller          &controller) {
+      const query_controller             &controller) {
     int64_t iptr;
     iarchive(iptr);
     iptr += (int64_t)&reference;
@@ -664,9 +664,9 @@ fun_ptr(query_controller.m_query_point, nn_mmap, *this, iarchive);
   }
 
   std::vector<query_controller> m_query_controllers;
-  id_recycler<query_id_type>       m_query_id_recycler;
+  id_recycler<query_id_type>    m_query_id_recycler;
 
-  ygm::comm                        *m_comm;
+  ygm::comm                           *m_comm;
   ygm::ygm_ptr<dhnsw_impl_type>        m_dist_index_impl_ptr;
   ygm::ygm_ptr<query_engine_impl_type> pthis;
 };

@@ -159,7 +159,7 @@ void read_points_with_id_helper(
           std::cerr << "Duplicate ID " << id << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        ref_point_store[id]= sent_point;
+        ref_point_store[id] = sent_point;
       };
       comm.async(point_partitioner(id), receiver, id, point);
     }

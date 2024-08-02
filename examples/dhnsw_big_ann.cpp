@@ -36,7 +36,7 @@ dist_t l2_sqr(const point_t& v1, const point_t& v2) {
     std::cout << "Size mismatch: " << v1.size() << " != " << v2.size()
               << std::endl;
   }
-  ASSERT_DEBUG(v1.size() == v2.size());
+  YGM_ASSERT_DEBUG(v1.size() == v2.size());
 
   dist_t d = 0;
   for (std::size_t i = 0; i < v1.size(); ++i) {
@@ -65,7 +65,7 @@ pair_bag<index_t, point_t> read_points(
       pt.push_back(feature);
     }
 
-    ASSERT_RELEASE(pt.size() == 128);
+    YGM_ASSERT_RELEASE(pt.size() == 128);
 
     to_return.async_insert(std::make_pair(id, pt));
   });
@@ -172,7 +172,7 @@ read_ground_truth(const std::string& filename, ygm::comm& world) {
   // Sanity check on ground-truth
   nn_dist_truth.for_all([](const auto& id, const auto& nn_vec) {
     for (const auto& nn_dist : nn_vec) {
-      ASSERT_RELEASE(nn_dist.second >= 0.0);
+      YGM_ASSERT_RELEASE(nn_dist.second >= 0.0);
     }
   });
 
