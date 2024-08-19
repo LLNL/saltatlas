@@ -21,6 +21,10 @@ add_saltatlas_example(dhnsw_ascii_levenshtein)
 add_saltatlas_example(dhnsw_big_ann)
 add_saltatlas_example(dhnsw_verbose_levenshtein)
 
+if (Boost_FOUND)
+	add_saltatlas_example(dhnsw_nearest_neighbor_graph)
+endif ()
+
 if (SALTATLAS_USE_HDF5)
     add_saltatlas_example(benchmark_hdf5)
 endif ()

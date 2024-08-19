@@ -78,7 +78,7 @@ find_package(OpenMP)
 # supports Boost, we do not need to use the boost-cmake feature.
 set(Boost_NO_BOOST_CMAKE ON)
 
-find_package(Boost 1.64 QUIET)
+find_package(Boost 1.75 QUIET)
 if (NOT Boost_FOUND)
     FetchContent_Declare(
         Boost
@@ -91,7 +91,7 @@ if (NOT Boost_FOUND)
                        ${boost_SOURCE_DIR}
         )
     else ()
-        if (SALTATLAS_USE_METALL) # Only Metall requires Boost
+		if (SALTATLAS_USE_METALL OR SALTATLAS_USE_BOOST)
             FetchContent_Populate(Boost)
             message(STATUS ${PROJECT_NAME} " cloned Boost dependency: "
                            ${boost_SOURCE_DIR}
@@ -99,7 +99,7 @@ if (NOT Boost_FOUND)
         endif ()
     endif ()
     set(BOOST_ROOT ${boost_SOURCE_DIR})
-    find_package(Boost 1.64)
+    find_package(Boost 1.75)
 else ()
     message(STATUS ${PROJECT_NAME} " found Boost dependency: "
                    ${Boost_INCLUDE_DIR}
@@ -335,6 +335,14 @@ if (SALTATLAS_USE_METALL)
     target_link_libraries(
         saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall
     )
+endif ()
+
+# Boost includes
+if (SALTATLAS_USE_BOOST)
+	target_include_directories(
+        saltatlas INTERFACE $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+                            $<INSTALL_INTERFACE:include/boost>
+	)
 endif ()
 
 option(TEST_WITH_SLURM "Run tests with Slurm" OFF)
