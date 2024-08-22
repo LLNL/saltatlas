@@ -1,11 +1,11 @@
 #pragma once
 
-#include <fstream>
+#include <algorithm>
 #include <filesystem>
-#include <vector>
+#include <fstream>
 #include <string>
 #include <string_view>
-#include <algorithm>
+#include <vector>
 
 namespace saltatlas::dndetail {
 
@@ -35,8 +35,9 @@ inline bool read_by_chunk(std::basic_ifstream<char_type, traits>& ifs,
 /// and subdirectories. If a file path is given, it returns the file path.
 /// \param path Directory or file path.
 /// \return Returns a vector of found file paths.
-inline std::vector<std::string> find_file_paths(const std::string_view path) {
-  std::vector<std::string> paths;
+inline std::vector<std::filesystem::path> find_file_paths(
+    const std::filesystem::path path) {
+  std::vector<std::filesystem::path> paths;
   if (std::filesystem::is_regular_file(std::filesystem::path(path))) {
     paths.emplace_back(path);
   } else {
@@ -51,9 +52,9 @@ inline std::vector<std::string> find_file_paths(const std::string_view path) {
 /// \brief Search file paths recursively.
 /// This function calls the single path version of find_file_paths() for each
 /// path in the given vector.
-inline std::vector<std::string> find_file_paths(
-    const std::vector<std::string>& paths) {
-  std::vector<std::string> found_paths;
+inline std::vector<std::filesystem::path> find_file_paths(
+    const std::vector<std::filesystem::path>& paths) {
+  std::vector<std::filesystem::path> found_paths;
   for (const auto& p : paths) {
     const auto ret = find_file_paths(p);
     found_paths.insert(found_paths.end(), ret.begin(), ret.end());

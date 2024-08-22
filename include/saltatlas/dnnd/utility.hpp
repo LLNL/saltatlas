@@ -15,8 +15,8 @@
 #include <ygm/comm.hpp>
 
 #include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <saltatlas/dnnd/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
+#include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::utility {
 
@@ -235,8 +235,8 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
 /// \param dump_file_path Out file path.
 template <typename id_t, typename dist_t>
 inline void dump_neighbors(const neighbors_tbl<id_t, dist_t> &table,
-                           const std::string_view            &dump_file_path) {
-  std::ofstream ofs(dump_file_path.data());
+                           const std::filesystem::path       &dump_file_path) {
+  std::ofstream ofs(dump_file_path);
   if (!ofs.is_open()) {
     std::cerr << "Failed to create search table file(s)" << std::endl;
     return;
@@ -259,9 +259,10 @@ inline void dump_neighbors(const neighbors_tbl<id_t, dist_t> &table,
 }
 
 template <typename id_t, typename dist_t>
-inline void gather_and_dump_neighbors(const neighbors_tbl<id_t, dist_t> &table,
-                                      const std::string_view &dump_file_path,
-                                      ygm::comm &comm, const int root = 0) {
+inline void gather_and_dump_neighbors(
+    const neighbors_tbl<id_t, dist_t> &table,
+    const std::filesystem::path &dump_file_path, ygm::comm &comm,
+    const int root = 0) {
   neighbors_tbl<id_t, dist_t> root_table;
   saltatlas::utility::gather_neighbors(table, root_table, comm);
 

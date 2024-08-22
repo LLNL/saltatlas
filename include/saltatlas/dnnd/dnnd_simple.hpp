@@ -5,15 +5,25 @@
 
 #pragma once
 
+#include <algorithm>
 #include <filesystem>
+#include <memory>
+#include <random>
+#include <sstream>
+#include <string>
 #include <string_view>
 
 #include <ygm/comm.hpp>
 
 #include "saltatlas/dnnd/data_reader.hpp"
-#include "saltatlas/dnnd/detail/base_dnnd.hpp"
+#include "saltatlas/dnnd/detail/distance.hpp"
+#include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
+#include "saltatlas/dnnd/detail/nn_index.hpp"
+#include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
+#include "saltatlas/dnnd/detail/query_kernel.hpp"
 #include "saltatlas/dnnd/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
+#include "saltatlas/point_store.hpp"
 
 namespace saltatlas {
 
@@ -24,57 +34,68 @@ namespace saltatlas {
 template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
           typename Distance = double>
-class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change to use composition model rather than inheritance
- private:
-  using base_type      = dndetail::base_dnnd<Id, Point, Distance>;
-  using data_core_type = typename base_type::data_core_type;
-  /// \brief Point store type.
-  using point_store_type = typename base_type::point_store_type;
-  /// \brief k-NN index type.
-  using knn_index_type = typename base_type::knn_index_type;
-  /// \brief Point partitioner type.
-  using point_partitioner = typename base_type::point_partitioner;
-
+class dnnd {
  public:
   /// \brief Point ID type.
-  using id_type = typename base_type::id_type;
+  using id_type = Id;
   /// \brief Distance type.
-  using distance_type = typename base_type::distance_type;
+  using distance_type = Distance;
   /// \brief Point type.
-  using point_type = typename base_type::point_type;
-  /// \brief Neighbor type (contains a neighbor ID and the distance to the
-  /// neighbor).
-  using neighbor_type = typename base_type::neighbor_type;
-  /// \brief Query result store type. Specifically,
-  /// std::vector<std::vector<neighbor_type>>.
-  using neighbor_store_type = typename base_type::neighbor_store_type;
-  /// \brief Distance function type.
-  /// Specifically, std::function<distance_type(const point_type &, const
-  /// point_type &)>.
-  using distance_function_type = typename base_type::distance_function_type;
-  using iterator_proxy_type =
-      dndetail::iterator_proxy<typename point_store_type::const_iterator>;
+  using point_type = Point;
 
  private:
+  /// \brief Point store type.
+  using point_store_type =
+      point_store<id_type, point_type, std::hash<id_type>, std::equal_to<>,
+                  std::allocator<std::byte>>;
+  /// \brief k-NN index type.
+  using knn_index_type = dndetail::nn_index<id_type, distance_type>;
+
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
-  using query_kernel_type =
-      dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
+
+  /// \brief Point partitioner type.
+  using point_partitioner = typename nn_kernel_type::point_partitioner;
+
   using nn_index_optimizer_type =
       dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
 
+  using query_kernel_type =
+      dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
+
+  using query_store_type = typename query_kernel_type::query_store_type;
+
  public:
+  /// \brief Neighbor type (contains a neighbor ID and the distance to the
+  /// neighbor).
+  using neighbor_type = typename knn_index_type::neighbor_type;
+
+  using iterator_proxy_type =
+      dndetail::iterator_proxy<typename point_store_type::const_iterator>;
+
+  /// \brief Distance function type.
+  /// Specifically, std::function<distance_type(const point_type &, const
+  /// point_type &)>.
+  using distance_function_type =
+      distance::distance_function_type<point_type, distance_type>;
+
+ public:
+  /// \brief Query result store type. Specifically,
+  /// std::vector<std::vector<neighbor_type>>.
+  using neighbor_store_type = typename query_kernel_type::neighbor_store_type;
+
   /// \brief Constructor.
-  /// \param did Distance function id.
+  /// \param distance_func_id Distance function id.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
   /// \param verbose If true, enable the verbose mode.
-  dnnd(const distance::id& did, ygm::comm& comm,
+  dnnd(const distance::id& distance_func_id, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
-    m_data_core.distance_id = did;
-    base_type::set_data_core(m_data_core);
-  }
+      : m_distance_func(distance::distance_function<point_type, distance_type>(
+            distance_func_id)),
+        m_comm(comm),
+        m_rnd_seed(rnd_seed),
+        m_verbose(verbose) {}
 
   /// \brief Constructor.
   /// \param distance_func Distance function.
@@ -84,9 +105,10 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   dnnd(const distance_function_type& distance_func, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
        const bool     verbose  = false)
-      : base_type(verbose, comm), m_data_core(distance::id::custom, rnd_seed) {
-    base_type::set_data_core(m_data_core, distance_func);
-  }
+      : m_distance_func(distance_func),
+        m_comm(comm),
+        m_rnd_seed(rnd_seed),
+        m_verbose(verbose) {}
 
   /// \brief Add points to the internal point store.
   /// \tparam id_iterator Iterator type for point IDs.
@@ -98,10 +120,9 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
-    point_store_type& pstore = base_type::get_point_store();
-    pstore.reserve(std::distance(ids_begin, ids_end));
+    m_pstore.reserve(std::distance(ids_begin, ids_end));
     for (auto id = ids_begin; id != ids_end; ++id) {
-      pstore[*id] = *points_begin;
+      m_pstore[*id] = *points_begin;
       ++points_begin;
     }
   }
@@ -122,13 +143,9 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
             typename std::iterator_traits<paths_iterator>::value_type,
             std::filesystem::path>,
         "paths_iterator must be an iterator of std::filesystem::path");
-    std::vector<std::string> point_file_paths;
-    for (auto path = paths_begin; path != paths_end; ++path) {
-      point_file_paths.push_back(path->string());
-    }
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
     saltatlas::read_points(point_file_paths, file_format, false,
-                           base_type::get_point_partitioner(),
-                           base_type::get_point_store(), base_type::get_comm());
+                           priv_get_point_partitioner(), m_pstore, m_comm);
   }
 
   /// \brief Load points from files and add to the internal point store.
@@ -143,7 +160,7 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
       paths_iterator paths_begin, paths_iterator paths_end,
       const std::function<std::pair<id_type, point_type>(const std::string&)>&
           line_parser) {
-    std::vector<std::string> point_file_paths(paths_begin, paths_end);
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
 
     const auto parser_wrapper = [&line_parser](const std::string& line,
                                                id_type& id, point_type& point) {
@@ -154,16 +171,28 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
     };
 
     saltatlas::dndetail::read_points_with_id_helper(
-        point_file_paths, parser_wrapper, base_type::get_point_store(),
-        base_type::get_point_partitioner(), base_type::get_comm(), false);
+        point_file_paths, parser_wrapper, m_pstore,
+        priv_get_point_partitioner(), m_comm, false);
   }
 
   /// \brief Build a KNNG.
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
-  void build(const int k, const double rho = 0.8, const double delta = 0.001) {
-    base_type::construct_index(k, rho, delta, false, 1 << 28);
+  void build(const int k, const double rho = 0.8, const double delta = 0.001,
+             const std::size_t batch_size = 1 << 26) {
+    typename nn_kernel_type::option option{.k                          = k,
+                                           .r                          = rho,
+                                           .delta                      = delta,
+                                           .exchange_reverse_neighbors = true,
+                                           .mini_batch_size = batch_size,
+                                           .rnd_seed        = m_rnd_seed,
+                                           .verbose         = m_verbose};
+
+    nn_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
+                          m_distance_func, m_comm);
+    kernel.construct(m_knn_index);
+    m_index_k = k;
   }
 
   /// \brief Apply optimizations to an already constructed KNNG aiming at
@@ -176,8 +205,16 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   /// if this value is less than 0, there is no pruning.
   void optimize(const bool   make_index_undirected     = true,
                 const double pruning_degree_multiplier = 1.5) {
-    base_type::optimize_index(make_index_undirected, pruning_degree_multiplier,
-                              false);
+    const typename nn_index_optimizer_type::option opt{
+        .index_k                   = m_index_k,
+        .undirected                = make_index_undirected,
+        .pruning_degree_multiplier = pruning_degree_multiplier,
+        .remove_long_paths         = false,
+        .verbose                   = m_verbose};
+    nn_index_optimizer_type optimizer{
+        opt,         m_pstore, priv_get_point_partitioner(), m_distance_func,
+        m_knn_index, m_comm};
+    optimizer.run();
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -197,8 +234,21 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   neighbor_store_type query(query_iterator queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    std::vector<point_type> queries(queries_begin, queries_end);
-    return base_type::query_batch(queries, k, epsilon, 0.0, 1 << 28);
+    typename query_kernel_type::option option{.k          = k,
+                                              .epsilon    = epsilon,
+                                              .mu         = 0,
+                                              .batch_size = 1 << 26,
+                                              .rnd_seed   = m_rnd_seed,
+                                              .verbose    = m_verbose};
+
+    query_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
+                             m_distance_func, m_knn_index, m_comm);
+
+    query_store_type    queries(queries_begin, queries_end);
+    neighbor_store_type query_result;
+    kernel.query_batch(queries, query_result);
+
+    return query_result;
   }
 
   /// \brief Dump the k-NN index to distributed files.
@@ -215,37 +265,58 @@ class dnnd : public dndetail::base_dnnd<Id, Point, Distance> { // FIXIME: change
   /// and distance pair is stored in the same column.
   void dump_graph(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
-    base_type::dump_index(path.string(), dump_distance);
+    std::stringstream file_name;
+    file_name << path.string() << "-" << m_comm.rank();
+    m_knn_index.dump(file_name.str(), dump_distance);
   }
 
   /// \brief Check if the local point store contains a point with the given ID.
   /// \param id Point ID.
-  bool contains_local(const id_type id) const {
-    return base_type::get_point_store().contains(id);
-  }
+  bool contains_local(const id_type id) const { return m_pstore.contains(id); }
 
   /// \brief Get a point with the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
-    return base_type::get_point_store().at(id);
+    return m_pstore.at(id);
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
   /// stored points.
-  auto local_points_begin() const {
-    return base_type::get_point_store().begin();
-  }
+  auto local_points_begin() const { return m_pstore.begin(); }
 
   /// \brief Returns an iterator that points to the end of the locally stored
   /// points.
-  auto local_points_end() const { return base_type::get_point_store().end(); }
+  auto local_points_end() const { return m_pstore.end(); }
 
   // API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
     return iterator_proxy_type(local_points_begin(), local_points_end());
   }
 
+  /// \brief Get the number of locally stored points.
+  std::size_t num_local_points() const { return m_pstore.size(); }
+
+  /// \brief Get the number of points.
+  /// This function performs an all-reduce operation, which is not cheap.
+  std::size_t num_points() const {
+    return m_comm.all_reduce_sum(m_pstore.size());
+  }
+
  private:
-  data_core_type m_data_core;
+  /// \brief Return a point partitioner instance.
+  /// \return A point partitioner instance.
+  point_partitioner priv_get_point_partitioner() const {
+    const int size = m_comm.size();
+    // TODO: hash id?
+    return [size](const id_type& id) { return id % size; };
+  };
+
+  distance_function_type m_distance_func;
+  ygm::comm&             m_comm;
+  uint64_t               m_rnd_seed;
+  point_store_type       m_pstore;
+  knn_index_type         m_knn_index{};
+  std::size_t            m_index_k{0};
+  bool                   m_verbose;
 };
 
 }  // namespace saltatlas

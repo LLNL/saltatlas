@@ -37,28 +37,16 @@ function(add_saltatlas_dnnd_example_feature_type example_name type_name)
             PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}")
 endfunction()
 
+add_saltatlas_example(dnnd_simple_example)
+add_saltatlas_example(dnnd_simple_custom_distance_example)
+add_saltatlas_example(dnnd_simple_custom_point_example)
+
+add_saltatlas_dnnd_example_feature_type(dnnd_bench float)
+add_saltatlas_dnnd_example_feature_type(dnnd_bench uint8_t)
+add_saltatlas_dnnd_example_feature_type(dnnd_bench double)
+
 if (SALTATLAS_USE_METALL)
-    add_saltatlas_example(dnnd_example)
-    add_saltatlas_example(dnnd_custom_point_example)
-    add_saltatlas_example(dnnd_string_example)
-    add_saltatlas_example(dnnd_pm_const_example)
-    add_saltatlas_example(dnnd_pm_optimize_example)
-    add_saltatlas_example(dnnd_pm_query_example)
-    add_saltatlas_example(dnnd_simple_example)
-    add_saltatlas_example(dnnd_simple_custom_distance_example)
-    add_saltatlas_example(dnnd_simple_custom_point_example)
-
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example float)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example float)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example float)
-
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example uint8_t)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example uint8_t)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example uint8_t)
-
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_const_example double)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_optimize_example double)
-    add_saltatlas_dnnd_example_feature_type(dnnd_pm_query_example double)
+    add_saltatlas_example(dnnd_advanced_example)
 endif ()
 
 add_subdirectory(datasets)

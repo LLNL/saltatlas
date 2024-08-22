@@ -16,43 +16,11 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
-#include <ygm/detail/cereal_boost_container.hpp>
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/data_reader.hpp>
 #include <saltatlas/dnnd/dhnsw_index_reader.hpp>
-#include <saltatlas/dnnd/dnnd.hpp>
-#include <saltatlas/dnnd/dnnd_pm.hpp>
 #include <saltatlas/dnnd/utility.hpp>
-
-#ifdef SALTATLAS_DNND_EXAMPLE_ID_TYPE
-using id_type = SALTATLAS_DNND_EXAMPLE_ID_TYPE;
-#else
-using id_type = uint32_t;
-#endif
-
-#ifdef SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE
-using feature_element_type = SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE;
-#else
-using feature_element_type = float;
-#endif
-
-#ifdef SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE
-using distance_type = SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE;
-#else
-using distance_type =
-    std::conditional_t<std::is_same_v<feature_element_type, double>, double,
-                       float>;
-#endif
-
-using dnnd_type =
-    saltatlas::dnnd<id_type, saltatlas::feature_vector<feature_element_type>,
-                    distance_type>;
-using neighbor_type = typename dnnd_type::neighbor_type;
-
-using dnnd_pm_type = saltatlas::dnnd_pm<
-    id_type, saltatlas::pm_feature_vector<feature_element_type>, distance_type>;
-using pm_neighbor_type = typename dnnd_pm_type::neighbor_type;
 
 /// Returns the name of the given primitive type in string.
 /// Returns the name of the given type in string.
@@ -79,6 +47,8 @@ std::string get_type_name() {
   }
 }
 
+template <typename id_type, typename feature_element_type,
+          typename distance_type>
 void show_config(ygm::comm& comm) {
   comm.cout0() << "ID type: " << get_type_name<id_type>() << std::endl;
   comm.cout0() << "Feature element type: "
@@ -117,8 +87,8 @@ inline void show_query_recall_score_helper(
 
 template <typename neighbor_store_type>
 inline void show_query_recall_score(
-    const neighbor_store_type& test_result,
-    const std::string_view& ground_truth_file_path, ygm::comm& comm) {
+    const neighbor_store_type&   test_result,
+    const std::filesystem::path& ground_truth_file_path, ygm::comm& comm) {
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
 
@@ -132,8 +102,8 @@ inline void show_query_recall_score(
 
 template <typename neighbor_store_type>
 inline void show_query_recall_score_with_only_distance(
-    const neighbor_store_type& test_result,
-    const std::string_view& ground_truth_file_path, ygm::comm& comm,
+    const neighbor_store_type&   test_result,
+    const std::filesystem::path& ground_truth_file_path, ygm::comm& comm,
     const double epsilon = 1e-6) {
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);
@@ -148,8 +118,8 @@ inline void show_query_recall_score_with_only_distance(
 
 template <typename neighbor_store_type>
 inline void show_query_recall_score_with_distance_ties(
-    const neighbor_store_type& test_result,
-    const std::string_view& ground_truth_file_path, ygm::comm& comm,
+    const neighbor_store_type&   test_result,
+    const std::filesystem::path& ground_truth_file_path, ygm::comm& comm,
     const double epsilon = 1e-6) {
   neighbor_store_type ground_truth;
   saltatlas::read_neighbors(ground_truth_file_path, ground_truth, comm);

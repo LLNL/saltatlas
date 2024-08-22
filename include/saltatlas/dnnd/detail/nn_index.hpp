@@ -6,6 +6,12 @@
 #pragma once
 
 #include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 
 #if __has_include(<metall/container/unordered_map.hpp>) \
   && __has_include(<metall/container/vector.hpp>)
@@ -36,8 +42,12 @@ namespace container =
 #endif
 }  // namespace
 
+// Forward declaration
 template <typename IdType = uint64_t, typename DistanceType = double,
           typename Allocator = std::allocator<std::byte>>
+class nn_index;
+
+template <typename IdType, typename DistanceType, typename Allocator>
 class nn_index {
  public:
   using id_type        = IdType;
@@ -62,6 +72,20 @@ class nn_index {
  public:
   explicit nn_index(const allocator_type &allocator = allocator_type{})
       : m_index(allocator) {}
+
+  nn_index(const nn_index &) = default;
+  nn_index(nn_index &&)      = default;
+
+  nn_index &operator=(const nn_index &) = default;
+  nn_index &operator=(nn_index &&)      = default;
+
+  // allocator-aware copy constructor
+  nn_index(const nn_index &other, const allocator_type &allocator)
+      : m_index(other.m_index, allocator) {}
+
+  // allocator-aware move constructor
+  nn_index(nn_index &&other, const allocator_type &allocator)
+      : m_index(std::move(other.m_index), allocator) {}
 
   void insert(const id_type &source, const neighbor_type &neighbor) {
     m_index[source].push_back(neighbor);
@@ -110,6 +134,14 @@ class nn_index {
   auto neighbors_end(const id_type &source) const {
     assert(m_index.count(source) > 0);
     return m_index.at(source).end();
+  }
+
+  void merge(nn_index<IdType, DistanceType, Allocator> &other) {
+    for (const auto &[source, neighbors] : other.m_index) {
+      for (const auto &neighbor : neighbors) {
+        insert(source, neighbor);
+      }
+    }
   }
 
   std::size_t num_points() const { return m_index.size(); }
