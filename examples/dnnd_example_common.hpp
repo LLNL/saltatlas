@@ -19,7 +19,6 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/dnnd/data_reader.hpp>
-#include <saltatlas/dnnd/dhnsw_index_reader.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
 /// Returns the name of the given primitive type in string.
