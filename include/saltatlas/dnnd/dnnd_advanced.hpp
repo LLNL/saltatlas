@@ -55,7 +55,7 @@ struct open_read_only_t {};
 /// \tparam Point Point type.
 /// \tparam Distance Distance type.
 template <typename Id       = uint64_t,
-          typename Point    = saltatlas::feature_vector<double>,
+          typename Point    = saltatlas::pm_feature_vector<double>,
           typename Distance = double>
 class dnnd {
  public:

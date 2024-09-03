@@ -55,9 +55,9 @@ class point_store {
 
  private:
   using point_table_type = container::unordered_map<
-      id_type, PointType, hasher, equal_to,
+      id_type, point_type, hasher, equal_to,
       dndetail::other_scoped_allocator<allocator_type,
-                                       std::pair<const id_type, PointType>>>;
+                                       std::pair<const id_type, point_type>>>;
 
  public:
   using iterator       = typename point_table_type::iterator;
