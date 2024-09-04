@@ -35,6 +35,9 @@ template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
           typename Distance = double>
 class dnnd {
+ private:
+  using self_type = dnnd<Id, Point, Distance>;
+
  public:
   /// \brief Point ID type.
   using id_type = Id;
@@ -111,6 +114,7 @@ class dnnd {
         m_verbose(verbose) {}
 
   /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
   /// \tparam id_iterator Iterator type for point IDs.
   /// \tparam point_iterator Iterator type for points.
   /// \param ids_begin Iterator to the beginning of point IDs.
@@ -120,14 +124,24 @@ class dnnd {
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
-    m_pstore.reserve(std::distance(ids_begin, ids_end));
-    for (auto id = ids_begin; id != ids_end; ++id) {
-      m_pstore[*id] = *points_begin;
-      ++points_begin;
+    auto receiver = [](auto, auto this_ptr, const id_t id,
+                       const auto& sent_point) {
+      if (this_ptr->m_pstore.contains(id)) {
+        std::cerr << "Duplicate ID " << id << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+      this_ptr->m_pstore[id] = sent_point;
+    };
+
+    for (; ids_begin != ids_end; ++ids_begin, ++points_begin) {
+      const auto dst = priv_get_point_partitioner()(*ids_begin);
+      m_comm.async(dst, receiver, m_this, *ids_begin, *points_begin);
     }
+    m_comm.barrier();
   }
 
   /// \brief Load points from files and add to the internal point store.
+  /// All ranks must call this function although some ranks load no points.
   /// \tparam paths_iterator Iterator type for file paths.
   /// \param paths_begin Iterator to the beginning of file paths.
   /// \param paths_end Iterator to the end of file paths.
@@ -150,6 +164,7 @@ class dnnd {
 
   /// \brief Load points from files and add to the internal point store.
   /// This function assumes that there is one point per line.
+  /// All ranks must call this function although some ranks load no points.
   /// \tparam paths_iterator Iterator type for file paths.
   /// \param paths_begin Iterator to the beginning of file paths.
   /// \param paths_end Iterator to the end of file paths.
@@ -176,6 +191,7 @@ class dnnd {
   }
 
   /// \brief Build a KNNG.
+  /// All ranks must call this function.
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
@@ -197,6 +213,7 @@ class dnnd {
 
   /// \brief Apply optimizations to an already constructed KNNG aiming at
   /// improving the query quality and performance.
+  /// All ranks must call this function.
   /// \param make_index_undirected If true, make the index undirected.
   /// \param make_index_undirected If true, make the graph undirected.
   /// \param pruning_degree_multiplier
@@ -220,6 +237,7 @@ class dnnd {
   /// \brief Query nearest neighbors of given points.
   /// This function assumes that the query points are already distributed.
   /// Query results are returned to the MPI rank that submitted the queries.
+  /// All ranks must call this function.
   /// \tparam query_iterator Iterator type for query points.
   /// \param queries_begin Iterator to the beginning of query points.
   /// \param queries_end Iterator to the end of query points.
@@ -310,13 +328,14 @@ class dnnd {
     return [size](const id_type& id) { return id % size; };
   };
 
-  distance_function_type m_distance_func;
-  ygm::comm&             m_comm;
-  uint64_t               m_rnd_seed;
-  point_store_type       m_pstore;
-  knn_index_type         m_knn_index{};
-  std::size_t            m_index_k{0};
-  bool                   m_verbose;
+  distance_function_type  m_distance_func;
+  ygm::comm&              m_comm;
+  uint64_t                m_rnd_seed;
+  point_store_type        m_pstore;
+  knn_index_type          m_knn_index{};
+  std::size_t             m_index_k{0};
+  bool                    m_verbose;
+  ygm::ygm_ptr<self_type> m_this{this};
 };
 
 }  // namespace saltatlas

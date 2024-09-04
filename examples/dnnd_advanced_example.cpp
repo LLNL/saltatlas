@@ -21,7 +21,7 @@ using id_t   = uint32_t;
 using dist_t = double;
 
 // Point Type
-using point_type = saltatlas::feature_vector<float>;
+using point_type = saltatlas::pm_feature_vector<float>;
 
 // Custom distance function
 // The distance function should have the signature as follows:

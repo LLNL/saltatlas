@@ -11,8 +11,8 @@
 ///     mpirun -n 2 ./example/dnnd_simple_custom_point_example
 
 #include <iostream>
+#include <random>
 #include <vector>
-
 #include <ygm/comm.hpp>
 
 #include <saltatlas/dnnd/dnnd_simple.hpp>
@@ -39,6 +39,23 @@ dist_t distance_func(const graph_point& a, const graph_point& b) {
   return a.data.size() + b.data.size();
 }
 
+// Randomly generate a point, just for demonstration
+graph_point gen_point() {
+  graph_point        p;
+  std::random_device rd;
+  std::mt19937       gen(rd());
+  const int          num_vertices = gen() % 10 + 1;
+  p.data.resize(num_vertices);
+  for (size_t i = 0; i < num_vertices; ++i) {
+    const int degree = gen() % 10 + 1;
+    p.data[i].reserve(degree);
+    for (size_t j = 0; j < degree; ++j) {
+      p.data[i][j] = std::uniform_real_distribution<double>(0.0, 1.0)(gen);
+    }
+  }
+  return p;
+}
+
 int main(int argc, char** argv) {
   ygm::comm comm(&argc, &argv);
 
@@ -46,9 +63,13 @@ int main(int argc, char** argv) {
 
   // Add points
   {
-    // Assuming ids and points are stored in vectors
     std::vector<id_t>        ids;
     std::vector<graph_point> points;
+    // Assuming ids and points are stored in vectors
+    for (size_t i = 0; i < 10; ++i) {
+      ids.push_back(i + 10 * comm.rank());
+      points.push_back(gen_point());
+    }
     g.add_points(ids.begin(), ids.end(), points.begin(), points.end());
   }
 

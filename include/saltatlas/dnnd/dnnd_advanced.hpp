@@ -55,9 +55,12 @@ struct open_read_only_t {};
 /// \tparam Point Point type.
 /// \tparam Distance Distance type.
 template <typename Id       = uint64_t,
-          typename Point    = saltatlas::feature_vector<double>,
+          typename Point    = saltatlas::pm_feature_vector<double>,
           typename Distance = double>
 class dnnd {
+ private:
+  using self_type = dnnd<Id, Point, Distance>;
+
  public:
   /// \brief Point ID type.
   using id_type = Id;
@@ -183,6 +186,7 @@ class dnnd {
   }
 
   /// \brief Add points to the internal point store.
+  /// All ranks must call this function.
   /// \tparam id_iterator Iterator type for point IDs.
   /// \tparam point_iterator Iterator type for points.
   /// \param ids_begin Iterator to the beginning of point IDs.
@@ -192,16 +196,24 @@ class dnnd {
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
-    assert(m_pstore);
-    m_pstore->reserve(std::distance(ids_begin, ids_end));
-    for (auto id = ids_begin; id != ids_end; ++id) {
-      assert(points_begin != points_end);
-      (*m_pstore)[*id] = *points_begin;
-      ++points_begin;
+    auto receiver = [](auto, auto this_ptr, const id_t id,
+                       const auto& sent_point) {
+      if (this_ptr->m_pstore.contains(id)) {
+        std::cerr << "Duplicate ID " << id << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+      this_ptr->m_pstore[id] = sent_point;
+    };
+
+    for (; ids_begin != ids_end; ++ids_begin, ++points_begin) {
+      const auto dst = priv_get_point_partitioner()(*ids_begin);
+      m_comm.async(dst, receiver, m_this, *ids_begin, *points_begin);
     }
+    m_comm.barrier();
   }
 
   /// \brief Load points from files and add to the internal point store.
+  /// All ranks must call this function.
   /// \tparam paths_iterator Iterator type for file paths.
   /// \param paths_begin Iterator to the beginning of file paths.
   /// \param paths_end Iterator to the end of file paths.
@@ -226,6 +238,7 @@ class dnnd {
   }
 
   /// \brief Load points from files and add to the internal point store.
+  /// All ranks must call this function.
   /// This function assumes that there is one point per line.
   /// \tparam paths_iterator Iterator type for file paths.
   /// \param paths_begin Iterator to the beginning of file paths.
@@ -253,6 +266,7 @@ class dnnd {
   }
 
   /// \brief Build a KNNG.
+  /// All ranks must call this function.
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
@@ -276,6 +290,7 @@ class dnnd {
   }
 
   /// \brief Build a KNNG.
+  /// All ranks must call this function.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
@@ -301,6 +316,7 @@ class dnnd {
   }
 
   /// \brief Build a KNNG.
+  /// All ranks must call this function.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
@@ -327,6 +343,7 @@ class dnnd {
   }
 
   /// \brief Update the KNNG.
+  /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
               const int k, const double rho = 0.8, const double delta = 0.001) {
     typename nn_kernel_type::option option{.k                          = k,
@@ -345,6 +362,7 @@ class dnnd {
 
   /// \brief Apply optimizations to an already constructed KNNG aiming at
   /// improving the query quality and performance.
+  /// All ranks must call this function.
   /// \param make_index_undirected If true, make the index undirected.
   /// \param make_index_undirected If true, make the graph undirected.
   /// \param pruning_degree_multiplier
@@ -374,6 +392,7 @@ class dnnd {
   /// \brief Query nearest neighbors of given points.
   /// This function assumes that the query points are already distributed.
   /// Query results are returned to the MPI rank that submitted the queries.
+  /// All ranks must call this function.
   /// \tparam query_iterator Iterator type for query points.
   /// \param queries_begin Iterator to the beginning of query points.
   /// \param queries_end Iterator to the end of query points.
@@ -411,6 +430,7 @@ class dnnd {
   /// \brief Query nearest neighbors of given points.
   /// This function runs queries on multiple indices in such a way that the
   /// indices are merged before the queries are run.
+  /// All ranks must call this function.
   template <typename index_id_iterator, typename query_iterator>
   neighbor_store_type query(index_id_iterator      index_ids_begin,
                             index_id_iterator      index_ids_end,
@@ -504,8 +524,9 @@ class dnnd {
   bool                                                 m_verbose;
   std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
   point_store_type*                                    m_pstore{nullptr};
-  knn_index_container* m_knn_index_list{nullptr};
-  size_container*      m_index_k_list{nullptr};
+  knn_index_container*    m_knn_index_list{nullptr};
+  size_container*         m_index_k_list{nullptr};
+  ygm::ygm_ptr<self_type> m_this{this};
 };
 
 }  // namespace saltatlas

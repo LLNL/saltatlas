@@ -79,7 +79,6 @@ void read_points_helper(
 
   ygm::ygm_ptr<point_store<id_t, point_t, H, E, pstore_alloc>> ptr_point_store(
       &local_point_store);
-  local_point_store.reset();
   comm.cf_barrier();
 
   // Reads points
@@ -132,7 +131,6 @@ void read_points_with_id_helper(
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
-  local_point_store.reset();
   static auto &ref_point_store = local_point_store;
   comm.cf_barrier();
 
