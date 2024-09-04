@@ -63,24 +63,44 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
   }
 
-  // Point Data Accessors
-  id_t pid = 0;
-  if (g.contains_local(pid)) {
-    auto p0 = g.get_local_point(pid);
-    std::cout << "Point 0 : ";
-    for (const auto& v : p0) {
-      std::cout << v << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  // Point Data Accessors, another API
-  for (const auto& [id, point] : g.local_points()) {
-    comm.cout0() << "Point " << id << " : ";
-    for (const auto& v : point) {
-      comm.cout0() << v << " ";
+  // --- Point Data Accessors --- //
+  // Get a local point by ID
+  {
+    id_t pid = 0;
+    if (g.contains_local(pid)) {
+      auto p0 = g.get_local_point(pid);
+      std::cout << "Point 0 : ";
+      for (const auto& v : p0) {
+        std::cout << v << " ";
+      }
+      std::cout << std::endl;
     }
     comm.cout0() << std::endl;
+  }
+
+  // Point data iterator
+  {
+    comm.cout0() << "Rank 0 local points" << std::endl;
+    for (const auto& [id, point] : g.local_points()) {
+      comm.cout0() << "Point " << id << " : ";
+      for (const auto& v : point) {
+        comm.cout0() << v << " ";
+      }
+      comm.cout0() << std::endl;
+    }
+    comm.cout0() << std::endl;
+  }
+
+  // Get points including the ones that are stored in other ranks
+  {
+    auto points = g.get_points({0, 1});
+    for (const auto& [id, point] : points) {
+      comm.cout0() << "Point " << id << " : ";
+      for (const auto& v : point) {
+        comm.cout0() << v << " ";
+      }
+      comm.cout0() << std::endl;
+    }
   }
 
   // Dump a KNNG to files

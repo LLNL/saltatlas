@@ -98,7 +98,9 @@ class dnnd {
             distance_func_id)),
         m_comm(comm),
         m_rnd_seed(rnd_seed),
-        m_verbose(verbose) {}
+        m_verbose(verbose) {
+    m_comm.cf_barrier();
+  }
 
   /// \brief Constructor.
   /// \param distance_func Distance function.
@@ -111,7 +113,9 @@ class dnnd {
       : m_distance_func(distance_func),
         m_comm(comm),
         m_rnd_seed(rnd_seed),
-        m_verbose(verbose) {}
+        m_verbose(verbose) {
+    m_comm.cf_barrier();
+  }
 
   /// \brief Add points to the internal point store.
   /// All ranks must call this function although some ranks add no points.
@@ -292,9 +296,53 @@ class dnnd {
   /// \param id Point ID.
   bool contains_local(const id_type id) const { return m_pstore.contains(id); }
 
+  /// \brief Get the owner rank of a point with the given ID.
+  /// \param id Point ID.
+  /// \return The rank that owns the point.
+  int get_owner(const id_type id) const {
+    return priv_get_point_partitioner()(id);
+  }
+
   /// \brief Get a point with the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
     return m_pstore.at(id);
+  }
+
+  std::vector<point_type> get_local_points(
+      const std::vector<id_type>& ids) const {
+    std::vector<point_type> points;
+    points.reserve(ids.size());
+    for (const auto& id : ids) {
+      points.push_back(m_pstore.at(id));
+    }
+    return points;
+  }
+
+  std::vector<std::pair<id_type, point_type>> get_points(
+      const std::vector<id_type>& ids) const {
+    std::vector<std::pair<id_type, point_type>> points;
+    points.reserve(ids.size());
+
+    static auto& ref_points = points;
+    ref_points              = points;
+
+    auto proc = [](auto comm, auto pthis, const id_type id,
+                       const int source_rank) {
+      comm->async(
+          source_rank,
+          [](auto, const auto& id, const auto& point) {
+            ref_points.emplace_back(id, point);
+          },
+          id, pthis->get_local_point(id));
+    };
+
+    for (const auto& id : ids) {
+      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
+    }
+
+    m_comm.barrier();
+
+    return points;
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
