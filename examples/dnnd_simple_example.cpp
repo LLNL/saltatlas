@@ -47,55 +47,84 @@ int main(int argc, char** argv) {
   g.optimize(make_graph_undirected);
 
   // Run queries
-  std::vector<point_type> queries;
-  if (comm.rank() == 0) {
-    queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
-  }
-  int        num_to_search = 4;
-  const auto results = g.query(queries.begin(), queries.end(), num_to_search);
-
-  // Show the query results
-  if (comm.rank() == 0) {
-    std::cout << "Neighbours (id, distance):";
-    for (const auto& [nn_id, nn_dist] : results[0]) {
-      std::cout << " " << nn_id << " (" << nn_dist << ")";
+  {
+    std::vector<point_type> queries;
+    if (comm.rank() == 0) {
+      queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
+    } else if (comm.rank() == 1) {
+      queries.push_back(point_type{78.44, 54.43, 59.68, 65.80, 24.361});
     }
-    std::cout << std::endl;
+
+    {
+      int        num_to_search = 4;
+      const auto results =
+          g.query(queries.begin(), queries.end(), num_to_search);
+      // Show the query results
+      comm.cout0() << "Query owner rank: neighbours (id, distance)..."
+                   << std::endl;
+      for (int i = 0; i <= 1; ++i) {
+        if (comm.rank() == i) {
+          std::cout << "Rank " << i << ": ";
+          for (const auto& [nn_id, nn_dist] : results[0]) {
+            std::cout << " " << nn_id << " (" << nn_dist << ")";
+          }
+          std::cout << std::endl;
+        }
+        comm.cf_barrier();
+      }
+    }
+
+    // Get nearest neighbours with features
+    comm.cout0()<< "\nNearest neighbor query result with features\n(show only the nearest point of the query from rank 0)" << std::endl;
+    {
+      int        num_to_search = 4;
+      const auto results =
+          g.query_with_features(queries.begin(), queries.end(), num_to_search);
+      // Show the query results
+      if (comm.rank() == 0) {
+        auto& neighbours = results.first;
+        auto& features   = results.second;
+        std::cout << "Point ID " << neighbours[0][0].id << ", distance "
+                     << neighbours[0][0].distance << ", feature {";
+        for (const auto& v : features[0][0]) {
+          std::cout << v << " ";
+        }
+        std::cout << "}" << std::endl;
+      }
+    }
   }
 
   // --- Point Data Accessors --- //
-  // Get a local point by ID
+  comm.cout0() << "\nPoint 0's features: " << std::endl;
   {
     id_t pid = 0;
     if (g.contains_local(pid)) {
       auto p0 = g.get_local_point(pid);
-      std::cout << "Point 0 : ";
       for (const auto& v : p0) {
         std::cout << v << " ";
       }
       std::cout << std::endl;
     }
-    comm.cout0() << std::endl;
   }
 
-  // Point data iterator
+  comm.cout0() << "\nRank 0's all local points" << std::endl;
   {
-    comm.cout0() << "Rank 0 local points" << std::endl;
     for (const auto& [id, point] : g.local_points()) {
-      comm.cout0() << "Point " << id << " : ";
+      comm.cout0() << "Point ID " << id << " : ";
       for (const auto& v : point) {
         comm.cout0() << v << " ";
       }
       comm.cout0() << std::endl;
     }
-    comm.cout0() << std::endl;
   }
 
-  // Get points including the ones that are stored in other ranks
+  comm.cout0() << "\nGet points including the ones that are stored in other ranks"
+               << std::endl;
   {
-    auto points = g.get_points({0, 1});
+    id_t ids[]  = {0, 1};
+    auto points = g.get_points(ids, ids + 2);
     for (const auto& [id, point] : points) {
-      comm.cout0() << "Point " << id << " : ";
+      comm.cout0() << "Point ID " << id << " : ";
       for (const auto& v : point) {
         comm.cout0() << v << " ";
       }

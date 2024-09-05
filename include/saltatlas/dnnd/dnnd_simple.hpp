@@ -273,6 +273,34 @@ class dnnd {
     return query_result;
   }
 
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    auto query_result = query(queries_begin, queries_end, k, epsilon);
+
+    std::vector<std::vector<point_type>> neighbor_features_store;
+    neighbor_features_store.reserve(query_result.size());
+    for (const auto& neighbors : query_result) {
+      std::vector<id_type> neighbor_ids;
+      neighbor_ids.reserve(neighbors.size());
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.push_back(neighbor.id);
+      }
+      auto neighbor_features =
+          get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+      std::vector<point_type> neighbor_features_vec;
+      neighbor_features_vec.reserve(neighbor_ids.size());
+      for (const auto& id : neighbor_ids) {
+        neighbor_features_vec.push_back(neighbor_features.at(id));
+      }
+      neighbor_features_store.push_back(std::move(neighbor_features_vec));
+    }
+
+    return std::make_pair(query_result, neighbor_features_store);
+  }
+
   /// \brief Dump the k-NN index to distributed files.
   /// \param out_file_prefix File path prefix.
   /// \param dump_distance If true, also dump distances
@@ -308,35 +336,51 @@ class dnnd {
     return m_pstore.at(id);
   }
 
-  std::vector<point_type> get_local_points(
-      const std::vector<id_type>& ids) const {
-    std::vector<point_type> points;
-    points.reserve(ids.size());
-    for (const auto& id : ids) {
-      points.push_back(m_pstore.at(id));
+  template <typename id_iterator>
+  std::unordered_map<id_type, point_type> get_local_points(
+      id_iterator ids_begin, id_iterator ids_end) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    std::unordered_map<id_type, point_type> points;
+    points.reserve(std::distance(ids_begin, ids_end));
+    for (auto it = ids_begin; it != ids_end; ++it) {
+      const auto id = *it;
+      points.emplace(id, m_pstore.at(id));
     }
     return points;
   }
 
-  std::vector<std::pair<id_type, point_type>> get_points(
-      const std::vector<id_type>& ids) const {
-    std::vector<std::pair<id_type, point_type>> points;
-    points.reserve(ids.size());
+  template <typename id_iterator>
+  std::unordered_map<id_type, point_type> get_points(
+      id_iterator ids_begin, id_iterator ids_end) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    std::unordered_map<id_type, point_type> points;
+    points.reserve(std::distance(ids_begin, ids_end));
 
     static auto& ref_points = points;
     ref_points              = points;
 
     auto proc = [](auto comm, auto pthis, const id_type id,
-                       const int source_rank) {
+                   const int source_rank) {
+      assert(pthis->contains_local(id));
+
       comm->async(
           source_rank,
           [](auto, const auto& id, const auto& point) {
-            ref_points.emplace_back(id, point);
+            ref_points.emplace(id, point);
           },
           id, pthis->get_local_point(id));
     };
 
-    for (const auto& id : ids) {
+    for (auto it = ids_begin; it != ids_end; ++it) {
+      const auto id = *it;
       m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
     }
 
