@@ -88,9 +88,18 @@ int main(int argc, char** argv) {
 
   g.optimize();
 
-  std::vector<graph_point> queries;
-  int                      num_to_search = 10;
+  std::vector<graph_point> queries{gen_point()};
+  int                      num_to_search = 2;
   const auto results = g.query(queries.begin(), queries.end(), num_to_search);
+
+  if (comm.rank() == 0) {
+    std::cout << "Query result of rank 0" << std::endl;
+    std::cout << "Neighbours (id, distance):";
+    for (const auto& [nn_id, nn_dist] : results[0]) {
+      std::cout << " " << nn_id << " (" << nn_dist << ")";
+    }
+    std::cout << std::endl;
+  }
 
   return 0;
 }

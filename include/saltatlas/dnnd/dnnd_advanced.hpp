@@ -151,6 +151,7 @@ class dnnd {
         metall::unique_instance)(localm.get_allocator<>());
     m_index_k_list = localm.construct<size_container>(metall::unique_instance)(
         localm.get_allocator<>());
+    m_comm.cf_barrier();
   }
 
   dnnd(open_only_t, const std::filesystem::path& datastore_path,
@@ -167,6 +168,7 @@ class dnnd {
     assert(m_knn_index_list);
     m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
     assert(m_index_k_list);
+    m_comm.cf_barrier();
   }
 
   dnnd(open_read_only_t, const std::filesystem::path& datastore_path,
@@ -183,6 +185,7 @@ class dnnd {
     assert(m_knn_index_list);
     m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
     assert(m_index_k_list);
+    m_comm.cf_barrier();
   }
 
   /// \brief Add points to the internal point store.
@@ -267,6 +270,20 @@ class dnnd {
 
   /// \brief Build a KNNG.
   /// All ranks must call this function.
+  /// \param distance_func_id Distance function ID.
+  /// \param k Number of neighbors per point.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
+  std::size_t build(const distance::id& distance_func_id, const int k,
+                    const double rho = 0.8, const double delta = 0.001) {
+    return build(distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 k, rho, delta);
+  }
+
+  /// \brief Build a KNNG.
+  /// All ranks must call this function.
+  /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
@@ -291,6 +308,22 @@ class dnnd {
 
   /// \brief Build a KNNG.
   /// All ranks must call this function.
+  /// \param distance_func_id Distance function ID.
+  /// \param k Number of neighbors per point.
+  /// \param initial_index Initial index.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
+  std::size_t build(const distance::id& distance_func_id, const int k,
+                    const knn_index_type& initial_index, const double rho = 0.8,
+                    const double delta = 0.001) {
+    return build(distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 k, initial_index, rho, delta);
+  }
+
+  /// \brief Build a KNNG.
+  /// All ranks must call this function.
+  /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
@@ -317,6 +350,23 @@ class dnnd {
 
   /// \brief Build a KNNG.
   /// All ranks must call this function.
+  /// \param distance_func_id Distance function ID.
+  /// \param k Number of neighbors per point.
+  /// \param initial_index Initial index.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
+  std::size_t build(
+      const distance::id& distance_func_id, const int k,
+      const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
+      const double rho = 0.8, const double delta = 0.001) {
+    return build(distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 k, initial_index, rho, delta);
+  }
+
+  /// \brief Build a KNNG.
+  /// All ranks must call this function.
+  /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
@@ -344,6 +394,16 @@ class dnnd {
 
   /// \brief Update the KNNG.
   /// All ranks must call this function.
+  void update(const std::size_t index_id, const distance::id& distance_func_id,
+              const int k, const double rho = 0.8, const double delta = 0.001) {
+    update(index_id,
+           distance::distance_function<point_type, distance_type>(
+               distance_func_id),
+           k, rho, delta);
+  }
+
+  /// \brief Update the KNNG.
+  /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
               const int k, const double rho = 0.8, const double delta = 0.001) {
     typename nn_kernel_type::option option{.k                          = k,
@@ -363,6 +423,29 @@ class dnnd {
   /// \brief Apply optimizations to an already constructed KNNG aiming at
   /// improving the query quality and performance.
   /// All ranks must call this function.
+  /// \param index_id Index ID.
+  /// \param distance_func_id Distance function ID.
+  /// \param make_index_undirected If true, make the index undirected.
+  /// \param make_index_undirected If true, make the graph undirected.
+  /// \param pruning_degree_multiplier
+  /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
+  /// where k is the number of neighbors each point in the index has.
+  /// if this value is less than 0, there is no pruning.
+  void optimize(const std::size_t   index_id,
+                const distance::id& distance_func_id,
+                const bool          make_index_undirected     = true,
+                const double        pruning_degree_multiplier = 1.5) {
+    optimize(index_id,
+             distance::distance_function<point_type, distance_type>(
+                 distance_func_id),
+             make_index_undirected, pruning_degree_multiplier);
+  }
+
+  /// \brief Apply optimizations to an already constructed KNNG aiming at
+  /// improving the query quality and performance.
+  /// All ranks must call this function.
+  /// \param index_id Index ID.
+  /// \param distance_function Distance function.
   /// \param make_index_undirected If true, make the index undirected.
   /// \param make_index_undirected If true, make the graph undirected.
   /// \param pruning_degree_multiplier
@@ -387,6 +470,18 @@ class dnnd {
                                       m_knn_index_list->at(index_id),
                                       m_comm};
     optimizer.run();
+  }
+
+  template <typename query_iterator>
+  neighbor_store_type query(const std::size_t   index_id,
+                            const distance::id& distance_func_id,
+                            query_iterator      queries_begin,
+                            query_iterator queries_end, const int k,
+                            const double epsilon = 0.1) {
+    return query(index_id,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -425,6 +520,19 @@ class dnnd {
     kernel.query_batch(queries, query_result);
 
     return query_result;
+  }
+
+  template <typename index_id_iterator, typename query_iterator>
+  neighbor_store_type query(index_id_iterator   index_ids_begin,
+                            index_id_iterator   index_ids_end,
+                            const distance::id& distance_func_id,
+                            query_iterator      queries_begin,
+                            query_iterator queries_end, const int k,
+                            const double epsilon = 0.1) {
+    return query(index_ids_begin, index_ids_end,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
   }
 
   /// \brief Query nearest neighbors of given points.
