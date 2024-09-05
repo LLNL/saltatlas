@@ -37,16 +37,17 @@ function(add_saltatlas_dnnd_example_feature_type example_name type_name)
             PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}")
 endfunction()
 
-add_saltatlas_example(dnnd_simple_example)
-add_saltatlas_example(dnnd_simple_custom_distance_example)
-add_saltatlas_example(dnnd_simple_custom_point_example)
+add_saltatlas_example(dnnd_simple)
+add_saltatlas_example(dnnd_simple_custom_distance)
+add_saltatlas_example(dnnd_simple_custom_point)
+add_saltatlas_example(dnnd_levenshtein)
 
 add_saltatlas_dnnd_example_feature_type(dnnd_bench float)
 add_saltatlas_dnnd_example_feature_type(dnnd_bench uint8_t)
 add_saltatlas_dnnd_example_feature_type(dnnd_bench double)
 
 if (SALTATLAS_USE_METALL)
-    add_saltatlas_example(dnnd_advanced_example)
+    add_saltatlas_example(dnnd_advanced)
 endif ()
 
 add_subdirectory(datasets)
