@@ -144,6 +144,18 @@ class dnnd {
     m_comm.barrier();
   }
 
+  /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
+  /// \tparam container_type Associative YGM container type for key-value store.
+  /// \param container Associative YGM container.
+  template <template <typename, typename> class container_type>
+  void add_points(container_type<id_type, point_type>& container) {
+    container.for_all([this](const id_type id, const point_type& point) {
+      this->add_point(id, point);
+    });
+    m_comm.barrier();
+  }
+
   /// \brief Load points from files and add to the internal point store.
   /// All ranks must call this function although some ranks load no points.
   /// \tparam paths_iterator Iterator type for file paths.
@@ -419,6 +431,21 @@ class dnnd {
     // TODO: hash id?
     return [size](const id_type& id) { return id % size; };
   };
+
+  /// \brief Add a single point. Only to be used by add_points.
+  void add_point(const id_type id, const point_type& point) {
+    auto receiver = [](auto, auto this_ptr, const id_t id,
+                       const auto& sent_point) {
+      if (this_ptr->m_pstore.contains(id)) {
+        std::cerr << "Duplicate ID " << id << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+      this_ptr->m_pstore[id] = sent_point;
+    };
+
+    const auto dst = priv_get_point_partitioner()(id);
+    m_comm.async(dst, receiver, m_this, id, point);
+  }
 
   distance_function_type  m_distance_func;
   ygm::comm&              m_comm;
