@@ -158,7 +158,7 @@ class dnnd {
                  typename ygm_container_type<id_type, point_type>::for_all_args>
   {
     container.for_all([this](const id_type id, const point_type& point) {
-      this->add_point(id, point);
+      this->priv_add_point(id, point);
     });
     m_comm.barrier();
   }
@@ -440,7 +440,7 @@ class dnnd {
   };
 
   /// \brief Add a single point. Only to be used by add_points.
-  void add_point(const id_type id, const point_type& point) {
+  void priv_add_point(const id_type id, const point_type& point) {
     auto receiver = [](auto, auto this_ptr, const id_t id,
                        const auto& sent_point) {
       if (this_ptr->m_pstore.contains(id)) {
