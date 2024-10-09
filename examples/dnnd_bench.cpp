@@ -269,8 +269,8 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -g <string> Ground truth file path" << std::endl;
   cout << "  -o <string> Query result file path" << std::endl;
   cout << "  -b <int>    Batch size (default: 1^25)" << std::endl;
-  cout << "  -D <string> kNNG dump prefix" << std::endl;
-  cout << "  -M          Dump index with distance" << std::endl;
+  cout << "  -G <string> kNNG dump prefix" << std::endl;
+  cout << "  -D          Dump index with distance" << std::endl;
   cout << "  -v          Verbose mode" << std::endl;
   cout << "  -h          Show this message" << std::endl;
 }
