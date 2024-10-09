@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include <ygm/comm.hpp>
+#include <ygm/container/detail/base_concepts.hpp>
 
 #include "saltatlas/dnnd/data_reader.hpp"
 #include "saltatlas/dnnd/detail/distance.hpp"
@@ -141,6 +142,42 @@ class dnnd {
       const auto dst = priv_get_point_partitioner()(*ids_begin);
       m_comm.async(dst, receiver, m_this, *ids_begin, *points_begin);
     }
+    m_comm.barrier();
+  }
+
+  /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
+  /// \tparam ygm_container_type Associative YGM container type for key-value
+  /// store.
+  /// \param container Associative YGM container.
+  template <template <typename, typename> class ygm_container_type>
+  void add_points(ygm_container_type<id_type, point_type>& container)
+    requires ygm::container::detail::HasForAll<
+                 ygm_container_type<id_type, point_type>> &&
+             ygm::container::detail::DoubleItemTuple<
+                 typename ygm_container_type<id_type, point_type>::for_all_args>
+  {
+    container.for_all([this](const id_type id, const point_type& point) {
+      this->priv_add_point(id, point);
+    });
+    m_comm.barrier();
+  }
+
+  /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
+  /// \tparam ygm_container_type Associative YGM container type for key-value
+  /// store (with array-type template signature).
+  /// \param container Associative YGM container.
+  template <template <typename, typename> class ygm_container_type>
+  void add_points(ygm_container_type<point_type, id_type>& container)
+    requires ygm::container::detail::HasForAll<
+                 ygm_container_type<id_type, point_type>> &&
+             ygm::container::detail::DoubleItemTuple<
+                 typename ygm_container_type<id_type, point_type>::for_all_args>
+  {
+    container.for_all([this](const id_type id, const point_type& point) {
+      this->priv_add_point(id, point);
+    });
     m_comm.barrier();
   }
 
@@ -419,6 +456,21 @@ class dnnd {
     // TODO: hash id?
     return [size](const id_type& id) { return id % size; };
   };
+
+  /// \brief Add a single point. Only to be used by add_points.
+  void priv_add_point(const id_type id, const point_type& point) {
+    auto receiver = [](auto, auto this_ptr, const id_t id,
+                       const auto& sent_point) {
+      if (this_ptr->m_pstore.contains(id)) {
+        std::cerr << "Duplicate ID " << id << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+      this_ptr->m_pstore[id] = sent_point;
+    };
+
+    const auto dst = priv_get_point_partitioner()(id);
+    m_comm.async(dst, receiver, m_this, id, point);
+  }
 
   distance_function_type  m_distance_func;
   ygm::comm&              m_comm;
