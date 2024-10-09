@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
       saltatlas::distance::id::levenshtein, comm);
 
   comm.cout0() << "<<Read Points>>" << std::endl;
-  g.load_points(point_file_paths.begin(), point_file_paths.end(), "wsv");
+  g.load_points(point_file_paths.begin(), point_file_paths.end(), "str");
 
   comm.cout0() << "<<Index Construction>>" << std::endl;
   int index_k{2};
