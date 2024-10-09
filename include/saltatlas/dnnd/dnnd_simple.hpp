@@ -163,6 +163,24 @@ class dnnd {
     m_comm.barrier();
   }
 
+  /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
+  /// \tparam ygm_container_type Associative YGM container type for key-value
+  /// store (with array-type template signature).
+  /// \param container Associative YGM container.
+  template <template <typename, typename> class ygm_container_type>
+  void add_points(ygm_container_type<point_type, id_type>& container)
+    requires ygm::container::detail::HasForAll<
+                 ygm_container_type<id_type, point_type>> &&
+             ygm::container::detail::DoubleItemTuple<
+                 typename ygm_container_type<id_type, point_type>::for_all_args>
+  {
+    container.for_all([this](const id_type id, const point_type& point) {
+      this->priv_add_point(id, point);
+    });
+    m_comm.barrier();
+  }
+
   /// \brief Load points from files and add to the internal point store.
   /// All ranks must call this function although some ranks load no points.
   /// \tparam paths_iterator Iterator type for file paths.
