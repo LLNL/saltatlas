@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -194,8 +195,9 @@ class nn_index {
   /// neighbor ids. The second line is the dummy value and distances to each
   /// neighbor. The dummy value is just a placeholder so that each neighbor id
   /// and distance pair is stored in the same column.
-  bool dump(const std::string_view filename, bool dump_distance = false) const {
-    std::ofstream ofs(filename.data());
+  bool dump(const std::filesystem::path &filename,
+            bool                         dump_distance = false) const {
+    std::ofstream ofs(filename);
     if (!ofs) {
       std::cerr << "Failed to open the file: " << filename << std::endl;
       return false;
@@ -221,6 +223,64 @@ class nn_index {
     if (!ofs) {
       std::cerr << "Failed to close the file: " << filename << std::endl;
       return false;
+    }
+    return true;
+  }
+
+  /// \brief Load the index from a dump file.
+  /// \param filename The file name to load the index.
+  /// The file must be formatted as described in the `dump` method.
+  /// \param contains_distance If true, the input file contains distances.
+  /// If false, the input file does not contain distances and distance values
+  /// will be uninitialized.
+  /// \param overwrite If true, the existing index is overwritten.
+  /// \return True if the load is successful.
+  bool load(const std::filesystem::path &filename,
+            const bool contains_distance = false, const bool overwrite = true) {
+    if (overwrite) reset();
+
+    std::ifstream ifs(filename);
+    if (!ifs) {
+      std::cerr << "Failed to open the file: " << filename << std::endl;
+      return false;
+    }
+    std::string line;
+    while (std::getline(ifs, line)) {
+      std::istringstream iss(line);
+      id_type            source;
+      iss >> source;
+      if (iss.fail()) {
+        std::cerr << "Failed to read the source id: " << line << std::endl;
+        return false;
+      }
+      if (m_index.count(source) > 0) {
+        std::cerr << "The source id is duplicated: " << source << std::endl;
+        return false;
+      }
+
+      neighbor_list_type neighbors;
+      id_type            neighbor_id;
+      while (iss >> neighbor_id) {
+        neighbors.emplace_back(neighbor_id, distance_type{});
+      }
+      m_index[source] = std::move(neighbors);
+
+      if (contains_distance) {
+        std::getline(ifs, line);
+        std::istringstream iss(line);
+        distance_type      distance;
+        iss >> distance;  // dummy distance
+        std::size_t index = 0;
+        while (iss >> distance) {
+          m_index[source][index++].distance = distance;
+        }
+        if (index != m_index[source].size()) {
+          std::cerr << "The number of distances does not match the number of "
+                       "neighbors"
+                    << std::endl;
+          return false;
+        }
+      }
     }
     return true;
   }
