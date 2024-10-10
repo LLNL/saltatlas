@@ -73,9 +73,10 @@ inline std::vector<T> str_split(const std::string &input) {
   return result;
 }
 
-/// \brief Split a string by whitespace and store elements into a vector of
-/// char. str_split's specialization for char. \param input Input string.
-/// \return Vector of char.
+/// \brief Split a string into a vector of char.
+/// str_split's specialization for char.
+/// \param input Input string.
+/// \return Vector of chars.
 template <>
 inline std::vector<char> str_split(const std::string &input) {
   std::vector<char> result(input.begin(), input.end());

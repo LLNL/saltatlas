@@ -3,11 +3,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-/// \brief A simple example of using DNND's simple with a custom distance
-/// function. It is recommended to see the examples/dnnd_simple_example.cpp
-/// beforehand. Usage:
+/// \brief A simple example of using DNND's advanced API
+/// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_simple_custom_distance_example
+///     mpirun -n 2 ./example/dnnd_advanced
 
 #include <iostream>
 #include <vector>

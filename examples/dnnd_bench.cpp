@@ -135,8 +135,8 @@ int main(int argc, char **argv) {
     }
 
     if (!opt.query_result_file_path.empty()) {
-      comm.cout0() << "\nDumping query results to " << opt.query_result_file_path
-                   << std::endl;
+      comm.cout0() << "\nDumping query results to "
+                   << opt.query_result_file_path << std::endl;
       saltatlas::utility::gather_and_dump_neighbors(
           query_results, opt.query_result_file_path, comm);
     }
@@ -253,19 +253,22 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << std::endl;
   cout << "Options:" << std::endl;
   cout << "  -k <int>    kNNG k parameter (required)" << std::endl;
-  cout << "  -f <string> Distance name (required)" << std::endl;
-  cout << "  -p <string> Point file format (required)" << std::endl;
+  cout << "  -f <string> Distance name (required). l1, l2, sql2, cosine, "
+          "altcosine, jaccard, altjaccard, and levenshtein are supported."
+       << std::endl;
+  cout << "  -p <string> Point file format (required). wsv, wsv-id, csv, "
+          "csv-id, str, and str-id are supported"
+       << std::endl;
   cout << "  -r <float> NN-Descent r parameter (default: 0.8)" << std::endl;
   cout << "  -d <float> NN-Descent delta parameter (default: 0.001)"
        << std::endl;
   cout << "  -u          Make index undirected (default: false)" << std::endl;
   cout << "  -m <float> High degree pruning parameter, must be >= 0 "
-          "(default: 0.0, no "
-          "prunning)"
+          "(default: 0.0, no prunning)"
        << std::endl;
   cout << "  -q <string> Query file path" << std::endl;
   cout << "  -n <int>    #of nearest neighbors to search" << std::endl;
-  cout << "  -e <float> Query epsilon parameter (default: 0.1)" << std::endl;
+  cout << "  -e <float>  Query epsilon parameter (default: 0.1)" << std::endl;
   cout << "  -g <string> Ground truth file path" << std::endl;
   cout << "  -o <string> Query result file path" << std::endl;
   cout << "  -b <int>    Batch size (default: 1^25)" << std::endl;

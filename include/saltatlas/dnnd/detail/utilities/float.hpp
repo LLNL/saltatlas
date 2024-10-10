@@ -7,13 +7,17 @@
 
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace saltatlas::dndetail {
 
 template <typename T>
 bool nearly_equal(const T a, const T b,
                   const double eps = std::numeric_limits<T>::epsilon()) {
-  return (std::fabs(a - b) < eps);
+  if constexpr (std::is_floating_point<T>::value) {
+    return (std::fabs(a - b) < eps);
+  }
+  return a == b;
 }
 
 }  // namespace saltatlas::dndetail
