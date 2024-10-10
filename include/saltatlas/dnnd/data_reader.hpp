@@ -307,8 +307,21 @@ inline void read_points(
                                   point_partitioner, comm, verbose);
   } else if (format == "str") {
     if (verbose) comm.cout0() << "Read string format files" << std::endl;
-    dndetail::read_points(point_file_names, local_point_store,
-                          point_partitioner, comm, verbose);
+    if (!std::is_same_v<typename point_t::value_type, char>) {
+      comm.cerr0() << "Point type must be a vector of char" << std::endl;
+    } else {
+      dndetail::read_points(point_file_names, local_point_store,
+                            point_partitioner, comm, verbose);
+    }
+  } else if (format == "str-id") {
+    if (verbose)
+      comm.cout0() << "Read string format files with IDs" << std::endl;
+    if (!std::is_same_v<typename point_t::value_type, char>) {
+      comm.cerr0() << "Point type must be a vector of char" << std::endl;
+    } else {
+      dndetail::read_points_with_id(point_file_names, local_point_store,
+                                    point_partitioner, comm, verbose);
+    }
   } else {
     comm.cerr0() << "Invalid reader mode" << std::endl;
   }

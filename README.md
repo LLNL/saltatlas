@@ -165,16 +165,14 @@ While the second example should be faster, the first is easier to use and more e
 
 ```shell
 cd build
-
-mpirun -n 2 ./examples/dnnd_example
+mpirun -n 2 ./examples/dnnd_simple_example
 ```
 
-
-## Running DNND PM (persistent memory) Examples
+## Running DNND Advanced API Examples
 
 ### Build
 
-The DNND PM examples require [Metall](https://github.com/LLNL/metall) and [Boost C++ Libraries](https://www.boost.org/) in addition to saltatlas's basic components.
+The DNND advanced-API examples require [Metall](https://github.com/LLNL/metall) and [Boost C++ Libraries](https://www.boost.org/) in addition to saltatlas's basic components.
 Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
 Those libraries are automatically downloaded and set up properly.
 
@@ -187,55 +185,6 @@ git clone https://github.com/LLNL/saltatlas.git
 cd saltatlas
 mkdir build && cd build
 cmake ../ -DSALTATLAS_USE_METALL=ON -DSALTATLAS_USE_HDF5=OFF -DCMAKE_BUILD_TYPE=RELEASE
-```
-
-### Executables
-
-There are three examples executables for k-NN index construction,
-k-NN index optimization, and query, respectively.
-
-Use `-h` option to show the help menus. 
-
-#### dnnd_pm_const_example
-
-This program constructs a k-NN index.
-
-```shell
-mpirun -n [#of procs] ./examples/dnnd_pm_const_example (options) point_file_0 point_file_1...
-```
-
-#### dnnd_pm_optimize_example
-
-This program optimizes an already constructed k-NN index.
-
-```shell
-mpirun -n [#of procs] ./examples/dnnd_pm_optimize_example (options)
-```
-
-
-#### dnnd_pm_query_example
-
-This program performs queries against an already constructed index.
-
-```shell
-mpirun -n [#of procs] ./examples/dnnd_pm_query_example (options)
-```
-
-
-### Running Example
-
-```shell
-cd build
-
-# Construct a k-NN index and store
-mpirun -n 2 ./examples/dnnd_pm_const_example -z ./pindex -k 2 -f l2 -p wsv ../examples/datasets/point_5-4.dat 
-
-# Optimize the k-NN index created above
-mpirun -n 2 ./examples/dnnd_pm_optimize_example -z ./pindex -u -m 1.5
-
-# Open the k-NN index created above, query nearest neighbors, and show the accuracy.
-mpirun -n 2 ./examples/dnnd_pm_query_example -z ./pindex \
-  -n 4 -q ../examples/datasets/query_5-4.txt -g ../examples/datasets/ground-truth_5-4.txt
 ```
 
 # License

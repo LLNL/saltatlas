@@ -98,10 +98,10 @@ class nn_index {
 
   void sort_and_remove_duplicate_neighbors(const id_type &source) {
     sort_neighbors(source);
-    m_index[source].erase(
-        std::unique(m_index[source].begin(), m_index[source].end()),
-        m_index[source].end());
-    m_index[source].shrink_to_fit();
+    auto& nns_list = m_index[source];
+    auto last = std::unique(nns_list.begin(), nns_list.end());
+    nns_list.erase(last, nns_list.end());
+    nns_list.shrink_to_fit();
   }
 
   /// \warning The neighbor list must be sorted beforehand.

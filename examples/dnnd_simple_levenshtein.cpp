@@ -2,73 +2,67 @@
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
+/*
+Usage example:
+cd saltatlas/build
+mpirun -n 2 ./examples/dnnd_simple_levenshtein -p str -u  -k 3 -n 4\
+  -q ../examples/datasets/query_string.txt \
+  -g ../examples/datasets/ground-truth_string.txt \
+  ../examples/datasets/point_string.txt
+*/
 
-// Usage:
-//   cd saltatlas/build
-//   mpirun -n 2 ./examples/dnnd_example
-
-#include <filesystem>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include <ygm/comm.hpp>
+
 #include <saltatlas/dnnd/dnnd_simple.hpp>
+#include <saltatlas/dnnd/utility.hpp>
+
 #include "dnnd_example_common.hpp"
 
-#ifdef SALTATLAS_DNND_EXAMPLE_ID_TYPE
-using id_type = SALTATLAS_DNND_EXAMPLE_ID_TYPE;
-#else
 using id_type = uint32_t;
-#endif
-
-#ifdef SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE
-using feature_element_type = SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE;
-#else
-using feature_element_type = float;
-#endif
-
-#ifdef SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE
-using distance_type = SALTATLAS_DNND_EXAMPLE_DISTANCE_TYPE;
-#else
-using distance_type =
-    std::conditional_t<std::is_same_v<feature_element_type, double>, double,
-                       float>;
-#endif
-
-using dnnd_type =
-    saltatlas::dnnd<id_type, saltatlas::feature_vector<feature_element_type>,
-                    distance_type>;
+using dist_t  = int;  // Levenshtein distance is an integer
+// Use char to represent a string
+using point_type = saltatlas::feature_vector<char>;
 
 struct option_t {
-  int                                index_k{0};
-  double                             r{0.8};
-  double                             delta{0.001};
-  std::string                        distance_name;
-  std::vector<std::filesystem::path> point_file_names;
-  std::string                        point_file_format;
-  std::size_t                        batch_size{1ULL << 25};
-  bool                               make_index_undirected{false};
-  double                             pruning_degree_multiplier{0.0};
+  // KNNG construction options
+  int         index_k{2};
+  double      r{0.8};
+  double      delta{0.001};
+  std::size_t batch_size{1ULL << 25};
+
+  // KNNG optimization options
+  bool   make_index_undirected{false};
+  double pruning_degree_multiplier{0.0};
+
+  // Query options
+  int    query_k{1};  // #of neighbors to search for
+  double epsilon{0.1};
+
+  // Data dump options
+  std::filesystem::path index_dump_prefix;
+  bool                  dump_index_with_distance{false};
+  bool                  verbose{false};
+
+  // Input file arguments
+  std::vector<std::filesystem::path> point_file_paths;
   std::filesystem::path              query_file_path;
   std::filesystem::path              ground_truth_file_path;
   std::filesystem::path              query_result_file_path;
-  int                                query_k{0};
-  double                             epsilon{0.1};
-  std::filesystem::path              index_dump_prefix;
-  bool                               dump_index_with_distance{false};
-  bool                               verbose{false};
+  // 'str' is for files that contain strings (one string per line)
+  // 'str-id' is for files that contain IDs in the first column
+  std::string point_file_format;
 };
 
-bool parse_options(int, char **, option_t &, bool &);
+bool parse_options(int argc, char **argv, option_t &opt, bool &help);
 template <typename cout_type>
 void usage(std::string_view, cout_type &);
-template <typename cout_type>
-void show_options(const option_t &, cout_type &);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
-  show_config<id_type, feature_element_type, distance_type>(comm);
 
   option_t opt;
   bool     help{false};
@@ -81,57 +75,35 @@ int main(int argc, char **argv) {
     usage(argv[0], comm.cout0());
     return 0;
   }
-  show_options(opt, comm.cout0());
 
-  dnnd_type g(saltatlas::distance::convert_to_distance_id(opt.distance_name),
-              comm, std::random_device{}(), opt.verbose);
+  saltatlas::dnnd<id_t, point_type, dist_t> g(
+      saltatlas::distance::id::levenshtein, comm);
 
-  {
-    comm.cout0() << "\n<<Read Points>>" << std::endl;
-    const auto paths =
-        saltatlas::utility::find_file_paths(opt.point_file_names);
-    ygm::timer point_read_timer;
-    g.load_points(paths.begin(), paths.end(), opt.point_file_format);
-    comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
-                 << std::endl;
-    comm.cout0() << "#of points\t" << g.num_points() << std::endl;
-  }
+  comm.cout0() << "<<Read Points>>" << std::endl;
+  // Read string points, where each line in files is a string
+  g.load_points(opt.point_file_paths.begin(), opt.point_file_paths.end(),
+                opt.point_file_format);
 
-  {
-    comm.cout0() << "\n<<kNNG Construction>>" << std::endl;
-    ygm::timer const_timer;
-    g.build(opt.index_k, opt.r, opt.delta, opt.batch_size);
-    comm.cout0() << "\nkNNG construction took (s)\t" << const_timer.elapsed()
-                 << std::endl;
-  }
+  comm.cout0() << "\n<<kNNG Construction>>" << std::endl;
+  g.build(opt.index_k, opt.r, opt.delta, opt.batch_size);
 
   if (opt.make_index_undirected) {
     comm.cout0() << "\n<<kNNG Optimization>>" << std::endl;
-    ygm::timer optimization_timer;
     g.optimize(opt.make_index_undirected, opt.pruning_degree_multiplier);
-    comm.cout0() << "\nkNNG optimization took (s)\t"
-                 << optimization_timer.elapsed() << std::endl;
   }
 
-  if (!opt.query_file_path.empty()) {
+  if (!opt.query_file_path.empty() && opt.query_k > 0) {
     comm.cout0() << "\n<<Query>>" << std::endl;
-    std::vector<dnnd_type::point_type> queries;
+    std::vector<point_type> queries;
     saltatlas::read_query(opt.query_file_path, queries, comm);
 
     comm.cout0() << "Executing queries" << std::endl;
-    ygm::timer step_timer;
     const auto query_results =
         g.query(queries.begin(), queries.end(), opt.query_k, opt.epsilon);
     comm.cf_barrier();
-    comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
-                 << std::endl;
 
     if (!opt.ground_truth_file_path.empty()) {
       show_query_recall_score(query_results, opt.ground_truth_file_path, comm);
-      show_query_recall_score_with_only_distance(
-          query_results, opt.ground_truth_file_path, comm);
-      show_query_recall_score_with_distance_ties(
-          query_results, opt.ground_truth_file_path, comm);
     }
 
     if (!opt.query_result_file_path.empty()) {
@@ -153,10 +125,6 @@ int main(int argc, char **argv) {
 }
 
 bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
-  opt.distance_name.clear();
-  opt.point_file_names.clear();
-  opt.point_file_format.clear();
-  opt.index_dump_prefix.clear();
   help = false;
 
   int n;
@@ -172,10 +140,6 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 
       case 'd':
         opt.delta = std::stod(optarg);
-        break;
-
-      case 'f':
-        opt.distance_name = optarg;
         break;
 
       case 'p':
@@ -235,12 +199,14 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
     }
   }
 
-  for (int index = optind; index < argc; index++) {
-    opt.point_file_names.emplace_back(argv[index]);
+  if (optind < argc) {
+    opt.point_file_paths.clear();
+    for (int index = optind; index < argc; index++) {
+      opt.point_file_paths.emplace_back(argv[index]);
+    }
   }
 
-  if (opt.distance_name.empty() || opt.point_file_format.empty() ||
-      opt.point_file_names.empty()) {
+  if (opt.point_file_format.empty() || opt.point_file_paths.empty()) {
     return false;
   }
 
@@ -253,9 +219,6 @@ void usage(std::string_view exe_name, cout_type &cout) {
        << std::endl;
   cout << "Options:" << std::endl;
   cout << "  -k <int>    kNNG k parameter (required)" << std::endl;
-  cout << "  -f <string> Distance name (required). l1, l2, sql2, cosine, "
-          "altcosine, jaccard, altjaccard, and levenshtein are supported."
-       << std::endl;
   cout << "  -p <string> Point file format (required). wsv, wsv-id, csv, "
           "csv-id, str, and str-id are supported"
        << std::endl;
@@ -276,29 +239,4 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -D          Dump index with distance" << std::endl;
   cout << "  -v          Verbose mode" << std::endl;
   cout << "  -h          Show this message" << std::endl;
-}
-
-template <typename cout_type>
-void show_options(const option_t &opt, cout_type &cout) {
-  cout << "Options:" << std::endl;
-  cout << "  k: " << opt.index_k << std::endl;
-  cout << "  r: " << opt.r << std::endl;
-  cout << "  delta: " << opt.delta << std::endl;
-  cout << "  distance name: " << opt.distance_name << std::endl;
-  cout << "  point file format: " << opt.point_file_format << std::endl;
-  cout << "  make index undirected: " << opt.make_index_undirected << std::endl;
-  cout << "  pruning degree multiplier: " << opt.pruning_degree_multiplier
-       << std::endl;
-  cout << "  query file path: " << opt.query_file_path << std::endl;
-  cout << "  ground truth file path: " << opt.ground_truth_file_path
-       << std::endl;
-  cout << "  query result file path: " << opt.query_result_file_path
-       << std::endl;
-  cout << "  query k: " << opt.query_k << std::endl;
-  cout << "  epsilon: " << opt.epsilon << std::endl;
-  cout << "  batch size: " << opt.batch_size << std::endl;
-  cout << "  index dump prefix: " << opt.index_dump_prefix << std::endl;
-  cout << "  dump index with distance: " << opt.dump_index_with_distance
-       << std::endl;
-  cout << "  verbose: " << opt.verbose << std::endl;
 }
