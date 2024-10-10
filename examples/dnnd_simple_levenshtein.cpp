@@ -58,17 +58,22 @@ struct option_t {
 };
 
 bool parse_options(int argc, char **argv, option_t &opt, bool &help);
+template <typename cout_type>
+void usage(std::string_view, cout_type &);
 
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
 
   option_t opt;
-  bool     help;
+  bool     help{false};
   if (!parse_options(argc, argv, opt, help)) {
-    if (comm.rank0()) {
-      std::cerr << "Invalid command line arguments" << std::endl;
-    }
-    return 1;
+    comm.cerr0() << "Invalid option" << std::endl;
+    usage(argv[0], comm.cerr0());
+    return 0;
+  }
+  if (help) {
+    usage(argv[0], comm.cout0());
+    return 0;
   }
 
   saltatlas::dnnd<id_t, point_type, dist_t> g(
@@ -217,11 +222,11 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -p <string> Point file format (required). wsv, wsv-id, csv, "
           "csv-id, str, and str-id are supported"
        << std::endl;
-  cout << "  -r <float> NN-Descent r parameter (default: 0.8)" << std::endl;
-  cout << "  -d <float> NN-Descent delta parameter (default: 0.001)"
+  cout << "  -r <float>  NN-Descent r parameter (default: 0.8)" << std::endl;
+  cout << "  -d <float>  NN-Descent delta parameter (default: 0.001)"
        << std::endl;
   cout << "  -u          Make index undirected (default: false)" << std::endl;
-  cout << "  -m <float> High degree pruning parameter, must be >= 0 "
+  cout << "  -m <float>  High degree pruning parameter, must be >= 0 "
           "(default: 0.0, no prunning)"
        << std::endl;
   cout << "  -q <string> Query file path" << std::endl;

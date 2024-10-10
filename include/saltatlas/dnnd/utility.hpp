@@ -228,7 +228,12 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
   }
 }
 
-/// \brief Dumps neighbors to a file
+/// \brief Dumps neighbors to a file.
+/// There are two blocks in the dumped file.
+/// Assume that there are n neighbors for each query.
+/// the first n-lines are IDs of neighbors, and the next n-lines are distances.
+/// 0-th line is for the neighbor IDs of the first entry in the table.
+/// n-th line is for the neighbor distances of the 0-th entry in the table.
 /// \tparam id_t ID type.
 /// \tparam dist_t Distance type.
 /// \param table Neighbors to dump.
@@ -258,6 +263,7 @@ inline void dump_neighbors(const neighbors_tbl<id_t, dist_t> &table,
   }
 }
 
+/// \brief Gather and dump neighbors to a file in the root rank.
 template <typename id_t, typename dist_t>
 inline void gather_and_dump_neighbors(
     const neighbors_tbl<id_t, dist_t> &table,

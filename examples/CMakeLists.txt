@@ -41,6 +41,7 @@ add_saltatlas_example(dnnd_simple)
 add_saltatlas_example(dnnd_simple_custom_distance)
 add_saltatlas_example(dnnd_simple_custom_point)
 add_saltatlas_example(dnnd_simple_levenshtein)
+add_saltatlas_example(dnnd_simple_charhist)
 
 add_saltatlas_dnnd_example_feature_type(dnnd_bench float)
 add_saltatlas_dnnd_example_feature_type(dnnd_bench uint8_t)
