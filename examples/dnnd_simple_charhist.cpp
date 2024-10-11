@@ -47,7 +47,7 @@ dist_t char_histgram_distance(const point_type &p1, const point_type &p2) {
 
 struct option_t {
   // KNNG construction options
-  int         index_k{2};
+  int         index_k{0};
   double      r{0.8};
   double      delta{0.001};
   std::size_t batch_size{1ULL << 25};
@@ -221,6 +221,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
     for (int index = optind; index < argc; index++) {
       opt.point_file_paths.emplace_back(argv[index]);
     }
+  }
+
+  if (opt.index_k <= 0) {
+    return false;
   }
 
   if (opt.point_file_format.empty() || opt.point_file_paths.empty()) {

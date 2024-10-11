@@ -239,6 +239,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
     opt.point_file_names.emplace_back(argv[index]);
   }
 
+  if (opt.index_k <= 0) {
+    return false;
+  }
+
   if (opt.distance_name.empty() || opt.point_file_format.empty() ||
       opt.point_file_names.empty()) {
     return false;

@@ -134,6 +134,7 @@ int main(int argc, char** argv) {
 
   // Dump a KNNG to files
   g.dump_graph("./knng");
+  comm.cout0() << "KNNG dumped to ./knng" << std::endl;
 
   return 0;
 }

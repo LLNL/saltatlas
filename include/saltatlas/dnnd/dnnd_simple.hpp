@@ -355,6 +355,7 @@ class dnnd {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
     m_knn_index.dump(file_name.str(), dump_distance);
+    m_comm.cf_barrier();
   }
 
   /// \brief Check if the local point store contains a point with the given ID.
