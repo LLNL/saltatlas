@@ -16,13 +16,13 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <saltatlas/dnnd/detail/utilities/general.hpp>
-#include <saltatlas/dnnd/detail/utilities/string_cast.hpp>
-#include <saltatlas/dnnd/detail/utilities/ygm.hpp>
-#include "saltatlas/point_store.hpp"
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/utilities/general.hpp>
+#include <saltatlas/common/detail/utilities/string_cast.hpp>
+#include <saltatlas/common/detail/utilities/ygm.hpp>
+#include "saltatlas/common/point_store.hpp"
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 
 /// \brief Read points (feature vectors) using multiple processes.
 /// Point IDs are equal to the corresponding line numbers,
@@ -259,7 +259,7 @@ template <typename id_type, typename point_t, typename H, typename E,
 void read_points(
     const std::vector<std::filesystem::path>          &file_names,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
-    const std::function<int(const id_t &id)>          &point_partitioner,
+    const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, point_t &point) {
     const auto buf = str_split<typename point_t::value_type>(input);
@@ -271,7 +271,7 @@ void read_points(
   read_points_helper(file_names, parser, local_point_store, point_partitioner,
                      comm, verbose);
 }
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail
 
 namespace saltatlas {
 
@@ -288,30 +288,30 @@ inline void read_points(
     if (verbose)
       comm.cout0() << "Read WSV format (whitespace separated, no ID) files"
                    << std::endl;
-    dndetail::read_points(point_file_names, local_point_store,
-                          point_partitioner, comm, verbose);
+    detail::read_points(point_file_names, local_point_store, point_partitioner,
+                        comm, verbose);
   } else if (format == "wsv-id") {
     if (verbose)
       comm.cout0() << "Read WSV-ID (whitespace separated with ID) format files"
                    << std::endl;
-    dndetail::read_points_with_id(point_file_names, local_point_store,
-                                  point_partitioner, comm, verbose);
+    detail::read_points_with_id(point_file_names, local_point_store,
+                                point_partitioner, comm, verbose);
   } else if (format == "csv") {
     if (verbose)
       comm.cout0() << "Read CSV format (without ID) files" << std::endl;
-    dndetail::read_points(point_file_names, ',', local_point_store,
-                          point_partitioner, comm, verbose);
+    detail::read_points(point_file_names, ',', local_point_store,
+                        point_partitioner, comm, verbose);
   } else if (format == "csv-id") {
     if (verbose) comm.cout0() << "Read CSV-ID format files" << std::endl;
-    dndetail::read_points_with_id(point_file_names, ',', local_point_store,
-                                  point_partitioner, comm, verbose);
+    detail::read_points_with_id(point_file_names, ',', local_point_store,
+                                point_partitioner, comm, verbose);
   } else if (format == "str") {
     if (verbose) comm.cout0() << "Read string format files" << std::endl;
     if (!std::is_same_v<typename point_t::value_type, char>) {
       comm.cerr0() << "Point type must be a vector of char" << std::endl;
     } else {
-      dndetail::read_points(point_file_names, local_point_store,
-                            point_partitioner, comm, verbose);
+      detail::read_points(point_file_names, local_point_store,
+                          point_partitioner, comm, verbose);
     }
   } else if (format == "str-id") {
     if (verbose)
@@ -319,8 +319,8 @@ inline void read_points(
     if (!std::is_same_v<typename point_t::value_type, char>) {
       comm.cerr0() << "Point type must be a vector of char" << std::endl;
     } else {
-      dndetail::read_points_with_id(point_file_names, local_point_store,
-                                    point_partitioner, comm, verbose);
+      detail::read_points_with_id(point_file_names, local_point_store,
+                                  point_partitioner, comm, verbose);
     }
   } else {
     comm.cerr0() << "Invalid reader mode" << std::endl;
@@ -328,7 +328,7 @@ inline void read_points(
 }
 
 namespace {
-using saltatlas::dndetail::neighbor;
+using saltatlas::detail::neighbor;
 
 template <typename id_t, typename dist_t>
 using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
@@ -391,13 +391,13 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     ifs.clear();
     ifs.seekg(0);
 
-    num_neighbors_per_entry = dndetail::str_split<id_type>(buf).size();
+    num_neighbors_per_entry = detail::str_split<id_type>(buf).size();
   }
 
   // Reads neighbor IDs.
   for (std::string buf; std::getline(ifs, buf);) {
-    const auto ids = dndetail::str_split<id_type>(buf);
-    std::vector<dndetail::neighbor<id_type, distance_type>> neighbors;
+    const auto ids = detail::str_split<id_type>(buf);
+    std::vector<detail::neighbor<id_type, distance_type>> neighbors;
     for (const auto id : ids) {
       neighbors.emplace_back(id, distance_type{});
     }
@@ -416,7 +416,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
   // Reads distances.
   std::size_t line_no = 0;
   for (std::string buf; std::getline(ifs, buf);) {
-    const auto distances = dndetail::str_split<distance_type>(buf);
+    const auto distances = detail::str_split<distance_type>(buf);
     if (distances.size() != num_neighbors_per_entry) {
       std::cerr << "#of neighbors per line are not the same" << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -444,7 +444,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
   if (comm.rank0()) {
     read_neighbors(file_path, global_store);
   }
-  dndetail::distribute_elements_by_block(global_store, store, comm);
+  detail::distribute_elements_by_block(global_store, store, comm);
 }
 
 /// \brief Reads a file that contain queries.
@@ -477,7 +477,7 @@ inline void read_query(const std::filesystem::path &query_file_path,
   read_query<point_t>(
       query_file_path,
       [](const std::string &line) {
-        auto data = dndetail::str_split<typename point_t::value_type>(line);
+        auto data = detail::str_split<typename point_t::value_type>(line);
         return point_t(data.begin(), data.end());
       },
       queries);
@@ -495,7 +495,7 @@ inline void read_query(const std::filesystem::path &query_file_path,
   if (comm.rank0()) {
     read_query(query_file_path, global_store);
   }
-  dndetail::distribute_elements_by_block(global_store, queries, comm);
+  detail::distribute_elements_by_block(global_store, queries, comm);
 }
 
 }  // namespace saltatlas

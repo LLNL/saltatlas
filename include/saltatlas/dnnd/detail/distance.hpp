@@ -9,12 +9,12 @@
 #include <cmath>
 #include <string_view>
 
+#include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/blas.hpp>
-#include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::distance {
 
-using saltatlas::dndetail::nearly_equal;
+using saltatlas::detail::nearly_equal;
 
 enum class id : uint8_t {
   invalid,

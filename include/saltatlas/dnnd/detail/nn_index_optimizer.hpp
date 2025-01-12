@@ -13,10 +13,10 @@
 #include <vector>
 
 #include <saltatlas/dnnd/detail/distance.hpp>
-#include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
-#include "saltatlas/point_store.hpp"
+#include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::dndetail {
 

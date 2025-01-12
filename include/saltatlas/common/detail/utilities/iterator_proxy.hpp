@@ -5,7 +5,7 @@
 
 #pragma once
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 
 template <typename iterator_type>
 class iterator_proxy {
@@ -22,4 +22,4 @@ class iterator_proxy {
   iterator_type m_end;
 };
 
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail

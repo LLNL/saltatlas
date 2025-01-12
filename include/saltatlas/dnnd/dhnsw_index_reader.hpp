@@ -13,8 +13,8 @@
 #include <ygm/comm.hpp>
 #include <ygm/io/ndjson_parser.hpp>
 
-#include <saltatlas/dnnd/detail/neighbor.hpp>
-#include "saltatlas/point_store.hpp"
+#include <saltatlas/common/detail/neighbor.hpp>
+#include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas {
 

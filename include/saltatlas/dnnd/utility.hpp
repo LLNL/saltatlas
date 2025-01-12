@@ -14,16 +14,16 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/detail/neighbor.hpp>
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
-#include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::utility {
 
 using saltatlas::dndetail::find_file_paths;
 
 namespace {
-using saltatlas::dndetail::neighbor;
+using saltatlas::detail::neighbor;
 
 template <typename id_t, typename dist_t>
 using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
@@ -124,8 +124,8 @@ inline std::vector<double> get_recall_scores_with_only_distance(
     std::size_t num_corrects = 0;
     for (std::size_t n = 0; n < k; ++n) {
       num_corrects += (sorted_test[n].distance < max_distance ||
-                       dndetail::nearly_equal(sorted_test[n].distance,
-                                              max_distance, epsilon));
+                       detail::nearly_equal(sorted_test[n].distance,
+                                            max_distance, epsilon));
     }
 
     scores.push_back((double)num_corrects / (double)k * 100.0);
@@ -177,7 +177,7 @@ inline std::vector<double> get_recall_scores_with_distance_ties(
     const auto               max_distance = sorted_gt[k - 1].distance;
     for (std::size_t n = 0; n < sorted_gt.size(); ++n) {
       if (n >= k &&
-          !dndetail::nearly_equal(sorted_gt[n].distance, max_distance, epsilon))
+          !detail::nearly_equal(sorted_gt[n].distance, max_distance, epsilon))
         break;
       true_id_set.insert(sorted_gt[n].id);
     }

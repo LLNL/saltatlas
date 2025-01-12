@@ -48,13 +48,14 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/utilities/mpi.hpp>
+#include <saltatlas/common/detail/utilities/ygm.hpp>
 #include <saltatlas/dnnd/detail/distance.hpp>
-#include <saltatlas/dnnd/detail/neighbor.hpp>
-#include <saltatlas/dnnd/detail/neighbor_cereal.hpp>
+#include <saltatlas/dnnd/detail/knn_heap.hpp>
+#include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
-#include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/utilities/ygm.hpp>
-#include "saltatlas/point_store.hpp"
+#include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -170,12 +171,11 @@ class dnnd_kernel {
       boost::unordered_node_map<id_type,
                                 unique_knn_heap<id_type, distance_type, bool>>;
 #else
-  using knn_heap_table_type =
-      std::unordered_map<id_type,
-                         unique_knn_heap<id_type, distance_type, bool>>;
+  using knn_heap_table_type = std::unordered_map<
+      id_type, dndetail::unique_knn_heap<id_type, distance_type, bool>>;
 #endif
 
-  using neighbor_type = neighbor<id_type, distance_type>;
+  using neighbor_type = detail::neighbor<id_type, distance_type>;
 #if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
   using adj_lsit_type =
       boost::unordered_node_map<id_type, std::vector<id_type>>;
@@ -298,7 +298,7 @@ class dnnd_kernel {
     // dataset. The global batch size is equal to the mini-batch size divided by
     // init_k as each point sends up to init_k messages for initialization.
     auto pitr = m_point_store.begin();
-    run_batched_ygm_async(
+    detail::run_batched_ygm_async(
         m_point_store.size(),               // #of tasks in local
         m_option.mini_batch_size / init_k,  // global batch size
         m_option.verbose, m_comm, [this, &pitr, init_k](auto& comm) {
@@ -571,7 +571,7 @@ class dnnd_kernel {
       m_comm.cf_barrier();
 
       auto itr = reverse_neighbors.begin();
-      run_batched_ygm_async(
+      detail::run_batched_ygm_async(
           reverse_neighbors.size(), m_option.mini_batch_size, false, m_comm,
           [&itr, this](auto& comm) {
             const auto& source        = itr->first;
@@ -621,8 +621,8 @@ class dnnd_kernel {
         return 1;
       };
 
-      run_batched_ygm_async(source_ids.size(), m_option.mini_batch_size, false,
-                            m_comm, neighbor_sender);
+      detail::run_batched_ygm_async(source_ids.size(), m_option.mini_batch_size,
+                                    false, m_comm, neighbor_sender);
       assert(sitr == source_ids.end());
     }
 
@@ -822,9 +822,9 @@ class dnnd_kernel {
     }
     ygm::timer mini_batch_timer;
 
-    const auto local_mini_batch_size =
-        mpi::assign_tasks(targets.size(), m_option.mini_batch_size,
-                          m_comm.rank(), m_comm.size(), m_option.verbose);
+    const auto local_mini_batch_size = detail::mpi::assign_tasks(
+        targets.size(), m_option.mini_batch_size, m_comm.rank(), m_comm.size(),
+        m_option.verbose);
     assert(local_mini_batch_size <= targets.size());
 
 #if SALTATLAS_DNND_SHOW_MSG_DST_STATISTICS

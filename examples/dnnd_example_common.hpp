@@ -18,7 +18,7 @@
 #include <ygm/comm.hpp>
 #include <ygm/utility.hpp>
 
-#include <saltatlas/dnnd/data_reader.hpp>
+#include <saltatlas/common/data_reader.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
 /// Returns the name of the given primitive type in string.

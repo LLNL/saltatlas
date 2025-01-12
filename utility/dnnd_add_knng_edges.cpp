@@ -20,13 +20,13 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/data_reader.hpp>
+#include <saltatlas/common/data_reader.hpp>
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/point_store.hpp>
 #include <saltatlas/dnnd/detail/distance.hpp>
-#include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/feature_vector.hpp>
 #include <saltatlas/dnnd/utility.hpp>
-#include <saltatlas/point_store.hpp>
 
 using id_t       = uint32_t;
 using point_t    = saltatlas::feature_vector<float>;

@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <utility>
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 
 /// \brief Divides a length into multiple groups.
 /// \param length A length to be divided.
@@ -34,4 +34,4 @@ inline std::pair<std::size_t, std::size_t> partial_range(
   return std::make_pair(begin_index, begin_index + partial_length);
 }
 
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail

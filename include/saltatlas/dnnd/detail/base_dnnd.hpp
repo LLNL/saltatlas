@@ -21,7 +21,7 @@
 #include <saltatlas/dnnd/detail/nn_index_optimizer.hpp>
 #include <saltatlas/dnnd/detail/query_kernel.hpp>
 #include <saltatlas/dnnd/feature_vector.hpp>
-#include "saltatlas/point_store.hpp"
+#include "saltatlas/common/point_store.hpp"
 
 // Ideas:
 // Do not use data_core anymore?

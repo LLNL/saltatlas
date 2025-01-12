@@ -10,10 +10,10 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/detail/utilities/general.hpp>
-#include <saltatlas/dnnd/detail/utilities/mpi.hpp>
+#include <saltatlas/common/detail/utilities/general.hpp>
+#include <saltatlas/common/detail/utilities/mpi.hpp>
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 /// \brief Distributes elements in a container.
 /// This functions assumes that container whose iterator is incrementable and
 /// has push_back() function.
@@ -33,7 +33,7 @@ inline void distribute_elements_by_block(const container_type &source_container,
   auto itr = std::begin(source_container);
   for (int r = 0; r < comm.size(); ++r) {
     const auto range =
-        dndetail::partial_range(source_container.size(), r, comm.size());
+        detail::partial_range(source_container.size(), r, comm.size());
     container_type send_buf;
     for (std::size_t i = range.first; i < range.second; ++i) {
       send_buf.push_back(*itr++);
@@ -62,12 +62,11 @@ inline void distribute_elements_by_block(const container_type &source_container,
 /// This function decide the timing of invoking YGM's barrier() based on the
 /// returned values from the sender.
 template <typename async_sender>
-inline void run_batched_ygm_async(const std::size_t   num_local_items,
-                                  const std::size_t   global_batch_size,
-                                  const bool          verbose,
-                                  ygm::comm &comm,
+inline void run_batched_ygm_async(const std::size_t num_local_items,
+                                  const std::size_t global_batch_size,
+                                  const bool verbose, ygm::comm &comm,
                                   const async_sender &sender) {
-  comm.cf_barrier(); // just in case.
+  comm.cf_barrier();  // just in case.
 
   for (std::size_t num_sent = 0, batch_no = 0;; ++batch_no) {
     assert(num_local_items >= num_sent);
@@ -101,4 +100,4 @@ inline void run_batched_ygm_async(const std::size_t   num_local_items,
   }
 }
 
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail

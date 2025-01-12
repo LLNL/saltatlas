@@ -9,3 +9,4 @@ scripts/*
 .autosave
 .DS_Store
 .idea
+.cache

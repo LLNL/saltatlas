@@ -7,9 +7,11 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
 #include <string>
+#include <vector>
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 template <typename T>
 inline T str_cast(const std::string &) {
   std::cerr << "str_cast is not implemented for this type." << typeid(T).name()
@@ -65,8 +67,8 @@ inline double str_cast<double>(const std::string &input) {
 /// \return Vector of T.
 template <typename T>
 inline std::vector<T> str_split(const std::string &input) {
-  std::vector<T>     result;
-  std::string        token;
+  std::vector<T> result;
+  std::string    token;
   for (std::stringstream ss(input); ss >> token;) {
     result.push_back(str_cast<T>(token));
   }
@@ -100,4 +102,4 @@ inline std::vector<T> str_split(const std::string &input,
   return result;
 }
 
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail

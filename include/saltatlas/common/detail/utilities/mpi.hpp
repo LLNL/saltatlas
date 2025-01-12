@@ -5,13 +5,13 @@
 
 #pragma once
 
+#include <mpi.h>
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <iostream>
-#include <vector>
 #include <numeric>
-#include <mpi.h>
+#include <vector>
 
 #define SALTATLAS_DNND_CHECK_MPI(ret)                                         \
   do {                                                                        \
@@ -21,7 +21,7 @@
     }                                                                         \
   } while (0)
 
-namespace saltatlas::dndetail::mpi {
+namespace saltatlas::detail::mpi {
 
 inline void show_task_distribution(const std::vector<std::size_t>& table) {
   const auto sum  = std::accumulate(table.begin(), table.end(), std::size_t(0));
@@ -49,7 +49,7 @@ inline void show_task_distribution(const std::vector<std::size_t>& table) {
 inline std::size_t assign_tasks(const std::size_t num_local_tasks,
                                 const std::size_t batch_size,
                                 const int mpi_rank, const int mpi_size,
-                                const bool verbose,
+                                const bool       verbose,
                                 const ::MPI_Comm mpi_comm = MPI_COMM_WORLD) {
   if (batch_size == 0) {
     return num_local_tasks;
@@ -104,8 +104,7 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
     // Tell the computed numbers to the other ranks
     for (int r = 1; r < mpi_size; ++r) {
       SALTATLAS_DNND_CHECK_MPI(MPI_Send(&task_assignment_table[r], 1,
-                                        MPI_UNSIGNED_LONG, r, 0,
-                                        mpi_comm));
+                                        MPI_UNSIGNED_LONG, r, 0, mpi_comm));
     }
     local_num_assigned_tasks = task_assignment_table[0];
 
@@ -128,4 +127,4 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
   return local_num_assigned_tasks;
 }
 
-}  // namespace saltatlas::dndetail::mpi
+}  // namespace saltatlas::detail::mpi

@@ -35,9 +35,9 @@ using hnswlib_func_type = DistType (*)(const void *, const void *,
 template <typename DistType, typename Point>
 class SpaceWrapper : public hnswlib::SpaceInterface<DistType> {
  public:
-  using wrapped_func_type = DistType (*)(Point &, Point &);
+  using wrapped_func_type = DistType (*)(const Point &, const Point &);
 
-  SpaceWrapper(wrapped_func_type f) : m_dist_functor(f){};
+  SpaceWrapper(const wrapped_func_type f) : m_dist_functor(f){};
 
   size_t get_data_size() { return sizeof(Point); }
 

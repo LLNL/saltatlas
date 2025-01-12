@@ -34,8 +34,9 @@
 #include <boost/unordered/unordered_node_map.hpp>
 #endif
 
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
-#include <saltatlas/dnnd/detail/utilities/float.hpp>
 
 namespace saltatlas::dndetail {
 
@@ -48,46 +49,6 @@ namespace container =
 #endif
 }  // namespace
 
-template <typename Id, typename Distance>
-struct neighbor {
-  using id_type       = Id;
-  using distance_type = Distance;
-
-  neighbor() = default;
-
-  neighbor(const id_type& _id, const distance_type& _distance)
-      : id(_id), distance(_distance) {}
-
-  friend bool operator<(const neighbor& lhd, const neighbor& rhd) {
-    if (lhd.distance != rhd.distance) return lhd.distance < rhd.distance;
-    return lhd.id < rhd.id;
-  }
-
-  template <typename T1, typename T2>
-  friend std::ostream& operator<<(std::ostream& os, const neighbor<T1, T2>& ng);
-
-  id_type       id;
-  distance_type distance;
-};
-
-template <typename T1, typename T2>
-std::ostream& operator<<(std::ostream& os, const neighbor<T1, T2>& ng) {
-  os << "id = " << ng.id << ", distance = " << ng.distance;
-  return os;
-}
-
-template <typename Id, typename Distance>
-inline bool operator==(const neighbor<Id, Distance>& lhs,
-                       const neighbor<Id, Distance>& rhs) {
-  return lhs.id == rhs.id && nearly_equal(lhs.distance, rhs.distance);
-}
-
-template <typename Id, typename Distance>
-inline bool operator!=(const neighbor<Id, Distance>& lhs,
-                       const neighbor<Id, Distance>& rhs) {
-  return !(lhs == rhs);
-}
-
 // TODO: make a version that deos not take value?
 template <typename Id, typename Distance, typename Value = std::byte,
           typename Alloc = std::allocator<std::byte>>
@@ -97,7 +58,7 @@ class unique_knn_heap {
   using distance_type  = Distance;
   using value_type     = Value;
   using allocator_type = Alloc;
-  using nenghbor_type  = neighbor<id_type, distance_type>;
+  using nenghbor_type  = detail::neighbor<id_type, distance_type>;
 
  private:
   using heap_type = container::priority_queue<

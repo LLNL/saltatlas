@@ -29,7 +29,7 @@
 #include <vector>
 #endif
 
-#include <saltatlas/dnnd/detail/neighbor.hpp>
+#include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 
 namespace saltatlas::dndetail {
@@ -53,7 +53,7 @@ class nn_index {
  public:
   using id_type        = IdType;
   using distance_type  = DistanceType;
-  using neighbor_type  = neighbor<id_type, distance_type>;
+  using neighbor_type  = detail::neighbor<id_type, distance_type>;
   using allocator_type = Allocator;
 
  private:

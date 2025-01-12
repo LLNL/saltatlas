@@ -16,15 +16,15 @@
 #include <ygm/comm.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
 
-#include "saltatlas/dnnd/data_reader.hpp"
+#include "saltatlas/common/data_reader.hpp"
+#include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
+#include "saltatlas/common/point_store.hpp"
 #include "saltatlas/dnnd/detail/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
-#include "saltatlas/dnnd/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
-#include "saltatlas/point_store.hpp"
 
 namespace saltatlas {
 
@@ -74,7 +74,7 @@ class dnnd {
   using neighbor_type = typename knn_index_type::neighbor_type;
 
   using iterator_proxy_type =
-      dndetail::iterator_proxy<typename point_store_type::const_iterator>;
+      detail::iterator_proxy<typename point_store_type::const_iterator>;
 
   /// \brief Distance function type.
   /// Specifically, std::function<distance_type(const point_type &, const
@@ -226,7 +226,7 @@ class dnnd {
       return true;
     };
 
-    saltatlas::dndetail::read_points_with_id_helper(
+    saltatlas::detail::read_points_with_id_helper(
         point_file_paths, parser_wrapper, m_pstore,
         priv_get_point_partitioner(), m_comm, false);
   }

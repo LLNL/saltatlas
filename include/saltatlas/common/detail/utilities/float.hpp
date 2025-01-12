@@ -9,7 +9,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace saltatlas::dndetail {
+namespace saltatlas::detail {
 
 template <typename T>
 bool nearly_equal(const T a, const T b,
@@ -20,4 +20,4 @@ bool nearly_equal(const T a, const T b,
   return a == b;
 }
 
-}  // namespace saltatlas::dndetail
+}  // namespace saltatlas::detail

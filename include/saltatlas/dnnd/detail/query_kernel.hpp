@@ -14,13 +14,13 @@
 
 #include <ygm/comm.hpp>
 
+#include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/utilities/general.hpp>
+#include <saltatlas/common/detail/utilities/mpi.hpp>
 #include <saltatlas/dnnd/detail/distance.hpp>
-#include <saltatlas/dnnd/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
-#include <saltatlas/dnnd/detail/utilities/general.hpp>
-#include <saltatlas/dnnd/detail/utilities/mpi.hpp>
-#include "saltatlas/point_store.hpp"
+#include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -142,9 +142,9 @@ class dknn_batch_query_kernel {
         m_comm.cout0() << "\n[Batch No. " << batch_no << "]" << std::endl;
       }
 
-      const auto local_batch_size =
-          mpi::assign_tasks(num_local_remains, m_option.batch_size,
-                            m_comm.rank(), m_comm.size(), m_option.verbose);
+      const auto local_batch_size = detail::mpi::assign_tasks(
+          num_local_remains, m_option.batch_size, m_comm.rank(), m_comm.size(),
+          m_option.verbose);
 
       // Initialize the variable used during the query.
       m_knn_heap_table.clear();
