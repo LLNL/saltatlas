@@ -75,7 +75,9 @@ int main(int argc, char** argv) {
     }
 
     // Get nearest neighbours with features
-    comm.cout0()<< "\nNearest neighbor query result with features\n(show only the nearest point of the query from rank 0)" << std::endl;
+    comm.cout0() << "\nNearest neighbor query result with features\n(show only "
+                    "the nearest point of the query from rank 0)"
+                 << std::endl;
     {
       int        num_to_search = 4;
       const auto results =
@@ -85,7 +87,7 @@ int main(int argc, char** argv) {
         auto& neighbours = results.first;
         auto& features   = results.second;
         std::cout << "Point ID " << neighbours[0][0].id << ", distance "
-                     << neighbours[0][0].distance << ", feature {";
+                  << neighbours[0][0].distance << ", feature {";
         for (const auto& v : features[0][0]) {
           std::cout << v << " ";
         }
@@ -118,8 +120,9 @@ int main(int argc, char** argv) {
     }
   }
 
-  comm.cout0() << "\nGet points including the ones that are stored in other ranks"
-               << std::endl;
+  comm.cout0()
+      << "\nGet points including the ones that are stored in other ranks"
+      << std::endl;
   {
     id_t ids[]  = {0, 1};
     auto points = g.get_points(ids, ids + 2);
@@ -135,6 +138,19 @@ int main(int argc, char** argv) {
   // Dump a KNNG to files
   g.dump_graph("./knng");
   comm.cout0() << "KNNG dumped to ./knng" << std::endl;
+
+  comm.cout0() << "\nGet the neighbors" << std::endl;
+  {
+    id_t ids[]     = {0, 1};
+    const auto neighbors = g.get_neighbors(ids, ids + 2);
+    for (const auto& [id, nbs] : neighbors) {
+      comm.cout0() << "Point ID " << id;
+      for (const auto& nb : nbs) {
+        comm.cout0() << " -> " << nb;
+      }
+      comm.cout0() << std::endl;
+    }
+  }
 
   return 0;
 }
