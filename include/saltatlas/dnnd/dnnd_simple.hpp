@@ -386,12 +386,9 @@ class dnnd {
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    std::unordered_map<id_type, point_type> points;
-    points.reserve(std::distance(ids_begin, ids_end));
-
-    static auto& ref_points = points;
-    ref_points              = points;
-    m_comm.cf_barrier();
+    static std::unordered_map<id_type, point_type> return_points_store;
+    return_points_store.clear();
+    return_points_store.reserve(std::distance(ids_begin, ids_end));
 
     auto proc = [](auto comm, auto pthis, const id_type id,
                    const int source_rank) {
@@ -400,19 +397,19 @@ class dnnd {
       comm->async(
           source_rank,
           [](auto, const auto& id, const auto& point) {
-            ref_points.emplace(id, point);
+            return_points_store.emplace(id, point);
           },
           id, pthis->get_local_point(id));
     };
+    m_comm.cf_barrier();
 
     for (auto it = ids_begin; it != ids_end; ++it) {
       const auto id = *it;
       m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
     }
-
     m_comm.barrier();
 
-    return points;
+    return return_points_store;
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
@@ -472,28 +469,27 @@ class dnnd {
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    std::unordered_map<id_type, std::vector<neighbor_type>> neighbors_table;
+    static std::unordered_map<id_type, std::vector<neighbor_type>>
+        neighbors_table;
+    neighbors_table.clear();
     neighbors_table.reserve(std::distance(ids_begin, ids_en));
 
-    static auto& ref_neighbors_table = neighbors_table;
-    ref_neighbors_table              = neighbors_table;
+    auto proc = [](auto comm, auto pthis, const id_type id,
+                   const int source_rank) {
+      assert(pthis->contains_local(id));
+      const auto neighbors = pthis->get_local_neighbors(id);
+      comm->async(
+          source_rank,
+          [](auto, const auto& id, const auto& neighbors) {
+            neighbors_table.emplace(id, neighbors);
+          },
+          id, neighbors);
+    };
     m_comm.cf_barrier();
 
     for (auto it = ids_begin; it != ids_en; ++it) {
       const auto id = *it;
-      m_comm.async(
-          get_owner(id),
-          [](auto comm, auto pthis, const id_type id, const int source_rank) {
-            assert(pthis->contains_local(id));
-            const auto neighbors = pthis->get_local_neighbors(id);
-            comm->async(
-                source_rank,
-                [](auto, const auto& id, const auto& neighbors) {
-                  ref_neighbors_table.emplace(id, neighbors);
-                },
-                id, neighbors);
-          },
-          m_this, id, m_comm.rank());
+      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
     }
     m_comm.barrier();
 

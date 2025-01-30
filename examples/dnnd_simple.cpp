@@ -124,8 +124,12 @@ int main(int argc, char** argv) {
       << "\nGet points including the ones that are stored in other ranks"
       << std::endl;
   {
-    id_t ids[]  = {0, 1};
-    auto points = g.get_points(ids, ids + 2);
+    std::vector<id_t> ids;
+    if (comm.rank() == 0) {
+      ids.push_back(0);
+      ids.push_back(1);
+    }
+    auto points = g.get_points(ids.begin(), ids.end());
     for (const auto& [id, point] : points) {
       comm.cout0() << "Point ID " << id << " : ";
       for (const auto& v : point) {
@@ -137,12 +141,16 @@ int main(int argc, char** argv) {
 
   // Dump a KNNG to files
   g.dump_graph("./knng");
-  comm.cout0() << "KNNG dumped to ./knng" << std::endl;
+  comm.cout0() << "\nKNNG dumped to ./knng" << std::endl;
 
   comm.cout0() << "\nGet the neighbors" << std::endl;
   {
-    id_t ids[]     = {0, 1};
-    const auto neighbors = g.get_neighbors(ids, ids + 2);
+    std::vector<id_t> ids;
+    if (comm.rank() == 0) {
+      ids.push_back(0);
+      ids.push_back(1);
+    }
+    const auto neighbors = g.get_neighbors(ids.begin(), ids.end());
     for (const auto& [id, nbs] : neighbors) {
       comm.cout0() << "Point ID " << id;
       for (const auto& nb : nbs) {
