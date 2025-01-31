@@ -26,38 +26,31 @@ using point_type = saltatlas::pm_feature_vector<float>;
 
 struct option_t {
   std::filesystem::path datastore_path;
-  std::vector<id_t>     point_ids;
   std::string           distance_name;
+  std::filesystem::path query_file_path;
   int                   query_n;  // #of neighbor points to search
 };
 
 bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   opt.datastore_path.clear();
-  opt.point_ids.clear();
   opt.distance_name.clear();
+  opt.query_file_path.clear();
   opt.query_n = 0;
   help        = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "d:p:f:n:h")) != -1) {
+  while ((n = ::getopt(argc, argv, "d:f:q:n:h")) != -1) {
     switch (n) {
       case 'd':
         opt.datastore_path = optarg;
         break;
 
-      case 'p':  // comma separated list of point ids
-      {
-        std::string        point_ids_str = optarg;
-        std::istringstream ss(point_ids_str);
-        std::string        token;
-        while (std::getline(ss, token, ',')) {
-          opt.point_ids.push_back(std::stoi(token));
-        }
-        break;
-      }
-
       case 'f':
         opt.distance_name = optarg;
+        break;
+
+      case 'q':
+        opt.query_file_path = optarg;
         break;
 
       case 'n':
@@ -74,7 +67,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   }
 
   if (opt.datastore_path.empty() || opt.distance_name.empty() ||
-      opt.point_ids.empty()) {
+      opt.query_file_path.empty() || opt.query_n <= 0) {
     return false;
   }
 
@@ -108,27 +101,30 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  std::vector<point_type> queries;
+  saltatlas::read_query(opt.query_file_path, queries, comm);
+
+  const auto distance_func =
+      saltatlas::distance::distance_function<point_type, dist_t>(
+          opt.distance_name);
   {
     saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_read_only,
                                                 opt.datastore_path, comm);
-    const auto                                distance_func =
-        saltatlas::distance::distance_function<point_type, dist_t>(
-            opt.distance_name);
-    const auto index_ids = g.get_index_ids();
-    for (const auto index_id : index_ids) {
-      comm.cout0() << "Run queries on index: " << index_id << std::endl;
-      const auto ret = g.query(index_id, distance_func, opt.point_ids.begin(),
-                               opt.point_ids.end(), opt.query_n);
-      for (int qid = 0; qid < ret.size(); ++qid) {
-        const auto &pid       = opt.point_ids[qid];
-        const auto &neighbors = ret[qid];
-        comm.cout0() << "Query source point ID: " << pid << std::endl;
-        for (const auto &n : neighbors) {
-          comm.cout0() << "Neighbor ID: " << n.id << " Distance: " << n.distance
-                       << ", " << std::endl;
+    const auto                                index_ids = g.get_index_ids();
+
+    // Run queries
+    {
+      for (const auto index_id : index_ids) {
+        comm.cout0() << "Run queries on index: " << index_id << std::endl;
+        const auto ret = g.query(index_id, distance_func, queries.begin(),
+                                 queries.end(), opt.query_n);
+        for (std::size_t i = 0; i < ret.size(); ++i) {
+          comm.cout0() << "Query " << i << ":\n";
+          for (const auto &neighbor : ret[i]) {
+            comm.cout0() << "  " << neighbor << std::endl;
+          }
         }
       }
-      comm.cout0() << "\n" << std::endl;
     }
     comm.cf_barrier();
   }

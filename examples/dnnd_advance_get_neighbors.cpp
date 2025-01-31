@@ -80,8 +80,6 @@ void show_help(cout_type &cout) {
 int main(int argc, char **argv) {
   ygm::comm comm(&argc, &argv);
 
-  metall::logger::set_log_level(metall::logger::level_filter::verbose);
-
   option_t opt;
   bool     help{false};
   if (!parse_options(argc, argv, opt, help)) {
@@ -106,34 +104,38 @@ int main(int argc, char **argv) {
     const auto index_id = g.get_index_ids().front();
     comm.cout0() << "Index ID: " << index_id << std::endl;
 
-    const auto ret =
-        g.get_neighbors(index_id, opt.point_ids.begin(), opt.point_ids.end());
-    for (const auto &item : ret) {
-      const auto &pid       = item.first;
-      const auto &neighbors = item.second;
-      comm.cout0() << "Source point ID: " << pid << std::endl;
-      for (const auto &n : neighbors) {
-        comm.cout0() << "Neighbor ID: " << n.id << " Distance: " << n.distance
-                     << ", " << std::endl;
+    {
+      const auto ret =
+          g.get_neighbors(index_id, opt.point_ids.begin(), opt.point_ids.end());
+      for (const auto &item : ret) {
+        const auto &pid       = item.first;
+        const auto &neighbors = item.second;
+        comm.cout0() << "Source point ID: " << pid << std::endl;
+        for (const auto &n : neighbors) {
+          comm.cout0() << n << std::endl;
+        }
       }
+      comm.cout0() << std::endl;
     }
-    comm.cout0() << std::endl;
 
-    // Demo get_neighbors_with_features
-    const auto ret2 = g.get_neighbors_with_features(
-        index_id, opt.point_ids.begin(), opt.point_ids.end());
-    for (const auto &item : ret2) {
-      const auto &pid       = item.first;
-      const auto &neighbors = item.second.first;
-      const auto &features  = item.second.second;
-      comm.cout0() << "Source point ID: " << pid << std::endl;
-      for (const auto &n : neighbors) {
-        comm.cout0() << "Neighbor ID: " << n.id << " Distance: " << n.distance
-                     << ", " << std::endl;
+    {
+      std::vector<id_t> ids;
+      if (comm.rank() == 0) {
+        ids.push_back(0);
+        ids.push_back(1);
       }
-      comm.cout0() << "Features: ";
-      for (const auto &f : features) {
-        comm.cout0() << saltatlas::to_string(f) << " ";
+      const auto neighbors_and_features =
+          g.get_neighbors_with_features(index_id, ids.begin(), ids.end());
+      for (const auto &[id, item] : neighbors_and_features) {
+        comm.cout0() << "Source point ID: " << id << std::endl;
+        const auto &neighbors = item.first;
+        const auto &features  = item.second;
+        for (int i = 0; i < neighbors.size(); ++i) {
+          comm.cout0() << neighbors[i]
+                       << ", feature = " << saltatlas::to_string(features[i])
+                       << std::endl;
+        }
+        comm.cout0() << std::endl;
       }
     }
 

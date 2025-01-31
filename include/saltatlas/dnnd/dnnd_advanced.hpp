@@ -569,6 +569,8 @@ class dnnd {
     return query_result;
   }
 
+  /// TODO: implement query_with_features()
+
   /// \brief Dump the k-NN index to distributed files.
   /// \param out_file_prefix File path prefix.
   /// \param dump_distance If true, also dump distances
@@ -624,12 +626,25 @@ class dnnd {
                    const int source_rank) {
       assert(pthis->contains_local(id));
 
+      // TODO: investigate why point instance is copied in YGM::async() (before
+      // sending apparently).
+      // Because of that, segmentation fault occurs when
+      // Metall is opened as read-only. The below is a workaround to avoid the
+      // issue: Allocate point instance in the heap, not in Metall, explicitly.
+      // If fallback_allocator is used, constructing the point_type without
+      // allocator instance falls back to the default (heap) allocator.
+      point_type point;
+      // TODO: check the value of propagate_on_container_copy_assignment.
+      // Assumes that the propagate_on_container_copy_assignment of the
+      // allocator_type of the point_type is false.
+      point = pthis->get_local_point(id);
+
       comm->async(
           source_rank,
-          [](auto, const auto& id, const auto& point) {
-            return_points_store.emplace(id, point);
+          [](auto, const auto& id, auto point) {
+            return_points_store.emplace(id, std::move(point));
           },
-          id, pthis->get_local_point(id));
+          id, std::move(point));
     };
     m_comm.cf_barrier();
 
