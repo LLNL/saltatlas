@@ -387,7 +387,7 @@ class dnnd {
         "id_iterator must be an iterator of id_type");
 
     static std::unordered_map<id_type, point_type> return_points_store;
-    return_points_store.clear();
+    return_points_store = decltype(return_points_store){};
     return_points_store.reserve(std::distance(ids_begin, ids_end));
 
     auto proc = [](auto comm, auto pthis, const id_type id,
@@ -440,7 +440,7 @@ class dnnd {
   /// \return The number of neighbors of the point.
   std::size_t num_local_neighbors(const id_type id) const {
     if (contains_local(id)) {
-      return m_knn_index.at(id).size();
+      return m_knn_index.num_neighbors(id);
     }
     return 0;
   }
@@ -471,7 +471,7 @@ class dnnd {
 
     static std::unordered_map<id_type, std::vector<neighbor_type>>
         neighbors_table;
-    neighbors_table.clear();
+    neighbors_table = decltype(neighbors_table){};
     neighbors_table.reserve(std::distance(ids_begin, ids_en));
 
     auto proc = [](auto comm, auto pthis, const id_type id,
@@ -494,6 +494,47 @@ class dnnd {
     m_comm.barrier();
 
     return neighbors_table;
+  }
+
+  /// \brief Get the neighbors of the given point with features of the
+  /// neighbors.
+  template <typename id_iterator>
+  std::unordered_map<
+      id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+  get_neighbors_with_features(id_iterator ids_begin,
+                              id_iterator ids_end) const {
+    // Get neighbors
+    const auto neighbors_table = get_neighbors(ids_begin, ids_end);
+
+    // Get neighbor's features
+    std::set<id_type> neighbor_ids;
+    for (auto& [id, neighbors] : neighbors_table) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+    const auto neighbor_features_table =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    // Construct the result table
+    std::unordered_map<
+        id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+        result;
+    for (auto& [id, neighbors] : neighbors_table) {
+      result[id];
+
+      std::vector<point_type> neighbor_features;
+      for (const auto& neighbor : neighbors) {
+        neighbor_features.push_back(
+            std::move(neighbor_features_table.at(neighbor.id)));
+      }
+
+      result[id] =
+          std::make_pair(std::move(neighbors), std::move(neighbor_features));
+    }
+    m_comm.cf_barrier();
+
+    return result;
   }
 
  private:

@@ -139,11 +139,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Dump a KNNG to files
-  g.dump_graph("./knng");
-  comm.cout0() << "\nKNNG dumped to ./knng" << std::endl;
-
-  comm.cout0() << "\nGet the neighbors" << std::endl;
+  comm.cout0() << "\nGet neighbors" << std::endl;
   {
     std::vector<id_t> ids;
     if (comm.rank() == 0) {
@@ -152,13 +148,38 @@ int main(int argc, char** argv) {
     }
     const auto neighbors = g.get_neighbors(ids.begin(), ids.end());
     for (const auto& [id, nbs] : neighbors) {
-      comm.cout0() << "Point ID " << id;
+      comm.cout0() << "Source point ID: " << id;
       for (const auto& nb : nbs) {
         comm.cout0() << " -> " << nb;
       }
       comm.cout0() << std::endl;
     }
   }
+
+  comm.cout0() << "\nGet neighbors with features" << std::endl;
+  {
+    std::vector<id_t> ids;
+    if (comm.rank() == 0) {
+      ids.push_back(0);
+      ids.push_back(1);
+    }
+    const auto neighbors_and_features =
+        g.get_neighbors_with_features(ids.begin(), ids.end());
+    for (const auto& [id, item] : neighbors_and_features) {
+      comm.cout0() << "Source point ID: " << id << std::endl;
+      const auto& neighbors = item.first;
+      const auto& features = item.second;
+      for (int i = 0; i < neighbors.size(); ++i) {
+        comm.cout0() << neighbors[i] << ", feature = "
+                     << saltatlas::to_string(features[i]) << std::endl;
+      }
+      comm.cout0() << std::endl;
+    }
+  }
+
+  // Dump a KNNG to files
+  g.dump_graph("./knng");
+  comm.cout0() << "\nKNNG dumped to ./knng" << std::endl;
 
   return 0;
 }

@@ -19,6 +19,7 @@
 #endif
 
 #include <memory>
+#include <ostream>
 #include "saltatlas/dnnd/detail/utilities/allocator.hpp"
 
 namespace saltatlas {
@@ -42,4 +43,19 @@ template <typename Element,
           typename Allocator = metall::manager::fallback_allocator<Element>>
 using pm_feature_vector = container::vector<Element, Allocator>;
 #endif
+
+// to_string for feature_vector and pm_feature_vector
+template <typename Element, typename Allocator>
+inline std::string to_string(const container::vector<Element, Allocator> &v) {
+  std::ostringstream oss;
+  oss << "[";
+  for (std::size_t i = 0; i < v.size(); ++i) {
+    oss << v[i];
+    if (i + 1 < v.size()) {
+      oss << ", ";
+    }
+  }
+  oss << "]";
+  return oss.str();
+}
 }  // namespace saltatlas
