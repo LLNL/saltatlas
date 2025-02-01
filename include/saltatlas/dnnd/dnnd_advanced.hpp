@@ -472,18 +472,6 @@ class dnnd {
     optimizer.run();
   }
 
-  template <typename query_iterator>
-  neighbor_store_type query(const std::size_t   index_id,
-                            const distance::id& distance_func_id,
-                            query_iterator      queries_begin,
-                            query_iterator queries_end, const int k,
-                            const double epsilon = 0.1) {
-    return query(index_id,
-                 distance::distance_function<point_type, distance_type>(
-                     distance_func_id),
-                 queries_begin, queries_end, k, epsilon);
-  }
-
   /// \brief Query nearest neighbors of given points.
   /// This function assumes that the query points are already distributed.
   /// Query results are returned to the MPI rank that submitted the queries.
@@ -522,17 +510,43 @@ class dnnd {
     return query_result;
   }
 
-  template <typename index_id_iterator, typename query_iterator>
-  neighbor_store_type query(index_id_iterator   index_ids_begin,
-                            index_id_iterator   index_ids_end,
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(const std::size_t      index_id,
+                      distance_function_type distance_function,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    auto query_result = query(index_id, distance_function, queries_begin,
+                              queries_end, k, epsilon);
+    return std::make_pair(query_result,
+                          priv_get_features_for_query_results(query_result));
+  }
+
+  /// \brief The same as query() but with distance function ID.
+  template <typename query_iterator>
+  neighbor_store_type query(const std::size_t   index_id,
                             const distance::id& distance_func_id,
                             query_iterator      queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    return query(index_ids_begin, index_ids_end,
+    return query(index_id,
                  distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  queries_begin, queries_end, k, epsilon);
+  }
+
+  /// \brief The same as query_with_features() but with distance function ID.
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(const std::size_t   index_id,
+                      const distance::id& distance_func_id,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    return query_with_features(
+        index_id,
+        distance::distance_function<point_type, distance_type>(
+            distance_func_id),
+        queries_begin, queries_end, k, epsilon);
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -569,7 +583,50 @@ class dnnd {
     return query_result;
   }
 
-  /// TODO: implement query_with_features()
+  /// \brief The same as query() but runs on multiple indices and returns neighbor
+  /// features.
+  template <typename index_id_iterator, typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(index_id_iterator      index_ids_begin,
+                      index_id_iterator      index_ids_end,
+                      distance_function_type distance_function,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    auto query_result = query(index_ids_begin, index_ids_end, distance_function,
+                              queries_begin, queries_end, k, epsilon);
+    return std::make_pair(query_result,
+                          priv_get_features_for_query_results(query_result));
+  }
+
+  /// \brief The same as query() but with distance function ID and on multiple
+  /// indices.
+  template <typename index_id_iterator, typename query_iterator>
+  neighbor_store_type query(index_id_iterator   index_ids_begin,
+                            index_id_iterator   index_ids_end,
+                            const distance::id& distance_func_id,
+                            query_iterator      queries_begin,
+                            query_iterator queries_end, const int k,
+                            const double epsilon = 0.1) {
+    return query(index_ids_begin, index_ids_end,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
+  }
+
+  /// \brief The same as query() but with distance function ID and on multiple
+  /// indices. Returns neighbor features also.
+  template <typename index_id_iterator, typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(index_id_iterator   index_ids_begin,
+                      index_id_iterator   index_ids_end,
+                      const distance::id& distance_func_id,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    return query(index_ids_begin, index_ids_end,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
+  }
 
   /// \brief Dump the k-NN index to distributed files.
   /// \param out_file_prefix File path prefix.
@@ -642,7 +699,10 @@ class dnnd {
       comm->async(
           source_rank,
           [](auto, const auto& id, auto point) {
-            return_points_store.emplace(id, std::move(point));
+            // Avoid duplicate insertion to get better performance.
+            if (!return_points_store.contains(id)) {
+              return_points_store.emplace(id, std::move(point));
+            }
           },
           id, std::move(point));
     };
@@ -776,10 +836,12 @@ class dnnd {
         id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
         result;
     for (auto& [id, neighbors] : neighbors_table) {
-      std::vector<point_type> neighbor_features;
-      for (const auto& neighbor : neighbors) {
-        neighbor_features.push_back(
-            std::move(neighbor_features_table.at(neighbor.id)));
+      // Construct neighbor feature vector
+      // The line below makes the fallback_allocator in the point_type not to
+      // get stateful allocator.
+      std::vector<point_type> neighbor_features(neighbors.size());
+      for (size_t i = 0; i < neighbors.size(); ++i) {
+        neighbor_features[i] = neighbor_features_table.at(neighbors[i].id);
       }
 
       result[id] =
@@ -807,6 +869,30 @@ class dnnd {
       return dndetail::murmurhash::hash<5981>{}(id) % size;
     };
   };
+
+  std::vector<std::vector<point_type>> priv_get_features_for_query_results(
+      const neighbor_store_type& query_results) {
+    std::set<id_type> neighbor_ids;
+    for (const auto& neighbors : query_results) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+    auto neighbor_features_table =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    std::vector<std::vector<point_type>> neighbor_features_to_return;
+    for (std::size_t i = 0; i < query_results.size(); ++i) {
+      std::vector<point_type> neighbor_features(query_results[i].size());
+      for (std::size_t j = 0; j < query_results[i].size(); ++j) {
+        neighbor_features[j] =
+            neighbor_features_table.at(query_results[i][j].id);
+      }
+      neighbor_features_to_return.push_back(std::move(neighbor_features));
+    }
+
+    return neighbor_features_to_return;
+  }
 
   ygm::comm&                                           m_comm;
   uint64_t                                             m_rnd_seed;

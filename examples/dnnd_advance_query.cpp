@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
     // Run queries
     {
       for (const auto index_id : index_ids) {
-        comm.cout0() << "Run queries on index: " << index_id << std::endl;
+        comm.cout0() << "Run queries on index " << index_id << std::endl;
         const auto ret = g.query(index_id, distance_func, queries.begin(),
                                  queries.end(), opt.query_n);
         for (std::size_t i = 0; i < ret.size(); ++i) {
@@ -127,6 +127,26 @@ int main(int argc, char **argv) {
       }
     }
     comm.cf_barrier();
+
+    // Run queries and receive neighbor features
+    {
+      for (const auto index_id : index_ids) {
+        comm.cout0() << "\nRun queries on index " << index_id << std::endl;
+        const auto ret =
+            g.query_with_features(index_id, distance_func, queries.begin(),
+                                  queries.end(), opt.query_n);
+        const auto &neighbors = ret.first;
+        const auto &features  = ret.second;
+        for (std::size_t qi = 0; qi < queries.size(); ++qi) {
+          comm.cout0() << "Query " << qi << ":\n";
+          for (int ni = 0; ni < neighbors[qi].size(); ++ni) {
+            comm.cout0() << neighbors[qi][ni] << ", feature = "
+                         << saltatlas::to_string(features[qi][ni]) << std::endl;
+          }
+          comm.cout0() << std::endl;
+        }
+      }
+    }
   }
 
   return 0;
