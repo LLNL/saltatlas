@@ -472,18 +472,6 @@ class dnnd {
     optimizer.run();
   }
 
-  template <typename query_iterator>
-  neighbor_store_type query(const std::size_t   index_id,
-                            const distance::id& distance_func_id,
-                            query_iterator      queries_begin,
-                            query_iterator queries_end, const int k,
-                            const double epsilon = 0.1) {
-    return query(index_id,
-                 distance::distance_function<point_type, distance_type>(
-                     distance_func_id),
-                 queries_begin, queries_end, k, epsilon);
-  }
-
   /// \brief Query nearest neighbors of given points.
   /// This function assumes that the query points are already distributed.
   /// Query results are returned to the MPI rank that submitted the queries.
@@ -522,17 +510,43 @@ class dnnd {
     return query_result;
   }
 
-  template <typename index_id_iterator, typename query_iterator>
-  neighbor_store_type query(index_id_iterator   index_ids_begin,
-                            index_id_iterator   index_ids_end,
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(const std::size_t      index_id,
+                      distance_function_type distance_function,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    auto query_result = query(index_id, distance_function, queries_begin,
+                              queries_end, k, epsilon);
+    return std::make_pair(query_result,
+                          priv_get_features_for_query_results(query_result));
+  }
+
+  /// \brief The same as query() but with distance function ID.
+  template <typename query_iterator>
+  neighbor_store_type query(const std::size_t   index_id,
                             const distance::id& distance_func_id,
                             query_iterator      queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    return query(index_ids_begin, index_ids_end,
+    return query(index_id,
                  distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  queries_begin, queries_end, k, epsilon);
+  }
+
+  /// \brief The same as query_with_features() but with distance function ID.
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(const std::size_t   index_id,
+                      const distance::id& distance_func_id,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    return query_with_features(
+        index_id,
+        distance::distance_function<point_type, distance_type>(
+            distance_func_id),
+        queries_begin, queries_end, k, epsilon);
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -569,6 +583,51 @@ class dnnd {
     return query_result;
   }
 
+  /// \brief The same as query() but runs on multiple indices and returns neighbor
+  /// features.
+  template <typename index_id_iterator, typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(index_id_iterator      index_ids_begin,
+                      index_id_iterator      index_ids_end,
+                      distance_function_type distance_function,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    auto query_result = query(index_ids_begin, index_ids_end, distance_function,
+                              queries_begin, queries_end, k, epsilon);
+    return std::make_pair(query_result,
+                          priv_get_features_for_query_results(query_result));
+  }
+
+  /// \brief The same as query() but with distance function ID and on multiple
+  /// indices.
+  template <typename index_id_iterator, typename query_iterator>
+  neighbor_store_type query(index_id_iterator   index_ids_begin,
+                            index_id_iterator   index_ids_end,
+                            const distance::id& distance_func_id,
+                            query_iterator      queries_begin,
+                            query_iterator queries_end, const int k,
+                            const double epsilon = 0.1) {
+    return query(index_ids_begin, index_ids_end,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
+  }
+
+  /// \brief The same as query() but with distance function ID and on multiple
+  /// indices. Returns neighbor features also.
+  template <typename index_id_iterator, typename query_iterator>
+  std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
+  query_with_features(index_id_iterator   index_ids_begin,
+                      index_id_iterator   index_ids_end,
+                      const distance::id& distance_func_id,
+                      query_iterator queries_begin, query_iterator queries_end,
+                      const int k, const double epsilon = 0.1) {
+    return query(index_ids_begin, index_ids_end,
+                 distance::distance_function<point_type, distance_type>(
+                     distance_func_id),
+                 queries_begin, queries_end, k, epsilon);
+  }
+
   /// \brief Dump the k-NN index to distributed files.
   /// \param out_file_prefix File path prefix.
   /// \param dump_distance If true, also dump distances
@@ -593,9 +652,69 @@ class dnnd {
   /// \param id Point ID.
   bool contains_local(const id_type id) const { return m_pstore->contains(id); }
 
+  /// \brief Get the owner rank of a point with the given ID.
+  /// \param id Point ID.
+  /// \return The rank that owns the point.
+  int get_owner(const id_type id) const {
+    return priv_get_point_partitioner()(id);
+  }
+
   /// \brief Get a point with the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
     return m_pstore->at(id);
+  }
+
+  /// \brief Get point data of the given IDs.
+  /// This function invokes YGM barrier. All ranks must call this function.
+  /// Note: returned data are always stored in normal heap memory, not Metall.
+  template <typename id_iterator>
+  std::unordered_map<id_type, point_type> get_points(
+      id_iterator ids_begin, id_iterator ids_end) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    static std::unordered_map<id_type, point_type> return_points_store;
+    return_points_store = decltype(return_points_store){};
+    return_points_store.reserve(std::distance(ids_begin, ids_end));
+
+    auto proc = [](auto comm, auto pthis, const id_type id,
+                   const int source_rank) {
+      assert(pthis->contains_local(id));
+
+      // TODO: investigate why point instance is copied in YGM::async() (before
+      // sending apparently).
+      // Because of that, segmentation fault occurs when
+      // Metall is opened as read-only. The below is a workaround to avoid the
+      // issue: Allocate point instance in the heap, not in Metall, explicitly.
+      // If fallback_allocator is used, constructing the point_type without
+      // allocator instance falls back to the default (heap) allocator.
+      point_type point;
+      // TODO: check the value of propagate_on_container_copy_assignment.
+      // Assumes that the propagate_on_container_copy_assignment of the
+      // allocator_type of the point_type is false.
+      point = pthis->get_local_point(id);
+
+      comm->async(
+          source_rank,
+          [](auto, const auto& id, auto point) {
+            // Avoid duplicate insertion to get better performance.
+            if (!return_points_store.contains(id)) {
+              return_points_store.emplace(id, std::move(point));
+            }
+          },
+          id, std::move(point));
+    };
+    m_comm.cf_barrier();
+
+    for (auto it = ids_begin; it != ids_end; ++it) {
+      const auto id = *it;
+      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
+    }
+    m_comm.barrier();
+
+    return return_points_store;
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
@@ -606,15 +725,139 @@ class dnnd {
   /// points.
   auto local_points_end() const { return m_pstore->end(); }
 
+  /// \brief Get the number of locally stored points.
+  std::size_t num_local_points() const { return m_pstore->size(); }
+
+  /// \brief Get the number of points.
+  /// This function performs an all-reduce operation, which is not cheap.
+  std::size_t num_points() const {
+    return m_comm.all_reduce_sum(m_pstore->size());
+  }
+
   /// \brief API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
     return iterator_proxy_type(local_points_begin(), local_points_end());
   }
 
   /// \brief Erase a kNN index
-  void erase(const id_type id) {
-    m_knn_index_list->erase(id);
-    m_index_k_list->erase(id);
+  /// \param index_id Index ID.
+  void erase(const std::size_t index_id) {
+    m_knn_index_list->erase(m_knn_index_list->begin() + index_id);
+    m_index_k_list->erase(m_index_k_list->begin() + index_id);
+  }
+
+  /// \brief Get the number of neighbors of the given point.
+  /// If the point is not stored locally, the function returns 0
+  /// \param index_id Index ID.
+  /// \param id Point ID.
+  /// \return The number of neighbors of the point.
+  std::size_t num_local_neighbors(std::size_t   index_id,
+                                  const id_type id) const {
+    if (contains_local(id)) {
+      return m_knn_index_list->at(index_id).at(id).size();
+    }
+    return 0;
+  }
+
+  /// \brief Get the neighbors of the given local point.
+  /// If the point is not stored locally, the function throws an exception.
+  /// \param id Point ID.
+  /// \return The neighbors of the point. A vector of neighbor.
+  std::vector<neighbor_type> get_local_neighbors(std::size_t   index_id,
+                                                 const id_type id) const {
+    std::vector<neighbor_type> neighbors;
+    for (auto itr = m_knn_index_list->at(index_id).neighbors_begin(id),
+              end = m_knn_index_list->at(index_id).neighbors_end(id);
+         itr != end; ++itr) {
+      neighbors.push_back(*itr);
+    }
+    return neighbors;
+  }
+
+  /// \brief Get the neighbors of the given point.
+  /// This function invokes YGM barrier. All ranks must call this function.
+  template <typename id_iterator>
+  std::unordered_map<id_type, std::vector<neighbor_type>> get_neighbors(
+      std::size_t index_id, id_iterator ids_begin, id_iterator ids_end) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    static std::unordered_map<id_type, std::vector<neighbor_type>>
+        neighbors_table;
+    neighbors_table = decltype(neighbors_table){};
+    neighbors_table.reserve(std::distance(ids_begin, ids_end));
+
+    auto proc = [](auto comm, auto pthis, const std::size_t index_id,
+                   const id_type id, const int source_rank) {
+      assert(pthis->contains_local(id));
+      const auto neighbors = pthis->get_local_neighbors(index_id, id);
+      comm->async(
+          source_rank,
+          [](auto, const auto& id, const auto& neighbors) {
+            neighbors_table.emplace(id, neighbors);
+          },
+          id, neighbors);
+    };
+    m_comm.cf_barrier();
+
+    for (auto it = ids_begin; it != ids_end; ++it) {
+      const auto id = *it;
+      m_comm.async(get_owner(id), proc, m_this, index_id, id, m_comm.rank());
+    }
+    m_comm.barrier();
+
+    return neighbors_table;
+  }
+
+  /// \brief Get the neighbors of the given point with features of the
+  /// neighbors.
+  template <typename id_iterator>
+  std::unordered_map<
+      id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+  get_neighbors_with_features(std::size_t index_id, id_iterator ids_begin,
+                              id_iterator ids_end) const {
+    // Get neighbors
+    const auto neighbors_table = get_neighbors(index_id, ids_begin, ids_end);
+
+    // Get neighbor's features
+    std::set<id_type> neighbor_ids;
+    for (auto& [id, neighbors] : neighbors_table) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+    const auto neighbor_features_table =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    // Construct the result table
+    std::unordered_map<
+        id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+        result;
+    for (auto& [id, neighbors] : neighbors_table) {
+      // Construct neighbor feature vector
+      // The line below makes the fallback_allocator in the point_type not to
+      // get stateful allocator.
+      std::vector<point_type> neighbor_features(neighbors.size());
+      for (size_t i = 0; i < neighbors.size(); ++i) {
+        neighbor_features[i] = neighbor_features_table.at(neighbors[i].id);
+      }
+
+      result[id] =
+          std::make_pair(std::move(neighbors), std::move(neighbor_features));
+    }
+    m_comm.cf_barrier();
+
+    return result;
+  }
+
+  std::vector<std::size_t> get_index_ids() const {
+    std::vector<std::size_t> index_ids;
+    for (std::size_t i = 0; i < m_knn_index_list->size(); ++i) {
+      index_ids.push_back(i);
+    }
+    return index_ids;
   }
 
  private:
@@ -626,6 +869,30 @@ class dnnd {
       return dndetail::murmurhash::hash<5981>{}(id) % size;
     };
   };
+
+  std::vector<std::vector<point_type>> priv_get_features_for_query_results(
+      const neighbor_store_type& query_results) {
+    std::set<id_type> neighbor_ids;
+    for (const auto& neighbors : query_results) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+    auto neighbor_features_table =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    std::vector<std::vector<point_type>> neighbor_features_to_return;
+    for (std::size_t i = 0; i < query_results.size(); ++i) {
+      std::vector<point_type> neighbor_features(query_results[i].size());
+      for (std::size_t j = 0; j < query_results[i].size(); ++j) {
+        neighbor_features[j] =
+            neighbor_features_table.at(query_results[i][j].id);
+      }
+      neighbor_features_to_return.push_back(std::move(neighbor_features));
+    }
+
+    return neighbor_features_to_return;
+  }
 
   ygm::comm&                                           m_comm;
   uint64_t                                             m_rnd_seed;

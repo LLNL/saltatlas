@@ -310,6 +310,8 @@ class dnnd {
     return query_result;
   }
 
+  /// \brief Run queries as the same as query() and return the query results
+  /// with the feature vectors of the neighbors.
   template <typename query_iterator>
   std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
   query_with_features(query_iterator queries_begin, query_iterator queries_end,
@@ -369,28 +371,13 @@ class dnnd {
     return priv_get_point_partitioner()(id);
   }
 
-  /// \brief Get a point with the given ID from the local point store.
+  /// \brief Get a point of the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
     return m_pstore.at(id);
   }
 
-  template <typename id_iterator>
-  std::unordered_map<id_type, point_type> get_local_points(
-      id_iterator ids_begin, id_iterator ids_end) const {
-    static_assert(
-        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
-                       id_type>,
-        "id_iterator must be an iterator of id_type");
-
-    std::unordered_map<id_type, point_type> points;
-    points.reserve(std::distance(ids_begin, ids_end));
-    for (auto it = ids_begin; it != ids_end; ++it) {
-      const auto id = *it;
-      points.emplace(id, m_pstore.at(id));
-    }
-    return points;
-  }
-
+  /// \brief Get point data of the given IDs.
+  /// This function invokes YGM barrier. All ranks must call this function.
   template <typename id_iterator>
   std::unordered_map<id_type, point_type> get_points(
       id_iterator ids_begin, id_iterator ids_end) const {
@@ -399,11 +386,9 @@ class dnnd {
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    std::unordered_map<id_type, point_type> points;
-    points.reserve(std::distance(ids_begin, ids_end));
-
-    static auto& ref_points = points;
-    ref_points              = points;
+    static std::unordered_map<id_type, point_type> return_points_store;
+    return_points_store = decltype(return_points_store){};
+    return_points_store.reserve(std::distance(ids_begin, ids_end));
 
     auto proc = [](auto comm, auto pthis, const id_type id,
                    const int source_rank) {
@@ -412,19 +397,19 @@ class dnnd {
       comm->async(
           source_rank,
           [](auto, const auto& id, const auto& point) {
-            ref_points.emplace(id, point);
+            return_points_store.emplace(id, point);
           },
           id, pthis->get_local_point(id));
     };
+    m_comm.cf_barrier();
 
     for (auto it = ids_begin; it != ids_end; ++it) {
       const auto id = *it;
       m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
     }
-
     m_comm.barrier();
 
-    return points;
+    return return_points_store;
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
@@ -447,6 +432,109 @@ class dnnd {
   /// This function performs an all-reduce operation, which is not cheap.
   std::size_t num_points() const {
     return m_comm.all_reduce_sum(m_pstore.size());
+  }
+
+  /// \brief Get the number of neighbors of the given point.
+  /// If the point is not stored locally, the function returns 0.
+  /// \param id Point ID.
+  /// \return The number of neighbors of the point.
+  std::size_t num_local_neighbors(const id_type id) const {
+    if (contains_local(id)) {
+      return m_knn_index.num_neighbors(id);
+    }
+    return 0;
+  }
+
+  /// \brief Get the neighbors of the given local point.
+  /// If the point is not stored locally, the function throws an exception.
+  /// \param id Point ID.
+  /// \return The neighbors of the point. A vector of neighbor.
+  std::vector<neighbor_type> get_local_neighbors(const id_type id) const {
+    std::vector<neighbor_type> neighbors;
+    for (auto itr = m_knn_index.neighbors_begin(id),
+              end = m_knn_index.neighbors_end(id);
+         itr != end; ++itr) {
+      neighbors.push_back(*itr);
+    }
+    return neighbors;
+  }
+
+  /// \brief Get the neighbors of the given point.
+  /// This function invokes YGM barrier. All ranks must call this function.
+  template <typename id_iterator>
+  std::unordered_map<id_type, std::vector<neighbor_type>> get_neighbors(
+      id_iterator ids_begin, id_iterator ids_en) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    static std::unordered_map<id_type, std::vector<neighbor_type>>
+        neighbors_table;
+    neighbors_table = decltype(neighbors_table){};
+    neighbors_table.reserve(std::distance(ids_begin, ids_en));
+
+    auto proc = [](auto comm, auto pthis, const id_type id,
+                   const int source_rank) {
+      assert(pthis->contains_local(id));
+      const auto neighbors = pthis->get_local_neighbors(id);
+      comm->async(
+          source_rank,
+          [](auto, const auto& id, const auto& neighbors) {
+            neighbors_table.emplace(id, neighbors);
+          },
+          id, neighbors);
+    };
+    m_comm.cf_barrier();
+
+    for (auto it = ids_begin; it != ids_en; ++it) {
+      const auto id = *it;
+      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
+    }
+    m_comm.barrier();
+
+    return neighbors_table;
+  }
+
+  /// \brief Get the neighbors of the given point with features of the
+  /// neighbors.
+  template <typename id_iterator>
+  std::unordered_map<
+      id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+  get_neighbors_with_features(id_iterator ids_begin,
+                              id_iterator ids_end) const {
+    // Get neighbors
+    const auto neighbors_table = get_neighbors(ids_begin, ids_end);
+
+    // Get neighbor's features
+    std::set<id_type> neighbor_ids;
+    for (auto& [id, neighbors] : neighbors_table) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+    const auto neighbor_features_table =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    // Construct the result table
+    std::unordered_map<
+        id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+        result;
+    for (auto& [id, neighbors] : neighbors_table) {
+      result[id];
+
+      std::vector<point_type> neighbor_features;
+      for (const auto& neighbor : neighbors) {
+        neighbor_features.push_back(
+            std::move(neighbor_features_table.at(neighbor.id)));
+      }
+
+      result[id] =
+          std::make_pair(std::move(neighbors), std::move(neighbor_features));
+    }
+    m_comm.cf_barrier();
+
+    return result;
   }
 
  private:

@@ -56,15 +56,17 @@ class nn_index {
   using neighbor_type  = detail::neighbor<id_type, distance_type>;
   using allocator_type = Allocator;
 
- private:
   using neighbor_list_type =
       container::vector<neighbor_type,
                         other_allocator<allocator_type, neighbor_type>>;
+
+ private:
   using point_table_type = container::unordered_map<
       id_type, neighbor_list_type, std::hash<id_type>, std::equal_to<>,
       other_scoped_allocator<allocator_type,
                              std::pair<const id_type, neighbor_list_type>>>;
 
+ public:
   using point_iterator          = typename point_table_type::iterator;
   using const_point_iterator    = typename point_table_type::const_iterator;
   using neighbor_iterator       = typename neighbor_list_type::iterator;
@@ -98,8 +100,8 @@ class nn_index {
 
   void sort_and_remove_duplicate_neighbors(const id_type &source) {
     sort_neighbors(source);
-    auto& nns_list = m_index[source];
-    auto last = std::unique(nns_list.begin(), nns_list.end());
+    auto &nns_list = m_index[source];
+    auto  last     = std::unique(nns_list.begin(), nns_list.end());
     nns_list.erase(last, nns_list.end());
     nns_list.shrink_to_fit();
   }
@@ -113,26 +115,28 @@ class nn_index {
     m_index[source].shrink_to_fit();
   }
 
-  auto points_begin() { return m_index.begin(); }
+  point_iterator points_begin() { return m_index.begin(); }
 
-  auto points_end() { return m_index.end(); }
+  point_iterator points_end() { return m_index.end(); }
 
-  auto points_begin() const { return m_index.begin(); }
+  const_point_iterator points_begin() const { return m_index.begin(); }
 
-  auto points_end() const { return m_index.end(); }
+  const_point_iterator points_end() const { return m_index.end(); }
 
-  auto neighbors_begin(const id_type &source) {
+  neighbor_iterator neighbors_begin(const id_type &source) {
     return m_index[source].begin();
   }
 
-  auto neighbors_end(const id_type &source) { return m_index[source].end(); }
+  neighbor_iterator neighbors_end(const id_type &source) {
+    return m_index[source].end();
+  }
 
-  auto neighbors_begin(const id_type &source) const {
+  const_neighbor_iterator neighbors_begin(const id_type &source) const {
     assert(m_index.count(source) > 0);
     return m_index.at(source).begin();
   }
 
-  auto neighbors_end(const id_type &source) const {
+  const_neighbor_iterator neighbors_end(const id_type &source) const {
     assert(m_index.count(source) > 0);
     return m_index.at(source).end();
   }

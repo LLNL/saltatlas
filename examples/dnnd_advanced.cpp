@@ -20,6 +20,9 @@ using id_t   = uint32_t;
 using dist_t = double;
 
 // Point Type
+// If one uses Metall's STL-allocator to allocate container in Metall's memory
+// space, metall::manager::fallback_allocator must be used because DNND
+// allocates temporal point instances.
 using point_type = saltatlas::pm_feature_vector<float>;
 
 // Custom distance function
@@ -45,11 +48,11 @@ int main(int argc, char** argv) {
     g.load_points(paths.begin(), paths.end(), "wsv");
 
     // ----- NNG build and NN search APIs ----- //
-    int        k  = 4;
-    const auto id = g.build(saltatlas::distance::id::l2, k);
+    int        k        = 4;
+    const auto index_id = g.build(saltatlas::distance::id::l2, k);
 
     bool make_graph_undirected = true;
-    g.optimize(id, saltatlas::distance::id::l2, make_graph_undirected);
+    g.optimize(index_id, saltatlas::distance::id::l2, make_graph_undirected);
 
     // Run queries
     std::vector<point_type> queries;
@@ -57,8 +60,8 @@ int main(int argc, char** argv) {
       queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
     }
     int        num_to_search = 4;
-    const auto results       = g.query(id, saltatlas::distance::id::l2, queries.begin(),
-                                       queries.end(), num_to_search);
+    const auto results       = g.query(index_id, saltatlas::distance::id::l2,
+                                       queries.begin(), queries.end(), num_to_search);
 
     if (comm.rank() == 0) {
       std::cout << "Neighbours (id, distance):";
@@ -80,8 +83,8 @@ int main(int argc, char** argv) {
     std::vector<std::filesystem::path>        paths{
         "../examples/datasets/point_5-4.txt"};
     g.load_points(paths.begin(), paths.end(), "wsv");
-    const auto id = g.build(custom_distance, 2);
-    comm.cout0() << "Created KNNG " << id << std::endl;
+    const auto index_id = g.build(custom_distance, 2);
+    comm.cout0() << "Created KNNG " << index_id << std::endl;
   }
 
   {
@@ -90,8 +93,8 @@ int main(int argc, char** argv) {
     g.update(0, custom_distance, 4);
     comm.cout0() << "Updated KNNG " << 0 << std::endl;
 
-    auto id = g.build(custom_distance, 4);
-    comm.cout0() << "Created KNNG " << id << std::endl;
+    auto index_id = g.build(custom_distance, 4);
+    comm.cout0() << "Created KNNG " << index_id << std::endl;
   }
 
   {
