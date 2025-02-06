@@ -96,6 +96,19 @@ class dhnsw {
     m_comm.barrier();
   }
 
+  template <template <typename, typename> class ygm_container_type>
+  void add_points(ygm_container_type<point_type, id_type> &container)
+    requires ygm::container::detail::HasForAll<
+                 ygm_container_type<id_type, point_type>> &&
+             ygm::container::detail::DoubleItemTuple<
+                 typename ygm_container_type<id_type, point_type>::for_all_args>
+  {
+    container.for_all([this](const id_type id, const point_type &point) {
+      m_point_store[id] = point;
+    });
+    m_comm.barrier();
+  }
+
   template <typename PathIterator>
   void load_points(PathIterator paths_begin, PathIterator paths_end,
                    const std::string_view file_format) {
