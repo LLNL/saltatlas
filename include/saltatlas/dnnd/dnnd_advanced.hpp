@@ -310,7 +310,7 @@ class dnnd {
   /// All ranks must call this function.
   /// \param distance_func_id Distance function ID.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index. The return value of get_knn_index()
+  /// \param initial_index Initial index. The return value of get_index()
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
@@ -326,7 +326,7 @@ class dnnd {
   /// All ranks must call this function.
   /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index. The return value of get_knn_index()
+  /// \param initial_index Initial index. The return value of get_index()
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
@@ -864,7 +864,7 @@ class dnnd {
 
   /// \brief Return the reference to k-NN index associated with index_id.
   /// \param index_id Index ID.
-  const knn_index_type& get_knn_index(const std::size_t index_id) const {
+  const knn_index_type& get_index(const std::size_t index_id) const {
     // Stable vector (or similar container) must be used to avoid dangling
     // reference when m_knn_index_list's size is changed.
     return m_knn_index_list->at(index_id);
