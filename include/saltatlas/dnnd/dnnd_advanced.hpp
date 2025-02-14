@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include <boost/interprocess/containers/stable_vector.hpp>
 #include <metall/container/vector.hpp>
 #include <metall/utility/metall_mpi_adaptor.hpp>
 #include <ygm/comm.hpp>
@@ -60,6 +61,13 @@ template <typename Id       = uint64_t,
 class dnnd {
  private:
   using self_type = dnnd<Id, Point, Distance>;
+  using mmanager  = metall::utility::metall_mpi_adaptor::manager_type;
+
+  template <typename T>
+  using allocator_type = mmanager::fallback_allocator<T>;
+
+  template <typename T>
+  using scp_allocator_type = mmanager::scoped_fallback_allocator_type<T>;
 
  public:
   /// \brief Point ID type.
@@ -69,23 +77,15 @@ class dnnd {
   /// \brief Point type.
   using point_type = Point;
 
+  /// \brief k-NN index type.
+  using knn_index_type =
+      dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>>;
+
  private:
-  using mmanager = metall::utility::metall_mpi_adaptor::manager_type;
-
-  template <typename T>
-  using allocator_type = mmanager::fallback_allocator<T>;
-
-  template <typename T>
-  using scp_allocator_type = mmanager::scoped_fallback_allocator_type<T>;
-
   /// \brief Point store type.
   using point_store_type =
       point_store<id_type, point_type, std::hash<id_type>, std::equal_to<>,
                   allocator_type<std::byte>>;
-
-  /// \brief k-NN index type.
-  using knn_index_type =
-      dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>>;
 
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
 
@@ -101,8 +101,8 @@ class dnnd {
   using query_store_type = typename query_kernel_type::query_store_type;
 
   using knn_index_container =
-      metall::container::vector<knn_index_type,
-                                scp_allocator_type<knn_index_type>>;
+      boost::interprocess::stable_vector<knn_index_type,
+                                         scp_allocator_type<knn_index_type>>;
   using size_container =
       metall::container::vector<std::size_t, scp_allocator_type<std::size_t>>;
 
@@ -310,7 +310,8 @@ class dnnd {
   /// All ranks must call this function.
   /// \param distance_func_id Distance function ID.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index.
+  /// \param initial_index Initial index. The return value of get_knn_index()
+  /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
@@ -325,7 +326,8 @@ class dnnd {
   /// All ranks must call this function.
   /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index.
+  /// \param initial_index Initial index. The return value of get_knn_index()
+  /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
@@ -342,7 +344,7 @@ class dnnd {
     nn_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
                           dfunc, m_comm);
     m_knn_index_list->emplace_back();
-    kernel.construct(initial_index, m_knn_index_list->back());
+    kernel.construct(initial_index, false, m_knn_index_list->back());
     m_index_k_list->push_back(k);
 
     return m_knn_index_list->size() - 1;
@@ -386,7 +388,7 @@ class dnnd {
     nn_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
                           dfunc, m_comm);
     m_knn_index_list->emplace_back();
-    kernel.construct(initial_index, m_knn_index_list->back());
+    kernel.construct(initial_index, false, m_knn_index_list->back());
     m_index_k_list->push_back(k);
 
     return m_knn_index_list->size() - 1;
@@ -583,8 +585,8 @@ class dnnd {
     return query_result;
   }
 
-  /// \brief The same as query() but runs on multiple indices and returns neighbor
-  /// features.
+  /// \brief The same as query() but runs on multiple indices and returns
+  /// neighbor features.
   template <typename index_id_iterator, typename query_iterator>
   std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
   query_with_features(index_id_iterator      index_ids_begin,
@@ -858,6 +860,14 @@ class dnnd {
       index_ids.push_back(i);
     }
     return index_ids;
+  }
+
+  /// \brief Return the reference to k-NN index associated with index_id.
+  /// \param index_id Index ID.
+  const knn_index_type& get_knn_index(const std::size_t index_id) const {
+    // Stable vector (or similar container) must be used to avoid dangling
+    // reference when m_knn_index_list's size is changed.
+    return m_knn_index_list->at(index_id);
   }
 
  private:
