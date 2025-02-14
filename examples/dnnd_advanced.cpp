@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     g.load_points(paths.begin(), paths.end(), "wsv");
 
     // ----- NNG build and NN search APIs ----- //
-    int        k        = 4;
+    int        k        = 3;
     const auto index_id = g.build(saltatlas::distance::id::l2, k);
 
     bool make_graph_undirected = true;
@@ -70,6 +70,9 @@ int main(int argc, char** argv) {
       }
       std::cout << std::endl;
     }
+
+    // Use already built index as an initial index
+    g.build(saltatlas::distance::id::l2, k + 1, g.get_index(index_id));
   }
 
   // -- Persistent memory example -- //
