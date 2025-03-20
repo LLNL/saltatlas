@@ -136,8 +136,8 @@ if (NOT ygm_POPULATED)
         set(JUST_INSTALL_YGM TRUE)
         FetchContent_Declare(
             ygm
-            GIT_REPOSITORY https://github.com/bwpriest/ygm.git
-            GIT_TAG feature/cmake_3.30_tweaks
+            GIT_REPOSITORY https://github.com/LLNL/ygm.git
+            GIT_TAG v0.8-dev
         )
         FetchContent_MakeAvailable(ygm)
     endif ()
