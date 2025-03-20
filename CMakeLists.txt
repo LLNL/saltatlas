@@ -92,8 +92,6 @@ find_package(OpenMP)
 # Boost
 #
 if (NOT boost_POPULATED AND SALTATLAS_USE_METALL)
-    cmake_policy(VERSION 3.30)
-    cmake_policy(SET CMP0167 NEW)
     find_package(Boost 1.80)
     if (Boost_FOUND)
         message(STATUS ${PROJECT_NAME} " found boost include dirs: "
@@ -104,6 +102,7 @@ if (NOT boost_POPULATED AND SALTATLAS_USE_METALL)
             Boost
             URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
         )
+        set(BOOST_INCLUDE_LIBRARIES container interprocess)
         FetchContent_MakeAvailable(Boost)
     endif ()
 endif ()
@@ -194,6 +193,7 @@ if (SALTATLAS_USE_METALL)
     endif ()
 
     find_package(Threads REQUIRED)
+    target_include_directories(saltatlas INTERFACE ${Boost_INCLUDE_DIRS})
     target_include_directories(
         saltatlas INTERFACE $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
                             $<INSTALL_INTERFACE:include/boost>
