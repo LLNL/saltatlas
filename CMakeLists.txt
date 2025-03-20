@@ -22,6 +22,8 @@ project(
     LANGUAGES C CXX
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set(SALTATLAS_MAIN_PROJECT ON)
 endif ()
@@ -89,109 +91,55 @@ find_package(OpenMP)
 #
 # Boost
 #
-# Disable the boost-cmake feature (BoostConfig.cmake or boost-config.cmake)
-# because there is a tricky behavior/issue. We use FetchContent to download
-# Boost and find_package to find the location of Boost. As find_package natively
-# supports Boost, we do not need to use the boost-cmake feature.
-set(Boost_NO_BOOST_CMAKE ON)
-
-find_package(Boost 1.80 QUIET)
-if (NOT Boost_FOUND)
-    FetchContent_Declare(
-        Boost
-        URL https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.bz2
-    )
-    FetchContent_GetProperties(Boost)
-    if (Boost_POPULATED)
-        message(STATUS ${PROJECT_NAME}
-                       " found already populated Boost dependency: "
-                       ${boost_SOURCE_DIR}
+if (NOT boost_POPULATED AND SALTATLAS_USE_METALL)
+    cmake_policy(VERSION 3.30)
+    cmake_policy(SET CMP0167 NEW)
+    find_package(Boost 1.80)
+    if (Boost_FOUND)
+        message(STATUS ${PROJECT_NAME} " found boost include dirs: "
+                       ${Boost_INCLUDE_DIRS}
         )
     else ()
-        if (SALTATLAS_USE_METALL) # Only Metall requires Boost
-            FetchContent_Populate(Boost)
-            message(STATUS ${PROJECT_NAME} " cloned Boost dependency: "
-                           ${boost_SOURCE_DIR}
-            )
-        endif ()
+        FetchContent_Declare(
+            Boost
+            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
+        )
+        FetchContent_MakeAvailable(Boost)
     endif ()
-    set(BOOST_ROOT ${boost_SOURCE_DIR})
-    find_package(Boost 1.80)
-else ()
-    message(STATUS ${PROJECT_NAME} " found Boost dependency: "
-                   ${Boost_INCLUDE_DIR}
-    )
 endif ()
 
 #
 # hnswlib
 #
-find_package(hnswlib CONFIG)
-if (NOT hnswlib_FOUND)
-    FetchContent_Declare(
-        hnswlib
-        GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
-        GIT_TAG feature/cmake_facelift
-    )
-    FetchContent_GetProperties(hnswlib)
-    if (hnswlib_POPULATED)
-        message(STATUS ${PROJECT_NAME}
-                       " found already populated hnswlib dependency: "
-                       ${hnswlib_SOURCE_DIR}
-        )
-    else ()
+if (NOT hnswlib_POPULATED)
+    find_package(hnswlib CONFIG QUIET)
+    if (NOT hnswlib_FOUND)
         # Do not compile any hnswlib tests
         set(JUST_INSTALL_HNSWLIB ON)
         # Install hnswlib at ${CMAKE_INSTALL_PREFIX}
         set(HNSWLIB_INSTALL ${SALTATLAS_INSTALL})
-        # Populate hnswlib
-        FetchContent_Populate(hnswlib)
-        # Include hnswlib root cmake boilerplate
-        add_subdirectory(${hnswlib_SOURCE_DIR} ${hnswlib_BINARY_DIR})
-        message(STATUS ${PROJECT_NAME} " cloned hnswlib dependency: "
-                       ${hnswlib_SOURCE_DIR}
+        FetchContent_Declare(
+            hnswlib
+            GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
+            GIT_TAG feature/cmake_facelift
         )
-    endif ()
-else ()
-    message(STATUS ${PROJECT_NAME} " found hnswlib dependency: " ${hnswlib_DIR})
-    if (${hnswlib_SOURCE_DIR} MATCHES "*_deps*")
-        add_subdirectory(${hnswlib_SOURCE_DIR} ${hnswlib_BINARY_DIR})
+        FetchContent_MakeAvailable(hnswlib)
     endif ()
 endif ()
 
 #
 # YGM
 #
-find_package(ygm 0.8 QUIET CONFIG)
-if (NOT ygm_FOUND)
-    FetchContent_Declare(
-        ygm
-        GIT_REPOSITORY https://github.com/bwpriest/ygm.git
-        GIT_TAG feature/cmake_3.30_tweaks
-    )
-    FetchContent_GetProperties(ygm)
-    if (ygm_POPULATED)
-        message(STATUS ${PROJECT_NAME}
-                       " found already populated ygm dependency: "
-                       ${ygm_SOURCE_DIR}
+if (NOT ygm_POPULATED)
+    find_package(ygm CONFIG QUIET)
+    if (NOT ygm_FOUND)
+        set(JUST_INSTALL_YGM TRUE)
+        FetchContent_Declare(
+            ygm
+            GIT_REPOSITORY https://github.com/bwpriest/ygm.git
+            GIT_TAG feature/cmake_3.30_tweaks
         )
-    else ()
-        # Do not compile any ygm tests
-        set(JUST_INSTALL_YGM ON)
-        # Install ygm at ${CMAKE_INSTALL_PREFIX}
-        set(YGM_INSTALL ${SALTATLAS_INSTALL})
-        # Populate ygm
-        FetchContent_Populate(ygm)
-        # Include ygm root cmake boilerplate
-        add_subdirectory(${ygm_SOURCE_DIR} ${ygm_BINARY_DIR})
-        message(STATUS ${PROJECT_NAME} " cloned ygm dependency "
-                       ${ygm_SOURCE_DIR}
-        )
-    endif ()
-else ()
-    message(STATUS ${PROJECT_NAME} " found ygm dependency " ${ygm_DIR})
-    if (${ygm_SOURCE_DIR} MATCHES "*_deps*")
-        add_subdirectory(${ygm_SOURCE_DIR} ${ygm_BINARY_DIR})
+        FetchContent_MakeAvailable(ygm)
     endif ()
 endif ()
 
@@ -216,47 +164,18 @@ endif ()
 if (SALTATLAS_USE_HDF5)
     find_package(saltatlas_h5_io CONFIG)
     if (NOT saltatlas_h5_io_FOUND)
+        # Do not compile any saltatlas_h5_io tests
+        set(JUST_INSTALL_SALTATLAS_H5_IO ON)
+        # Install h5_cpp_io at ${CMAKE_INSTALL_PREFIX}
+        set(SALTATLAS_H5_IO_INSTALL ${SALTATLAS_INSTALL})
         FetchContent_Declare(
             saltatlas_h5_io
             GIT_REPOSITORY https://github.com/LLNL/saltatlas_h5_io.git
             GIT_TAG main
         )
-        FetchContent_GetProperties(saltatlas_h5_io)
-        if (saltatlas_h5_io_POPULATED)
-            message(
-                STATUS ${PROJECT_NAME}
-                       "found already populated saltatlas_h5_io dependency: "
-                       ${h5_cpp_io_SOURCE_DIR}
-            )
-        else ()
-            # Do not compile any saltatlas_h5_io tests
-            set(JUST_INSTALL_SALTATLAS_H5_IO ON)
-            # Install h5_cpp_io at ${CMAKE_INSTALL_PREFIX}
-            set(SALTATLAS_H5_IO_INSTALL ${SALTATLAS_INSTALL})
-            # Populate saltatlas_h5_io
-            FetchContent_Populate(saltatlas_h5_io)
-            # Include saltatlas_h5_io root cmake boilerplate
-            add_subdirectory(
-                ${saltatlas_h5_io_SOURCE_DIR} ${saltatlas_h5_io_BINARY_DIR}
-            )
-            message(STATUS ${PROJECT_NAME}
-                           " cloned saltatlas_h5_io dependency: "
-                           ${saltatlas_h5_io_SOURCE_DIR}
-            )
-        endif ()
-    else ()
-        message(STATUS ${PROJECT_NAME} " found saltatlas_h5_io dependency: "
-                       ${saltatlas_h5_io_DIR}
-        )
-        if (${saltatlas_h5_io_SOURCE_DIR} MATCHES "*_deps*")
-            add_subdirectory(
-                ${saltatlas_h5_io_SOURCE_DIR} ${saltatlas_h5_io_BINARY_DIR}
-            )
-        endif ()
+        FetchContent_MakeAvailable(saltatlas_h5_io)
     endif ()
     target_link_libraries(saltatlas INTERFACE saltatlas_h5_io::saltatlas_h5_io)
-else ()
-    message(STATUS ${PROJECT_NAME} " building without saltatlas_h5_io and HDF5")
 endif ()
 
 #
@@ -265,29 +184,13 @@ endif ()
 if (SALTATLAS_USE_METALL)
     find_package(Metall QUIET CONFIG)
     if (NOT Metall_FOUND)
+        set(JUST_INSTALL_METALL_HEADER ON)
         FetchContent_Declare(
             Metall
             GIT_REPOSITORY https://github.com/LLNL/metall.git
             GIT_TAG master
         )
-        FetchContent_GetProperties(Metall)
-        if (Metall_POPULATED)
-            message(STATUS ${PROJECT_NAME}
-                           " found already populated Metall dependency: "
-                           ${metall_SOURCE_DIR}
-            )
-        else ()
-            # Do not compile anything in Metall
-            set(JUST_INSTALL_METALL_HEADER ON)
-            FetchContent_MakeAvailable(Metall)
-            message(STATUS ${PROJECT_NAME} " cloned Metall dependency "
-                           ${metall_SOURCE_DIR}
-            )
-        endif ()
-    else ()
-        message(STATUS ${PROJECT_NAME} " found Metall dependency: "
-                       ${Metall_INCLUDE_DIRS}
-        )
+        FetchContent_MakeAvailable(Metall)
     endif ()
 
     find_package(Threads REQUIRED)
