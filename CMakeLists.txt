@@ -197,12 +197,12 @@ endif ()
 #
 # YGM
 #
-find_package(ygm 0.7 QUIET CONFIG)
+find_package(ygm 0.8 QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
         GIT_REPOSITORY https://github.com/LLNL/ygm.git
-        GIT_TAG v0.7-dev
+        GIT_TAG v0.8-dev
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
@@ -346,7 +346,7 @@ if (SALTATLAS_INSTALL)
     set(SALTATLAS_EXPORT_TARGETS saltatlas)
 
     install(
-        TARGETS ${SALTATLAS_EXPORT_TARGETS}
+        TARGETS ${SALTATLAS_EXPORT_TARGETS} ygm cereal
         EXPORT ${PROJECT_NAME}Targets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
