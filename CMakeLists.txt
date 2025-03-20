@@ -18,9 +18,13 @@ endif ()
 
 # Controls whether to set up install boilerplate for project and depencencies.
 # Expects CMAKE_INSTALL_PREFIX to be set to a suitable directory.
+option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
 option(SALTATLAS_INSTALL "Generate the install target"
        ${SALTATLAS_MAIN_PROJECT}
 )
+option(SALTATLAS_USE_METALL "Use Metall" OFF)
+option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
+option(SALTATLAS_USE_HDF5 "Include HDF5 and h5 read/write utilities" OFF)
 
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
@@ -51,21 +55,24 @@ if (EXISTS "${LOC_PATH}")
 endif ()
 
 # Check if the compiler is GCC
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.1")
-        message(WARNING "Your GCC version may be too old. Please consider using GCC version 9.3.1 or higher.")
-    endif()
-else()
-    message(WARNING "You are not using GCC. This project has only been tested with GCC. Please consider using GCC version 9.3.1 or higher.")
-endif()
-
-#  Option to use Metall
-option(SALTATLAS_USE_METALL "Use Metall" OFF)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.1")
+        message(
+            WARNING
+                "Your GCC version may be too old. Please consider using GCC version 9.3.1 or higher."
+        )
+    endif ()
+else ()
+    message(
+        WARNING
+            "You are not using GCC. This project has only been tested with GCC. Please consider using GCC version 9.3.1 or higher."
+    )
+endif ()
 
 include(FetchContent)
 
 #
-#  OpenMP
+# OpenMP
 #
 find_package(OpenMP)
 
@@ -201,8 +208,8 @@ find_package(ygm 0.8 QUIET CONFIG)
 if (NOT ygm_FOUND)
     FetchContent_Declare(
         ygm
-        GIT_REPOSITORY https://github.com/LLNL/ygm.git
-        GIT_TAG v0.8-dev
+        GIT_REPOSITORY https://github.com/bwpriest/ygm.git
+        GIT_TAG feature/cmake_3.30_tweaks
     )
     FetchContent_GetProperties(ygm)
     if (ygm_POPULATED)
@@ -240,7 +247,6 @@ target_include_directories(
 target_link_libraries(
     saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm hnswlib::hnswlib
 )
-option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
 if (SALTATLAS_DETERMINISM)
     message(STATUS ${PROJECT_NAME} " setting determinism")
     target_compile_definitions(saltatlas INTERFACE SALTATLAS_DETERMINISM)
@@ -249,7 +255,6 @@ endif ()
 #
 # saltatlas_h5_io (needs findable HDF5 >= v1.10.7)
 #
-option(SALTATLAS_USE_HDF5 "Include HDF5 and h5 read/write utilities" ON)
 if (SALTATLAS_USE_HDF5)
     find_package(saltatlas_h5_io CONFIG)
     if (NOT saltatlas_h5_io_FOUND)
@@ -337,8 +342,6 @@ if (SALTATLAS_USE_METALL)
     )
 endif ()
 
-option(TEST_WITH_SLURM "Run tests with Slurm" OFF)
-
 if (SALTATLAS_INSTALL)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
@@ -385,7 +388,6 @@ if (SALTATLAS_INSTALL)
 
 endif ()
 
-option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
 if (JUST_INSTALL_SALTATLAS)
     return()
 endif ()
