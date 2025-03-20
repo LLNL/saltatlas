@@ -6,6 +6,16 @@
 # Works with 3.11 and tested through 3.15 (not tested yet)
 cmake_minimum_required(VERSION 3.14)
 
+# ---------------------------------------------------------------------------- #
+# CMake policy
+# ---------------------------------------------------------------------------- #
+if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.30")
+    cmake_policy(SET CMP0167 NEW)
+endif ()
+
+# ---------------------------------------------------------------------------- #
+# saltatlas configuration
+# ---------------------------------------------------------------------------- #
 project(
     saltatlas
     VERSION 0.1
@@ -146,58 +156,6 @@ else ()
     message(STATUS ${PROJECT_NAME} " found hnswlib dependency: " ${hnswlib_DIR})
     if (${hnswlib_SOURCE_DIR} MATCHES "*_deps*")
         add_subdirectory(${hnswlib_SOURCE_DIR} ${hnswlib_BINARY_DIR})
-    endif ()
-endif ()
-
-#
-# Cereal
-#
-set(SALTATLAS_CEREAL_VERSION 1.3.0)
-# Will do something like this upon new release and fix to spack distribution.
-# find_package(cereal ${SALTATLAS_CEREAL_VERSION} CONFIG QUIET)
-find_package(cereal CONFIG QUIET)
-set(SALTATLAS_CEREAL_TARGET "cereal::cereal")
-if (NOT cereal_FOUND)
-    # Currently cereal version 1.3.0 has an outdated CMakeLists.txt, so we need
-    # to use this commit for now.
-    FetchContent_Declare(
-        cereal
-        GIT_REPOSITORY https://github.com/USCiLab/cereal.git
-        GIT_TAG af0700efb25e7dc7af637b9e6f970dbb94813bff
-    )
-    FetchContent_GetProperties(cereal)
-    if (cereal_POPULATED)
-        message(STATUS ${PROJECT_NAME}
-                       " found already populated cereal dependency: "
-                       ${cereal_SOURCE_DIR}
-        )
-    else ()
-        # Do not compile any cereal tests
-        set(JUST_INSTALL_CEREAL ON)
-        # Install cereal at ${CMAKE_INSTALL_PREFIX}
-        set(CEREAL_INSTALL ${SALTATLAS_INSTALL})
-        # Populate cereal
-        FetchContent_Populate(cereal)
-        # Include cereal root cmake boilerplate
-        add_subdirectory(${cereal_SOURCE_DIR} ${cereal_BINARY_DIR})
-        message(STATUS ${PROJECT_NAME} " cloned cereal dependency: "
-                       ${cereal_SOURCE_DIR}
-        )
-    endif ()
-else ()
-    message(STATUS ${PROJECT_NAME} " found cereal dependency: " ${cereal_DIR})
-    if (${cereal_SOURCE_DIR} MATCHES "*_deps*")
-        add_subdirectory(${cereal_SOURCE_DIR} ${cereal_BINARY_DIR})
-    endif ()
-    # cereal installed with spack creates library target "cereal", whereas
-    # installing from source creates target "cereal::cereal". This is the only
-    # simple way I could figure out how to differentiate the two, but this will
-    # cause problems if a spack instance installs headers to a path that does
-    # not include the substring "spack".
-    if (${cereal_DIR} MATCHES ".*spack.*")
-        set(SALTATLAS_CEREAL_TARGET "cereal")
-    else ()
-
     endif ()
 endif ()
 
