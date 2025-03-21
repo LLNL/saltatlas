@@ -104,6 +104,9 @@ if (NOT boost_POPULATED AND SALTATLAS_USE_METALL)
         )
         set(BOOST_INCLUDE_LIBRARIES container interprocess)
         FetchContent_MakeAvailable(Boost)
+        foreach (lib ${BOOST_INCLUDE_LIBRARIES})
+            list(APPEND BOOST_COMPONENTS "Boost::${lib}")
+        endforeach ()
     endif ()
 endif ()
 
@@ -200,6 +203,7 @@ if (SALTATLAS_USE_METALL)
     )
     target_link_libraries(
         saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall
+                            ${BOOST_COMPONENTS}
     )
 endif ()
 
