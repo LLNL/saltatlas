@@ -7,26 +7,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Update apt
-        run: |
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-      - name: Cache boost
-        uses: actions/cache@v4
-        id: cache-boost
-        with:
-          path: "~/boost_1_87_0"
-          key: ${{ runner.os }}-libboost1.87
-      - name: Install boost
-        if: steps.cache-boost.outputs.cache-hit != 'true'
-        run: |
-          cd ~
-          wget --no-verbose https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.bz2
-          tar -xjf boost_1_87_0.tar.bz2
       - name: Install OpenMPI
         run: sudo apt-get install openmpi-bin libopenmpi-dev
       - name: Build w/o HDF5 w/ Metall
         run: |
           mkdir build && cd build
-          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-13 -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON -DBOOST_ROOT=~/boost_1_87_0
+          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
           make -j
