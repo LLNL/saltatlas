@@ -31,9 +31,7 @@ endif ()
 # Controls whether to set up install boilerplate for project and depencencies.
 # Expects CMAKE_INSTALL_PREFIX to be set to a suitable directory.
 option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
-option(SALTATLAS_INSTALL "Generate the install target"
-       ${SALTATLAS_MAIN_PROJECT}
-)
+option(SALTATLAS_INSTALL "Generate the install target" OFF)
 option(SALTATLAS_USE_METALL "Use Metall" OFF)
 option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
 option(SALTATLAS_USE_HDF5 "Include HDF5 and h5 read/write utilities" OFF)
