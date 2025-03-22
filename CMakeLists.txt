@@ -89,59 +89,62 @@ find_package(OpenMP)
 #
 # Boost
 #
-if (NOT boost_POPULATED AND SALTATLAS_USE_METALL)
-    find_package(Boost 1.80)
-    if (Boost_FOUND)
-        message(STATUS ${PROJECT_NAME} " found boost include dirs: "
-                       ${Boost_INCLUDE_DIRS}
-        )
-    else ()
-        FetchContent_Declare(
-            Boost
-            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-        )
-        set(BOOST_INCLUDE_LIBRARIES container interprocess)
-        FetchContent_MakeAvailable(Boost)
-        foreach (lib ${BOOST_INCLUDE_LIBRARIES})
-            list(APPEND BOOST_COMPONENTS "Boost::${lib}")
-        endforeach ()
-    endif ()
+set(FETCHCONTENT_QUIET FALSE)
+if (SALTATLAS_USE_METALL)
+    FetchContent_Declare(
+        Boost
+        URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
+    )
+    set(BOOST_INCLUDE_LIBRARIES
+        json
+        unordered
+        interprocess
+        container
+        property_tree
+        uuid
+        graph
+    )
+    FetchContent_MakeAvailable(Boost)
+    foreach (lib ${BOOST_INCLUDE_LIBRARIES})
+        list(APPEND BOOST_FETCHED_COMPONENTS "Boost::${lib}")
+    endforeach ()
 endif ()
 
 #
 # hnswlib
 #
-if (NOT hnswlib_POPULATED)
-    find_package(hnswlib CONFIG QUIET)
-    if (NOT hnswlib_FOUND)
-        # Do not compile any hnswlib tests
-        set(JUST_INSTALL_HNSWLIB ON)
-        # Install hnswlib at ${CMAKE_INSTALL_PREFIX}
-        set(HNSWLIB_INSTALL ${SALTATLAS_INSTALL})
-        FetchContent_Declare(
-            hnswlib
-            GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
-            GIT_TAG feature/cmake_facelift
-        )
-        FetchContent_MakeAvailable(hnswlib)
-    endif ()
-endif ()
+# Do not compile any hnswlib tests
+set(JUST_INSTALL_HNSWLIB ON)
+# Install hnswlib at ${CMAKE_INSTALL_PREFIX}
+set(HNSWLIB_INSTALL ${SALTATLAS_INSTALL})
+FetchContent_Declare(
+    hnswlib
+    GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
+    GIT_TAG feature/cmake_facelift
+)
+FetchContent_MakeAvailable(hnswlib)
+
+#
+# Cereal
+#
+set(JUST_INSTALL_CEREAL TRUE)
+FetchContent_Declare(
+    cereal
+    GIT_REPOSITORY https://github.com/USCiLab/cereal.git
+    GIT_TAG v1.3.2
+)
+FetchContent_MakeAvailable(cereal)
 
 #
 # YGM
 #
-if (NOT ygm_POPULATED)
-    find_package(ygm CONFIG QUIET)
-    if (NOT ygm_FOUND)
-        set(JUST_INSTALL_YGM TRUE)
-        FetchContent_Declare(
-            ygm
-            GIT_REPOSITORY https://github.com/LLNL/ygm.git
-            GIT_TAG v0.8-dev
-        )
-        FetchContent_MakeAvailable(ygm)
-    endif ()
-endif ()
+set(JUST_INSTALL_YGM TRUE)
+FetchContent_Declare(
+    ygm
+    GIT_REPOSITORY https://github.com/LLNL/ygm.git
+    GIT_TAG v0.8-dev
+)
+FetchContent_MakeAvailable(ygm)
 
 add_library(saltatlas INTERFACE)
 add_library(saltatlas::saltatlas ALIAS saltatlas)
@@ -182,29 +185,21 @@ endif ()
 # Metall
 #
 if (SALTATLAS_USE_METALL)
-    find_package(Metall QUIET CONFIG)
-    if (NOT Metall_FOUND)
-        set(JUST_INSTALL_METALL_HEADER ON)
-        FetchContent_Declare(
-            Metall
-            GIT_REPOSITORY https://github.com/LLNL/metall.git
-            GIT_TAG master
-        )
-        FetchContent_MakeAvailable(Metall)
-    endif ()
+    set(JUST_INSTALL_METALL_HEADER ON)
+    FetchContent_Declare(
+        Metall
+        GIT_REPOSITORY https://github.com/LLNL/metall.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(Metall)
 
     find_package(Threads REQUIRED)
-    target_include_directories(saltatlas INTERFACE ${Boost_INCLUDE_DIRS})
-    target_include_directories(
-        saltatlas INTERFACE $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
-                            $<INSTALL_INTERFACE:include/boost>
-    )
-    target_link_libraries(
-        saltatlas INTERFACE stdc++fs Threads::Threads Metall::Metall
-                            ${BOOST_COMPONENTS}
-    )
+    target_link_libraries(saltatlas INTERFACE Threads::Threads Metall::Metall)
+
+    target_link_libraries(saltatlas INTERFACE ${BOOST_FETCHED_COMPONENTS})
 endif ()
 
+# WARNING: there may be some bugs in this step.
 if (SALTATLAS_INSTALL)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
