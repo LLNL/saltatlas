@@ -33,7 +33,6 @@ endif ()
 option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
 option(SALTATLAS_USE_METALL "Use Metall" OFF)
 option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
-option(SALTATLAS_USE_HDF5 "Include HDF5 and h5 read/write utilities" OFF)
 
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
@@ -156,24 +155,6 @@ target_link_libraries(
 if (SALTATLAS_DETERMINISM)
     message(STATUS ${PROJECT_NAME} " setting determinism")
     target_compile_definitions(saltatlas INTERFACE SALTATLAS_DETERMINISM)
-endif ()
-
-#
-# saltatlas_h5_io (needs findable HDF5 >= v1.10.7)
-#
-if (SALTATLAS_USE_HDF5)
-    find_package(saltatlas_h5_io CONFIG)
-    if (NOT saltatlas_h5_io_FOUND)
-        # Do not compile any saltatlas_h5_io tests
-        set(JUST_INSTALL_SALTATLAS_H5_IO ON)
-        FetchContent_Declare(
-            saltatlas_h5_io
-            GIT_REPOSITORY https://github.com/LLNL/saltatlas_h5_io.git
-            GIT_TAG main
-        )
-        FetchContent_MakeAvailable(saltatlas_h5_io)
-    endif ()
-    target_link_libraries(saltatlas INTERFACE saltatlas_h5_io::saltatlas_h5_io)
 endif ()
 
 #
