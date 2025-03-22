@@ -31,7 +31,6 @@ endif ()
 # Controls whether to set up install boilerplate for project and depencencies.
 # Expects CMAKE_INSTALL_PREFIX to be set to a suitable directory.
 option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
-option(SALTATLAS_INSTALL "Generate the install target" OFF)
 option(SALTATLAS_USE_METALL "Use Metall" OFF)
 option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
 option(SALTATLAS_USE_HDF5 "Include HDF5 and h5 read/write utilities" OFF)
@@ -115,8 +114,6 @@ endif ()
 #
 # Do not compile any hnswlib tests
 set(JUST_INSTALL_HNSWLIB ON)
-# Install hnswlib at ${CMAKE_INSTALL_PREFIX}
-set(HNSWLIB_INSTALL ${SALTATLAS_INSTALL})
 FetchContent_Declare(
     hnswlib
     GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
@@ -169,8 +166,6 @@ if (SALTATLAS_USE_HDF5)
     if (NOT saltatlas_h5_io_FOUND)
         # Do not compile any saltatlas_h5_io tests
         set(JUST_INSTALL_SALTATLAS_H5_IO ON)
-        # Install h5_cpp_io at ${CMAKE_INSTALL_PREFIX}
-        set(SALTATLAS_H5_IO_INSTALL ${SALTATLAS_INSTALL})
         FetchContent_Declare(
             saltatlas_h5_io
             GIT_REPOSITORY https://github.com/LLNL/saltatlas_h5_io.git
@@ -197,53 +192,6 @@ if (SALTATLAS_USE_METALL)
     target_link_libraries(saltatlas INTERFACE Threads::Threads Metall::Metall)
 
     target_link_libraries(saltatlas INTERFACE ${BOOST_FETCHED_COMPONENTS})
-endif ()
-
-# WARNING: there may be some bugs in this step.
-if (SALTATLAS_INSTALL)
-    include(GNUInstallDirs)
-    include(CMakePackageConfigHelpers)
-
-    set(SALTATLAS_EXPORT_TARGETS saltatlas)
-
-    install(
-        TARGETS ${SALTATLAS_EXPORT_TARGETS} ygm cereal
-        EXPORT ${PROJECT_NAME}Targets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-
-    install(
-        EXPORT ${PROJECT_NAME}Targets
-        FILE ${PROJECT_NAME}Targets.cmake
-        NAMESPACE ${PROJECT_NAME}::
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake
-    )
-
-    install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/saltatlas
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-
-    # create version file
-    write_basic_package_version_file(
-        "${PROJECT_NAME}ConfigVersion.cmake"
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY ExactVersion
-    )
-
-    # create config file
-    configure_package_config_file(
-        "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
-        "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake
-    )
-
-    install(FILES "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-                  "${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake
-    )
-
 endif ()
 
 if (JUST_INSTALL_SALTATLAS)
