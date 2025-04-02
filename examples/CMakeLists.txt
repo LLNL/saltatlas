@@ -6,30 +6,28 @@
 #
 # This function adds an example.
 #
-function(add_saltatlas_example example_name)
+function (add_saltatlas_example example_name)
     set(example_source "${example_name}.cpp")
     set(example_exe "${example_name}")
     add_executable(${example_exe} ${example_source})
     target_link_libraries(${example_exe} PUBLIC saltatlas)
-endfunction()
+endfunction ()
 
 add_saltatlas_example(dhnsw_bench)
-
-if (SALTATLAS_USE_HDF5)
-    add_saltatlas_example(benchmark_hdf5)
-endif ()
 
 #
 # This function adds a DNND example with the given feature element type.
 #
-function(add_saltatlas_dnnd_example_feature_type example_name type_name)
+function (add_saltatlas_dnnd_example_feature_type example_name type_name)
     set(example_source "${example_name}.cpp")
     set(example_exe "${example_name}_${type_name}_features")
     add_executable(${example_exe} ${example_source})
     target_link_libraries(${example_exe} PUBLIC saltatlas)
-    target_compile_definitions(${example_exe}
-            PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}")
-endfunction()
+    target_compile_definitions(
+        ${example_exe}
+        PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}"
+    )
+endfunction ()
 
 add_saltatlas_example(dnnd_simple)
 add_saltatlas_example(dnnd_simple_custom_distance)
