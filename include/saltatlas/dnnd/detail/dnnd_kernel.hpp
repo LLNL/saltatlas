@@ -49,11 +49,11 @@
 #include <ygm/utility.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
+#include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
 #include <saltatlas/common/detail/utilities/ygm.hpp>
 #include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/knn_heap.hpp>
-#include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include "saltatlas/common/point_store.hpp"
 
@@ -191,6 +191,14 @@ class dnnd_kernel {
       m_global_max_id = std::max(m_global_max_id, id);
     }
     m_global_max_id = m_comm.all_reduce_max(m_global_max_id);
+
+    const auto num_points = m_comm.all_reduce_sum(m_point_store.size());
+    if (m_global_max_id + 1 != num_points) {
+      m_comm.cerr0() << "Error: Point IDs must be consecutive integers from 0 "
+                        "to N - 1, where N is the number of points."
+                     << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
   }
 
   void priv_init_knn_heap_with_random_values() {
