@@ -201,11 +201,11 @@ class dnnd {
                   point_iterator points_begin, point_iterator points_end) {
     auto receiver = [](auto, auto this_ptr, const id_t id,
                        const auto& sent_point) {
-      if (this_ptr->m_pstore.contains(id)) {
+      if ((this_ptr->m_pstore)->contains(id)) {
         std::cerr << "Duplicate ID " << id << std::endl;
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
       }
-      this_ptr->m_pstore[id] = sent_point;
+      (*(this_ptr->m_pstore))[id] = sent_point;
     };
 
     for (; ids_begin != ids_end; ++ids_begin, ++points_begin) {
