@@ -13,7 +13,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
+#include <ygm/utility/timer.hpp>
 
 #include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/dnnd/detail/dnnd_kernel.hpp>
