@@ -106,21 +106,7 @@ if (SALTATLAS_USE_METALL)
     foreach (lib ${BOOST_INCLUDE_LIBRARIES})
         list(APPEND BOOST_FETCHED_COMPONENTS "Boost::${lib}")
     endforeach ()
-else ()
-    FetchContent_Declare(
-        Boost
-        URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-    )
-    set(BOOST_INCLUDE_LIBRARIES
-        unordered
-        container
-    )
-    FetchContent_MakeAvailable(Boost)
-    foreach (lib ${BOOST_INCLUDE_LIBRARIES})
-        list(APPEND BOOST_FETCHED_COMPONENTS "Boost::${lib}")
-    endforeach ()
 endif ()
-
 
 #
 # hnswlib
