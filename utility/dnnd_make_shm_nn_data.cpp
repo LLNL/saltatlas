@@ -12,7 +12,7 @@
 #include <metall/container/string.hpp>
 #include <metall/metall.hpp>
 #include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
+#include <ygm/utility/timer.hpp>
 
 #include <saltatlas/dnnd/data_reader.hpp>
 #include <saltatlas/dnnd/dhnsw_index_reader.hpp>
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     static knn_index_type*           main_knn_index;
     if (comm.rank0()) {
       manager          = std::make_unique<metall::manager>(metall::create_only,
-                                                  out_path.c_str());
+                                                           out_path.c_str());
       main_point_store = manager->construct<point_store_type>(
           metall::unique_instance)(manager->get_allocator());
       main_knn_index = manager->construct<knn_index_type>(
