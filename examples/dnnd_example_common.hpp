@@ -16,7 +16,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
+#include <ygm/utility/timer.hpp>
 
 #include <saltatlas/common/data_reader.hpp>
 #include <saltatlas/dnnd/utility.hpp>

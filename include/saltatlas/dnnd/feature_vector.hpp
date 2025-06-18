@@ -13,7 +13,7 @@
 
 #if SALTATLAS_DNND_USE_METALL_CONTAINER
 #include <metall/container/vector.hpp>
-#include <ygm/detail/cereal_boost_container.hpp>
+#include <ygm/utility/boost_vector.hpp>
 #else
 #include <vector>
 #endif

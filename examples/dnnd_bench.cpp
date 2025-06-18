@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
     comm.cout0() << "\n<<Read Points>>" << std::endl;
     const auto paths =
         saltatlas::utility::find_file_paths(opt.point_file_names);
-    ygm::timer point_read_timer;
+    ygm::utility::timer point_read_timer;
     g.load_points(paths.begin(), paths.end(), opt.point_file_format);
     comm.cout0() << "\nReading points took (s)\t" << point_read_timer.elapsed()
                  << std::endl;
@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
 
   {
     comm.cout0() << "\n<<kNNG Construction>>" << std::endl;
-    ygm::timer const_timer;
+    ygm::utility::timer const_timer;
     g.build(opt.index_k, opt.r, opt.delta, opt.batch_size);
     comm.cout0() << "\nkNNG construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
 
   if (opt.make_index_undirected) {
     comm.cout0() << "\n<<kNNG Optimization>>" << std::endl;
-    ygm::timer optimization_timer;
+    ygm::utility::timer optimization_timer;
     g.optimize(opt.make_index_undirected, opt.pruning_degree_multiplier);
     comm.cout0() << "\nkNNG optimization took (s)\t"
                  << optimization_timer.elapsed() << std::endl;
@@ -119,8 +119,8 @@ int main(int argc, char **argv) {
     saltatlas::read_query(opt.query_file_path, queries, comm);
 
     comm.cout0() << "Executing queries" << std::endl;
-    ygm::timer step_timer;
-    const auto query_results =
+    ygm::utility::timer step_timer;
+    const auto          query_results =
         g.query(queries.begin(), queries.end(), opt.query_k, opt.epsilon);
     comm.cf_barrier();
     comm.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()
