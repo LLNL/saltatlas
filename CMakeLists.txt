@@ -31,8 +31,14 @@ endif ()
 # Controls whether to set up install boilerplate for project and depencencies.
 # Expects CMAKE_INSTALL_PREFIX to be set to a suitable directory.
 option(JUST_INSTALL_SALTATLAS "Skip executables" OFF)
+option(SALTATLAS_USE_HNSWLIB "Use Hnswlib" ON)
 option(SALTATLAS_USE_METALL "Use Metall" OFF)
 option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
+# User options to specify Boost source or URL
+set(BOOST_SOURCE_DIR CACHE STRING "Path to Boost libraries directory already uncompressed. Must be a version that supports CMake.")
+set(BOOST_FETCH_URL CACHE STRING "URL or file path to an archived Boost source. Must be a version that supports CMake.")
+# Link Boost UUID with libatomic fails on LC machines
+option(BOOST_UUID_LINK_LIBATOMIC "Link Boost UUID with libatomic" OFF)
 
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
@@ -87,38 +93,40 @@ find_package(OpenMP)
 #
 # Boost
 #
-set(FETCHCONTENT_QUIET FALSE)
+include(fetch_boost)
+
+# List of boost components this project depends on
+set(BOOST_COMPS container unordered) # YGM requires these
 if (SALTATLAS_USE_METALL)
-    FetchContent_Declare(
-        Boost
-        URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-    )
-    set(BOOST_INCLUDE_LIBRARIES
-        json
-        unordered
-        interprocess
-        container
-        property_tree
-        uuid
-        graph
-    )
-    FetchContent_MakeAvailable(Boost)
-    foreach (lib ${BOOST_INCLUDE_LIBRARIES})
-        list(APPEND BOOST_FETCHED_COMPONENTS "Boost::${lib}")
-    endforeach ()
+    # Metall requires these
+    # Extend BOOST_COMPS
+    list(APPEND BOOST_COMPS json unordered interprocess container property_tree uuid graph)
+endif ()
+
+# We do not check if Boost is already populated, since fetch_boost() does that.
+if (BOOST_SOURCE_DIR)
+  fetch_boost(SOURCE ${BOOST_SOURCE_DIR} COMPONENTS ${BOOST_COMPS})
+elseif (BOOST_FETCH_URL)
+  fetch_boost(URL ${BOOST_FETCH_URL} COMPONENTS ${BOOST_COMPS})
+else ()
+  # Use default Boost version if not specified by the user
+  fetch_boost(URL "https://github.com/boostorg/boost/releases/download/boost-1.88.0/boost-1.88.0-cmake.tar.gz"
+              COMPONENTS ${BOOST_COMPS})
 endif ()
 
 #
 # hnswlib
 #
-# Do not compile any hnswlib tests
-set(JUST_INSTALL_HNSWLIB ON)
-FetchContent_Declare(
-    hnswlib
-    GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
-    GIT_TAG feature/cmake_facelift
-)
-FetchContent_MakeAvailable(hnswlib)
+if (SALTATLAS_USE_HNSWLIB)
+    # Do not compile any hnswlib tests
+    set(JUST_INSTALL_HNSWLIB ON)
+    FetchContent_Declare(
+        hnswlib
+        GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
+        GIT_TAG feature/cmake_facelift
+    )
+    FetchContent_MakeAvailable(hnswlib)
+endif ()
 
 #
 # Cereal
@@ -142,6 +150,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ygm)
 
+#
+# SALTATLAS INTERFACE
+#
 add_library(saltatlas INTERFACE)
 add_library(saltatlas::saltatlas ALIAS saltatlas)
 target_compile_features(saltatlas INTERFACE cxx_std_20)
@@ -150,8 +161,11 @@ target_include_directories(
                         $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(
-    saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm hnswlib::hnswlib
+    saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm ${BOOST_LIBS}
 )
+if (SALTATLAS_USE_HNSWLIB)
+    target_link_libraries(saltatlas INTERFACE hnswlib::hnswlib)
+endif ()
 if (SALTATLAS_DETERMINISM)
     message(STATUS ${PROJECT_NAME} " setting determinism")
     target_compile_definitions(saltatlas INTERFACE SALTATLAS_DETERMINISM)
@@ -171,8 +185,6 @@ if (SALTATLAS_USE_METALL)
 
     find_package(Threads REQUIRED)
     target_link_libraries(saltatlas INTERFACE Threads::Threads Metall::Metall)
-
-    target_link_libraries(saltatlas INTERFACE ${BOOST_FETCHED_COMPONENTS})
 endif ()
 
 if (JUST_INSTALL_SALTATLAS)
