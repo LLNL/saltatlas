@@ -9,6 +9,13 @@ cmake_minimum_required(VERSION 3.14)
 # ---------------------------------------------------------------------------- #
 # CMake policy
 # ---------------------------------------------------------------------------- #
+# When using the URL download method with the ExternalProject_Add() or
+# FetchContent_Declare() commands, sets the timestamps of extracted contents
+# to the time of extraction.
+if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.24")
+    cmake_policy(SET CMP0135 NEW)
+endif ()
+
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.30")
     cmake_policy(SET CMP0167 NEW)
 endif ()
