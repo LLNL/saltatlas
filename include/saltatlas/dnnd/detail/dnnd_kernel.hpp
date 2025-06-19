@@ -46,6 +46,7 @@
 #endif
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/utility/timer.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
@@ -190,9 +191,9 @@ class dnnd_kernel {
     for (const auto& [id, _] : m_point_store) {
       m_global_max_id = std::max(m_global_max_id, id);
     }
-    m_global_max_id = m_comm.all_reduce_max(m_global_max_id);
+    m_global_max_id = ygm::max(m_global_max_id, m_comm);
 
-    const auto num_points = m_comm.all_reduce_sum(m_point_store.size());
+    const auto num_points = ygm::sum(m_point_store.size(), m_comm);
     if (m_global_max_id + 1 != num_points) {
       m_comm.cerr0() << "Error: Point IDs must be consecutive integers from 0 "
                         "to N - 1, where N is the number of points."
@@ -257,7 +258,7 @@ class dnnd_kernel {
                        << std::endl;
       }
       // Test the terminal condition
-      const auto num_global_news = m_comm.all_reduce_sum(m_cnt_new_neighbors);
+      const auto num_global_news = ygm::sum(m_cnt_new_neighbors, m_comm);
       if (m_option.verbose) {
         m_comm.cout0() << "#of neighbor updates\t" << num_global_news
                        << std::endl;
@@ -273,14 +274,14 @@ class dnnd_kernel {
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
       m_comm.cout0() << "\nMessage Statistics" << std::endl;
       m_comm.cout0() << "#of sent neighbor suggestions\t"
-                     << m_comm.all_reduce_sum(m_num_neighbor_suggestion_msgs)
+                     << ygm::sum(m_num_neighbor_suggestion_msgs, m_comm)
                      << std::endl;
       m_comm.cout0() << "#of sent feature vectors\t"
-                     << m_comm.all_reduce_sum(m_num_feature_msgs) << std::endl;
+                     << ygm::sum(m_num_feature_msgs, m_comm) << std::endl;
       m_comm.cout0() << "#of returned distance\t"
-                     << m_comm.all_reduce_sum(m_num_distance_msgs) << std::endl;
+                     << ygm::sum(m_num_distance_msgs, m_comm) << std::endl;
       m_comm.cout0() << "#of pruned messages due to longer distance\t"
-                     << m_comm.all_reduce_sum(m_num_pruned_distance_msgs)
+                     << ygm::sum(m_num_pruned_distance_msgs, m_comm)
                      << std::endl;
 #endif
     }
@@ -351,7 +352,7 @@ class dnnd_kernel {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
       m_comm.cout0() << "#of generated initial neighbors: "
-                     << m_comm.all_reduce_sum(m_knn_heap_table.size() * init_k)
+                     << ygm::sum(m_knn_heap_table.size() * init_k, m_comm)
                      << std::endl;
     }
   }
@@ -698,7 +699,7 @@ class dnnd_kernel {
       const bool generated_all_tasks = task_generator(pos_src, pos1, pos2);
       priv_launch_neighbor_checking(targets);
       const bool finished = generated_all_tasks && targets.empty();
-      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
+      if (ygm::sum((int)finished, m_comm) == m_comm.size()) break;
     }
   }
 
@@ -745,7 +746,7 @@ class dnnd_kernel {
           task_generator(pos_src, pos_old, pos_new);
       priv_launch_neighbor_checking(targets);
       const bool finished = generated_all_tasks && targets.empty();
-      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
+      if (ygm::sum((int)finished, m_comm) == m_comm.size()) break;
     }
   }
 

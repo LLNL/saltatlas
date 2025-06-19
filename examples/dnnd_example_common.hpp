@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/utility/timer.hpp>
 
 #include <saltatlas/common/data_reader.hpp>
@@ -75,12 +76,12 @@ inline void show_query_recall_score_helper(
                              : std::accumulate(local_scores.begin(),
                                                local_scores.end(), double(0.0));
 
-  const auto num_scores = comm.all_reduce_sum(local_scores.size());
+  const auto num_scores = ygm::sum(local_scores.size(), comm);
 
   comm.cout0() << score_name << " recall scores (min mean max):\t"
-               << comm.all_reduce_min(local_min) << "\t"
-               << comm.all_reduce_sum(local_sum) / num_scores << "\t"
-               << comm.all_reduce_max(local_max) << std::endl;
+               << ygm::min(local_min, comm) << "\t"
+               << ygm::sum(local_sum, comm) / num_scores << "\t"
+               << ygm::max(local_max, comm) << std::endl;
   comm.cf_barrier();
 }
 

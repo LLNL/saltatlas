@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/io/ndjson_parser.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
@@ -64,9 +65,9 @@ inline void read_dhnsw_index(
 
   if (verbose) {
     comm.cout0() << "#of read points\t"
-                 << comm.all_reduce_sum(local_store.size()) << std::endl;
+                 << ygm::sum(local_store.size(), comm) << std::endl;
     comm.cout0() << "#of invalid lines\t"
-                 << comm.all_reduce_sum(num_invalid_lines) << std::endl;
+                 << ygm::sum(num_invalid_lines, comm) << std::endl;
   }
 
   if (verbose) {
@@ -80,9 +81,9 @@ inline void read_dhnsw_index(
       min_k          = std::min(nn.size(), min_k);
     }
     comm.cf_barrier();
-    comm.cout0() << "Max ID\t" << comm.all_reduce_max(max_id) << std::endl;
-    comm.cout0() << "Max k\t" << comm.all_reduce_max(max_k) << std::endl;
-    comm.cout0() << "Min k\t" << comm.all_reduce_min(max_k) << std::endl;
+    comm.cout0() << "Max ID\t" << ygm::max(max_id, comm) << std::endl;
+    comm.cout0() << "Max k\t" << ygm::max(max_k, comm) << std::endl;
+    comm.cout0() << "Min k\t" << ygm::min(max_k, comm) << std::endl;
   }
 }
 
