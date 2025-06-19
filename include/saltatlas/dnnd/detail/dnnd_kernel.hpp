@@ -364,8 +364,7 @@ class dnnd_kernel {
                        << std::endl;
       } else {
         m_comm.cout0() << "#of generated initial neighbors: "
-                       << m_comm.all_reduce_sum(m_knn_heap_table.size() *
-                                                init_k)
+                       << ygm::sum(m_knn_heap_table.size() * init_k, m_comm)
                        << std::endl;
       }
     }
