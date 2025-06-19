@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include <ygm/detail/collective.hpp>
+
 #include <saltatlas/dnnd/detail/distance.hpp>
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/neighbor_cereal.hpp>
@@ -87,7 +89,7 @@ class nn_index_optimizer {
     }
     if (m_option.verbose) {
       m_comm.cout0() << "#of original neighbors\t"
-                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
+                     << ygm::sum(m_nn_index.count_all_neighbors(), m_comm)
                      << std::endl;
     }
 
@@ -110,10 +112,10 @@ class nn_index_optimizer {
     m_comm.cf_barrier();
     if (m_option.verbose) {
       m_comm.cout0() << "#of neighbors\t"
-                     << m_comm.all_reduce_sum(m_nn_index.count_all_neighbors())
+                     << ygm::sum(m_nn_index.count_all_neighbors(), m_comm)
                      << std::endl;
       m_comm.cout0() << "Max #of neighbors\t"
-                     << m_comm.all_reduce_max(max_degree) << std::endl;
+                     << ygm::max(max_degree, m_comm) << std::endl;
     }
   }
 
@@ -169,7 +171,7 @@ class nn_index_optimizer {
       count += old_size - m_nn_index.num_neighbors(source);
     }
     if (m_option.verbose) {
-      m_comm.cout0() << "#of pruned neighbors\t" << m_comm.all_reduce_sum(count)
+      m_comm.cout0() << "#of pruned neighbors\t" << ygm::sum(count, m_comm)
                      << std::endl;
     }
   }
@@ -180,7 +182,7 @@ class nn_index_optimizer {
     }
 
     const auto global_initial_num_neighbors =
-        m_comm.all_reduce_sum(m_nn_index.count_all_neighbors());
+        ygm::sum(m_nn_index.count_all_neighbors(), m_comm);
 
     const std::size_t local_batch_size =
         (m_option.batch_size > 0) ? m_option.batch_size / m_comm.size()
@@ -216,7 +218,7 @@ class nn_index_optimizer {
       }
       m_comm.barrier();
       const auto finished =
-          m_comm.all_reduce_min(std::size_t(pitr == pend ? 1 : 0));
+          ygm::min(std::size_t(pitr == pend ? 1 : 0), m_comm);
       if (finished > 0) {
         break;
       }
@@ -224,7 +226,7 @@ class nn_index_optimizer {
     }
 
     const auto global_retained_num_neighbors =
-        m_comm.all_reduce_sum(m_nn_index.count_all_neighbors());
+        ygm::sum(m_nn_index.count_all_neighbors(), m_comm);
     const auto global_removed_num_neighbors =
         global_initial_num_neighbors - global_retained_num_neighbors;
     if (m_option.verbose) {

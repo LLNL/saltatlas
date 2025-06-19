@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
@@ -431,7 +432,7 @@ class dnnd {
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
   std::size_t num_points() const {
-    return m_comm.all_reduce_sum(m_pstore.size());
+    return ygm::sum(m_pstore.size(), m_comm);
   }
 
   /// \brief Get the number of neighbors of the given point.

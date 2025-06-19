@@ -8,6 +8,7 @@
 #include <saltatlas/dhnsw/detail/hnswlib_space_wrapper.hpp>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/detail/ygm_ptr.hpp>
 
 #include <hnswlib/hnswalg.h>
@@ -174,7 +175,7 @@ class dhnsw_impl {
       hnsw_size += voronoi_cell_hnsw->cur_element_count;
     }
 
-    return comm().all_reduce_sum(hnsw_size);
+    return ygm::sum(hnsw_size, comm());
   }
 
   const hnswlib::HierarchicalNSW<dist_type> &get_cell_hnsw(
