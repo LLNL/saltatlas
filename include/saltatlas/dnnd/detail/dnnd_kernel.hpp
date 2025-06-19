@@ -358,9 +358,16 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
-      m_comm.cout0() << "#of generated initial neighbors: "
-                     << m_comm.all_reduce_sum(num_random_neighbors)
-                     << std::endl;
+      if (m_comm.all_reduce_sum(num_random_neighbors) > 0) {
+        m_comm.cout0() << "#of generated initial neighbors: "
+                       << m_comm.all_reduce_sum(num_random_neighbors)
+                       << std::endl;
+      } else {
+        m_comm.cout0() << "#of generated initial neighbors: "
+                       << m_comm.all_reduce_sum(m_knn_heap_table.size() *
+                                                init_k)
+                       << std::endl;
+      }
     }
   }
 
