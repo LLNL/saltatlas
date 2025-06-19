@@ -4,9 +4,8 @@ Instructions for each method will be provided.
 
 ### Generic steps
 These are the generic steps in install saltatlas.
-saltalas's build system will automatically fetch all dependencies, including
-boost if using the cmake flag `-DSALTATLAS_USE_METALL=ON` (this is off by
-default).
+saltalas's build system will automatically fetch all dependencies.
+
 ``` bash
 # Load an appropriate version of gcc (on LC systems)
 module load gcc/12.1.1-magic
@@ -17,6 +16,21 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 # Builds all compile targets
 make -j
 ```
+
+#### Fetching Boost
+
+saltatlas's CMake will automatically fetch a proper version of Boost by default.
+
+There are two CMake options to change the behavior:
+
+- `BOOST_SOURCE_DIR`
+  - Path to Boost libraries directory already downloaded and uncompressed.
+  - This option will copy the only required files to build this project from the original source directory. Useful for faster build and saving disk space.
+- `BOOST_FETCH_URL`
+  - URL or file path to an archived Boost source.
+
+For both cases, Boost must be a version that supports CMake.
+Using two options at the same time will result in an error.
 
 ## Running examples
 
