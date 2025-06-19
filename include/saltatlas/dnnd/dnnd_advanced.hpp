@@ -16,7 +16,9 @@
 #include <boost/interprocess/containers/stable_vector.hpp>
 #include <metall/container/vector.hpp>
 #include <metall/utility/metall_mpi_adaptor.hpp>
+
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
@@ -733,7 +735,7 @@ class dnnd {
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
   std::size_t num_points() const {
-    return m_comm.all_reduce_sum(m_pstore->size());
+    return ygm::sum(m_pstore->size(), m_comm);
   }
 
   /// \brief API for using 'for_each' with local points.
