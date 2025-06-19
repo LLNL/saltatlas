@@ -299,6 +299,9 @@ class dnnd_kernel {
     // sqrt(k) is enough?
     const std::size_t init_k = m_option.k;
 
+    // Keep track of number of random neighbros generated
+    static std::size_t num_random_neighbors = 0;
+
     // Initialize the k-nn heap with random values using a batched algorithm to
     // avoid sending too many messages at once. A single task corresponds to all
     // works of a single point in the dataset to simplify the implementation.
@@ -322,6 +325,10 @@ class dnnd_kernel {
               const auto& nid = nitr->first;
               neighbors.insert(nid);
             }
+          }
+
+          if (0 < neighbors.size() && neighbors.size() < init_k) {
+            num_random_neighbors += init_k - neighbors.size();
           }
 
           // Fill the remaining space with random values
@@ -351,7 +358,7 @@ class dnnd_kernel {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
       m_comm.cout0() << "#of generated initial neighbors: "
-                     << m_comm.all_reduce_sum(m_knn_heap_table.size() * init_k)
+                     << m_comm.all_reduce_sum(num_random_neighbors)
                      << std::endl;
     }
   }
