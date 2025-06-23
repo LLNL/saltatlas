@@ -300,8 +300,9 @@ class dnnd_kernel {
     // sqrt(k) is enough?
     const std::size_t init_k = m_option.k;
 
-    // Keep track of number of random neighbros generated
-    static std::size_t num_random_neighbors = 0;
+    // Keep track of number of random neighbors generated
+    static std::size_t num_random_neighbors;
+    num_random_neighbors = 0;
 
     // Initialize the k-nn heap with random values using a batched algorithm to
     // avoid sending too many messages at once. A single task corresponds to all
@@ -328,10 +329,6 @@ class dnnd_kernel {
             }
           }
 
-          if (0 < neighbors.size() && neighbors.size() < init_k) {
-            num_random_neighbors += init_k - neighbors.size();
-          }
-
           // Fill the remaining space with random values
           while (neighbors.size() < init_k) {
             id_type nid;
@@ -345,6 +342,7 @@ class dnnd_kernel {
             }
 
             neighbors.insert(nid);
+            ++num_random_neighbors;
             // Visit 'nid' and come back to 'sid' with the distance between
             // them.
             m_comm.async(m_point_partitioner(nid), distance_calculator{},
@@ -358,15 +356,8 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
-      if (m_comm.all_reduce_sum(num_random_neighbors) > 0) {
-        m_comm.cout0() << "#of generated initial neighbors: "
-                       << m_comm.all_reduce_sum(num_random_neighbors)
-                       << std::endl;
-      } else {
-        m_comm.cout0() << "#of generated initial neighbors: "
-                       << ygm::sum(m_knn_heap_table.size() * init_k, m_comm)
-                       << std::endl;
-      }
+      m_comm.cout0() << "#of generated initial neighbors: "
+                     << ygm::sum(num_random_neighbors) << std::endl;
     }
   }
 
