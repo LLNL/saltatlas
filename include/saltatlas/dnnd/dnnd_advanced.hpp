@@ -318,10 +318,10 @@ class dnnd {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001) {
+                    const double delta = 0.001, const bool recheck = false) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta);
+                 k, initial_index, rho, delta, recheck);
   }
 
   /// \brief Build a KNNG.
@@ -334,7 +334,7 @@ class dnnd {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
                     const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001) {
+                    const double delta = 0.001, const bool recheck = false) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
@@ -346,7 +346,7 @@ class dnnd {
     nn_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
                           dfunc, m_comm);
     m_knn_index_list->emplace_back();
-    kernel.construct(initial_index, false, m_knn_index_list->back());
+    kernel.construct(initial_index, recheck, m_knn_index_list->back());
     m_index_k_list->push_back(k);
 
     return m_knn_index_list->size() - 1;
@@ -362,10 +362,11 @@ class dnnd {
   std::size_t build(
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001) {
+      const double rho = 0.8, const double delta = 0.001,
+      const bool recheck = false) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta);
+                 k, initial_index, rho, delta, recheck);
   }
 
   /// \brief Build a KNNG.
@@ -378,7 +379,8 @@ class dnnd {
   std::size_t build(
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001) {
+      const double rho = 0.8, const double delta = 0.001,
+      const bool recheck = false) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
@@ -390,7 +392,7 @@ class dnnd {
     nn_kernel_type kernel(option, *m_pstore, priv_get_point_partitioner(),
                           dfunc, m_comm);
     m_knn_index_list->emplace_back();
-    kernel.construct(initial_index, false, m_knn_index_list->back());
+    kernel.construct(initial_index, recheck, m_knn_index_list->back());
     m_index_k_list->push_back(k);
 
     return m_knn_index_list->size() - 1;
