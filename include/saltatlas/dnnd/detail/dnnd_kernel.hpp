@@ -357,7 +357,7 @@ class dnnd_kernel {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
       m_comm.cout0() << "#of generated initial neighbors: "
-                     << ygm::sum(num_random_neighbors) << std::endl;
+                     << ygm::sum(num_random_neighbors, m_comm) << std::endl;
     }
   }
 
