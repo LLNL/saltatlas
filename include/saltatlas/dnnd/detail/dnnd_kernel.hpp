@@ -245,7 +245,7 @@ class dnnd_kernel {
       priv_get_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
       if (m_option.verbose) {
-        m_comm.cout0() << "Generating friend checking requests took (s)\t"
+        m_comm.cout0() << "Getting new and old neighbors took (s)\t"
                        << gen_timer.elapsed() << std::endl;
       }
 
@@ -356,7 +356,7 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
-      m_comm.cout0() << "#of generated initial neighbors: "
+      m_comm.cout0() << "#of generated random initial neighbors: "
                      << ygm::sum(num_random_neighbors, m_comm) << std::endl;
     }
   }
@@ -377,10 +377,12 @@ class dnnd_kernel {
                      sid, nid, point);
       }
     }
+    m_comm.barrier();
+
     if (!recheck) {
       priv_make_knn_heap_old();
     }
-    m_comm.barrier();
+    m_comm.cf_barrier();
   }
 
   /// \brief Fills k-NN heap with a given index.
@@ -398,10 +400,12 @@ class dnnd_kernel {
                      sid, nid, point);
       }
     }
+    m_comm.barrier();
+
     if (!recheck) {
       priv_make_knn_heap_old();
     }
-    m_comm.barrier();
+    m_comm.cf_barrier();
   }
 
   void priv_make_knn_heap_old() {
@@ -661,7 +665,16 @@ class dnnd_kernel {
     m_mini_batch_no = 0;
     m_comm.cf_barrier();
 
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nNeighbor check new-new" << std::endl;
+    }
     priv_update_neighbors_new_new(new_msg_srcs, new_table);
+    m_comm.cf_barrier();
+    m_mini_batch_no = 0;
+
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nNeighbor check old-old" << std::endl;
+    }
     priv_update_neighbors_old_new(new_msg_srcs, old_table, new_table);
   }
 
@@ -831,7 +844,10 @@ class dnnd_kernel {
   void priv_launch_neighbor_checking(
       std::queue<std::pair<id_type, id_type>>& targets) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nMini-batch No. " << m_mini_batch_no << std::endl;
+      if (m_mini_batch_no > 0) {
+        m_comm.cout0() << "\n";
+      }
+      m_comm.cout0() << "Mini-batch No. " << m_mini_batch_no << std::endl;
     }
     ygm::utility::timer mini_batch_timer;
 
