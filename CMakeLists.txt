@@ -103,11 +103,11 @@ find_package(OpenMP)
 include(fetch_boost)
 
 # List of boost components this project depends on
-set(BOOST_COMPS container unordered) # YGM requires these
+set(BOOST_COMPS json unordered container static_string) # YGM requires these
 if (SALTATLAS_USE_METALL)
     # Metall requires these
     # Extend BOOST_COMPS
-    list(APPEND BOOST_COMPS json unordered interprocess container property_tree uuid graph)
+    list(APPEND BOOST_COMPS interprocess property_tree uuid)
 endif ()
 
 # We do not check if Boost is already populated, since fetch_boost() does that.
