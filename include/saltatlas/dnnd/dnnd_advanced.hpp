@@ -126,6 +126,11 @@ class dnnd {
   /// std::vector<std::vector<neighbor_type>>.
   using neighbor_store_type = typename query_kernel_type::neighbor_store_type;
 
+  /// \brief Return the owner rank of the given point ID.
+  static constexpr int get_owner(const id_type& id, const int mpi_size) {
+    return dndetail::murmurhash::hash<5981>{}(id) % mpi_size;
+  }
+
   /// \brief Constructor.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
@@ -879,9 +884,7 @@ class dnnd {
   /// \return A point partitioner instance.
   point_partitioner priv_get_point_partitioner() const {
     const int size = m_comm.size();
-    return [size](const id_type& id) {
-      return dndetail::murmurhash::hash<5981>{}(id) % size;
-    };
+    return [size](const id_type& id) { return get_owner(id, size); };
   };
 
   std::vector<std::vector<point_type>> priv_get_features_for_query_results(
