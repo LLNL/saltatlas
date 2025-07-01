@@ -41,6 +41,7 @@ add_saltatlas_dnnd_example_feature_type(dnnd_bench double)
 
 if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_advanced)
+    add_saltatlas_example(dnnd_adv_test)
     add_saltatlas_example(dnnd_advance_index_build)
     add_saltatlas_example(dnnd_advance_get_neighbors)
     add_saltatlas_example(dnnd_advance_query)
