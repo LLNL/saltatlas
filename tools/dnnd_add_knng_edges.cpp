@@ -23,7 +23,7 @@
 #include <saltatlas/common/data_reader.hpp>
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/point_store.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/feature_vector.hpp>
 #include <saltatlas/dnnd/utility.hpp>

@@ -53,7 +53,7 @@
 #include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
 #include <saltatlas/common/detail/utilities/ygm.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/knn_heap.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include "saltatlas/common/point_store.hpp"

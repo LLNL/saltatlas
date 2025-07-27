@@ -23,7 +23,7 @@
 #include "saltatlas/common/data_reader.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/common/point_store.hpp"
-#include "saltatlas/dnnd/detail/distance.hpp"
+#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"

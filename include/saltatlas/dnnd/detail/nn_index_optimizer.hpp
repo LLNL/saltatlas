@@ -14,7 +14,7 @@
 
 #include <ygm/detail/collective.hpp>
 
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
