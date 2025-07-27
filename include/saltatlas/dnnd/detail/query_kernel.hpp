@@ -18,7 +18,7 @@
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/general.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include "saltatlas/common/point_store.hpp"
