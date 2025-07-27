@@ -74,6 +74,8 @@ inline distance_type sql2(const point_type &p0, const point_type &p1) {
   return d;
 }
 
+/// \brief Cosine distance.
+/// \note: This function does not return negative distances.
 template <typename point_type, typename distance_type>
 inline distance_type cosine(const point_type &p0, const point_type &p1) {
   assert(p0.size() == p1.size());
@@ -87,14 +89,20 @@ inline distance_type cosine(const point_type &p0, const point_type &p1) {
            nearly_equal(n1, distance_type(0)))
     return static_cast<distance_type>(1);
 
-  const distance_type x =
+  const distance_type dot =
       dndetail::blas::inner_product(p0.size(), p0.data(), p1.data());
-  return static_cast<distance_type>(1.0 - x / std::sqrt(n0 * n1));
+  const auto d = static_cast<distance_type>(1.0 - dot / std::sqrt(n0 * n1));
+  if (d < distance_type(0)) {
+    // Avoid negative distance due to floating point precision issues.
+    return static_cast<distance_type>(0);
+  }
+  return d;
 }
 
 /// \brief Alternative cosine distance. The original model is from PyNNDescent.
 /// This function returns the same relative distance orders as the normal
 /// cosine similarity.
+/// \note: This function does not return negative distances.
 template <typename point_type, typename distance_type>
 inline distance_type alt_cosine(const point_type &p0, const point_type &p1) {
   assert(p0.size() == p1.size());
@@ -111,13 +119,19 @@ inline distance_type alt_cosine(const point_type &p0, const point_type &p1) {
     return std::numeric_limits<distance_type>::max() / distance_type(2);
   }
 
-  const distance_type x =
+  const distance_type dot =
       dndetail::blas::inner_product(p0.size(), p0.data(), p1.data());
-  if (x < 0 || nearly_equal(x, distance_type(0))) {
+  if (dot < 0 || nearly_equal(dot, distance_type(0))) {
     return std::numeric_limits<distance_type>::max() / distance_type(2);
   }
 
-  return static_cast<distance_type>(std::log2(std::sqrt(n0 * n1) / x));
+  const auto d =
+      static_cast<distance_type>(std::log2(std::sqrt(n0 * n1) / dot));
+  if (d < distance_type(0)) {
+    // Avoid negative distance due to floating point precision issues.
+    return static_cast<distance_type>(0);
+  }
+  return d;
 }
 
 template <typename point_type, typename distance_type>
