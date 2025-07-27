@@ -53,9 +53,9 @@
 #include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
 #include <saltatlas/common/detail/utilities/ygm.hpp>
-#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/knn_heap.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::dndetail {
@@ -95,8 +95,8 @@ class dnnd_kernel {
         m_distance_function(distance_function),
         m_comm(comm),
         m_rnd_generator(m_option.rnd_seed + m_comm.rank()) {
-    priv_find_max_id();
     m_this.check(m_comm);
+    m_num_points = ygm::sum(m_point_store.size(), m_comm);
   }
 
   /// \brief Construct a knn-index.
@@ -106,6 +106,9 @@ class dnnd_kernel {
       nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
+    }
+    if (!priv_check_const_option()) {
+      return;
     }
     priv_init_knn_heap_with_random_values();
     priv_construct_kernel();
@@ -127,6 +130,9 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
+    if (!priv_check_const_option()) {
+      return;
+    }
     priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
     priv_convert(knn_index);
@@ -144,6 +150,9 @@ class dnnd_kernel {
       nn_index<id_type, distance_type, alloc_type>&            knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
+    }
+    if (!priv_check_const_option()) {
+      return;
     }
     priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
@@ -186,20 +195,21 @@ class dnnd_kernel {
 
   static constexpr std::size_t k_neighbor_check_local_batch_size_factor = 4;
 
-  void priv_find_max_id() {
-    m_global_max_id = 0;
-    for (const auto& [id, _] : m_point_store) {
-      m_global_max_id = std::max(m_global_max_id, id);
-    }
-    m_global_max_id = ygm::max(m_global_max_id, m_comm);
-
-    const auto num_points = ygm::sum(m_point_store.size(), m_comm);
-    if (m_global_max_id + 1 != num_points) {
-      m_comm.cerr0() << "Error: Point IDs must be consecutive integers from 0 "
-                        "to N - 1, where N is the number of points."
+  bool priv_check_const_option() {
+    if (ssize_t(m_option.k) <= 0) {
+      m_comm.cerr0() << "k (" << m_option.k << ") must be greater than 0."
                      << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
+
+    if (m_option.k >= m_num_points) {
+      m_comm.cerr0() << "k (" << m_option.k
+                     << ") must be less than the number of points ("
+                     << m_num_points - 1 << ")." << std::endl;
+      return false;
+    }
+
+    return true;
   }
 
   void priv_init_knn_heap_with_random_values() {
@@ -264,7 +274,7 @@ class dnnd_kernel {
                        << std::endl;
       }
       if ((double)num_global_news <
-          m_option.delta * (m_global_max_id + 1) * m_option.k) {
+          m_option.delta * (m_num_points + 1) * m_option.k) {
         break;
       }
       ++epoch_no;
@@ -295,6 +305,7 @@ class dnnd_kernel {
   /// This function can accept already partially filled heap.
   void priv_fill_knn_heap_with_random_value() {
     m_comm.cf_barrier();
+
     ygm::utility::timer init_timer;
 
     // sqrt(k) is enough?
@@ -304,9 +315,10 @@ class dnnd_kernel {
     static std::size_t num_random_neighbors;
     num_random_neighbors = 0;
 
-    // Initialize the k-nn heap with random values using a batched algorithm to
-    // avoid sending too many messages at once. A single task corresponds to all
-    // works of a single point in the dataset to simplify the implementation.
+    // Initialize the k-nn heap with randomly picked neighbors.
+    // Use the batched algorithm to avoid sending too many messages at once.
+    // A single task corresponds to al works of a single point in the dataset
+    // to simplify the implementation.
     // Thus, the total number of tasks is equal to the number of points in the
     // dataset. The global batch size is equal to the mini-batch size divided by
     // init_k as each point sends up to init_k messages for initialization.
@@ -318,35 +330,14 @@ class dnnd_kernel {
           const auto  sid          = pitr->first;
           const auto& source_point = pitr->second;
 
-          std::unordered_set<id_type> neighbors;
-          // Get the neighbors already in the heap
-          if (m_knn_heap_table.count(sid) > 0) {
-            for (auto nitr = m_knn_heap_table.at(sid).begin(),
-                      nend = m_knn_heap_table.at(sid).end();
-                 nitr != nend; ++nitr) {
-              const auto& nid = nitr->first;
-              neighbors.insert(nid);
-            }
-          }
-
-          // Fill the remaining space with random values
-          while (neighbors.size() < init_k) {
-            id_type nid;
-            // Generate a random id that is not in the neighbor set
-            while (true) {
-              std::uniform_int_distribution<id_type> pid_dist(0,
-                                                              m_global_max_id);
-              assert(m_option.k < m_global_max_id);
-              nid = pid_dist(m_rnd_generator);
-              if (nid != sid && neighbors.count(nid) == 0) break;
-            }
-
-            neighbors.insert(nid);
-            ++num_random_neighbors;
-            // Visit 'nid' and come back to 'sid' with the distance between
-            // them.
-            m_comm.async(m_point_partitioner(nid), distance_calculator{},
-                         m_this, sid, nid, source_point);
+          auto n_neighbors = m_knn_heap_table.at(sid).size();
+          while (n_neighbors < init_k) {
+            std::uniform_int_distribution<id_type> dst_dist(0,
+                                                            m_comm.size() - 1);
+            const auto dst = dst_dist(m_rnd_generator);
+            m_comm.async(dst, random_neighbor_explorer{}, m_this, sid,
+                         source_point);
+            ++n_neighbors;
           }
 
           ++pitr;
@@ -454,6 +445,54 @@ class dnnd_kernel {
                     const id_type nid, const distance_type d) {
       assert(local_this->m_knn_heap_table.count(sid));
       local_this->m_knn_heap_table.at(sid).push_unique(nid, d, true);
+    }
+  };
+
+  // Visit a remote node and pick up a neighbor randomly.
+  struct random_neighbor_explorer {
+    void operator()(const ygm::ygm_ptr<self_type>& local_this,
+                    const id_type sid, const point_type& src_point) {
+      const auto num_local_points = local_this->m_point_store.size();
+      const auto src_rank         = local_this->m_point_partitioner(sid);
+      if (num_local_points == 0) {
+        local_this->comm().async(src_rank, random_neighbor_explorer{},
+                                 local_this, sid,
+                                 std::numeric_limits<id_type>::max(),
+                                 std::numeric_limits<distance_type>::max());
+      }
+      std::uniform_int_distribution<id_type> dist(0, num_local_points - 1);
+      const auto offset = dist(local_this->m_rnd_generator);
+      auto       pitr   = local_this->m_point_store.begin();
+      std::advance(pitr, offset);
+      const auto& nid       = pitr->first;
+      const auto& nbr_point = pitr->second;
+      const auto  d = local_this->m_distance_function(src_point, nbr_point);
+      local_this->comm().async(local_this->m_point_partitioner(sid),
+                               random_neighbor_explorer{}, local_this, sid, nid,
+                               d);
+    }
+
+    // 2nd call. Push a returned distance to sid's heap.
+    // If the nid is one of the neighbors of sid already or if the nid is the
+    // invalid id, the function initiate another random neighbor exploring
+    // process.
+    void operator()(ygm::ygm_ptr<self_type> local_this, const id_type sid,
+                    const id_type nid, const distance_type d) {
+      assert(local_this->m_knn_heap_table.count(sid));
+      bool ret = false;
+      if (nid != std::numeric_limits<id_type>::max()) {
+        ret = local_this->m_knn_heap_table.at(sid).push_unique(nid, d, true);
+      }
+      if (!ret) {
+        // Couldn't add a neighbor, so try to find another one.
+        auto dist = std::uniform_int_distribution<int>(
+            0, local_this->m_comm.size() - 1);
+        const int dest_rank = dist(local_this->m_rnd_generator);
+        // Call the 1st ()operator to explore a random neighbor.
+        local_this->comm().async(dest_rank, random_neighbor_explorer{},
+                                 local_this, sid,
+                                 local_this->m_point_store[sid]);
+      }
     }
   };
 
@@ -991,7 +1030,7 @@ class dnnd_kernel {
   std::mt19937                  m_rnd_generator;
   ygm::ygm_ptr<self_type>       m_this{this};
   knn_heap_table_type           m_knn_heap_table{};
-  id_type                       m_global_max_id{0};
+  std::size_t                   m_num_points{0};  // Global number of points
   std::size_t                   m_mini_batch_no{0};
   std::size_t                   m_cnt_new_neighbors{0};
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
