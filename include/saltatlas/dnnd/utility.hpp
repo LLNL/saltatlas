@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
@@ -208,7 +209,7 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
                              ygm::comm &comm, const int root_rank = 0) {
   using nb_tbl_t = neighbors_tbl<id_t, dist_t>;
 
-  const std::size_t num_queries = comm.all_reduce_sum(local_results.size());
+  const std::size_t num_queries = ygm::sum(local_results.size(), comm);
   ygm::ygm_ptr<nb_tbl_t> ptr_root_results(&root_results);
   comm.cf_barrier();
 

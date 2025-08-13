@@ -193,8 +193,8 @@ int main(int argc, char** argv) {
     saltatlas::read_query(opt.query_file_path, queries, world);
 
     world.cout0() << "Executing queries" << std::endl;
-    ygm::timer step_timer;
-    const auto query_results =
+    ygm::utility::timer step_timer;
+    const auto          query_results =
         my_dhnsw.query(queries.begin(), queries.end(), opt.query_k);
     world.cf_barrier();
     world.cout0() << "\nProcessing queries took (s)\t" << step_timer.elapsed()

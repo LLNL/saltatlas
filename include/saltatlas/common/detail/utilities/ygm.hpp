@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include <saltatlas/common/detail/utilities/general.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
@@ -73,7 +74,7 @@ inline void run_batched_ygm_async(const std::size_t num_local_items,
     const auto num_local_remains = num_local_items - num_sent;
     if (verbose) {
       comm.cout0() << "Batch #" << batch_no << std::endl;
-      comm.cout0() << "#of remains: " << comm.all_reduce_sum(num_local_remains)
+      comm.cout0() << "#of remains: " << ygm::sum(num_local_remains, comm)
                    << std::endl;
     }
 
@@ -95,7 +96,7 @@ inline void run_batched_ygm_async(const std::size_t num_local_items,
     comm.barrier();
 
     const auto finished =
-        comm.all_reduce_min(num_sent == num_local_items ? 1 : 0);
+        ygm::min(num_sent == num_local_items ? 1 : 0, comm);
     if (finished > 0) break;
   }
 }

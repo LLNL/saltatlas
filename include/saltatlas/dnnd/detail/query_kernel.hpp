@@ -13,11 +13,12 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/general.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 #include "saltatlas/common/point_store.hpp"
@@ -97,11 +98,11 @@ class dknn_batch_query_kernel {
     for (const auto& [id, _] : m_point_store) {
       m_global_max_id = std::max(m_global_max_id, id);
     }
-    m_global_max_id = m_comm.all_reduce_max(m_global_max_id);
+    m_global_max_id = ygm::max(m_global_max_id, m_comm);
   }
 
   id_type priv_all_gather_query(const query_store_type& queries) {
-    const std::size_t max_num_queries = m_comm.all_reduce_max(queries.size());
+    const std::size_t max_num_queries = ygm::max(queries.size(), m_comm);
     const id_type     offset          = max_num_queries * m_comm.rank();
 
     // Allgather
@@ -188,14 +189,14 @@ class dknn_batch_query_kernel {
       query_no_offset += local_batch_size;
       m_comm.cf_barrier();
 
-      const auto num_global_remains = m_comm.all_reduce_sum(num_local_remains);
+      const auto num_global_remains = ygm::sum(num_local_remains, m_comm);
       if (num_global_remains == 0) break;
       if (m_option.verbose) {
         m_comm.cout0() << "#of remaining queries\t" << num_global_remains
                        << std::endl;
       }
     }  // end of all queries
-    if (m_comm.all_reduce_sum(num_local_remains) > 0) {
+    if (ygm::sum(num_local_remains, m_comm) > 0) {
       m_comm.cout0() << "Logic error!! Not all queries have been processed"
                      << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);

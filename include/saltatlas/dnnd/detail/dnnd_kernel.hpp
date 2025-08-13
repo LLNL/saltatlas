@@ -46,13 +46,14 @@
 #endif
 
 #include <ygm/comm.hpp>
-#include <ygm/utility.hpp>
+#include <ygm/detail/collective.hpp>
+#include <ygm/utility/timer.hpp>
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/neighbor_cereal.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
 #include <saltatlas/common/detail/utilities/ygm.hpp>
-#include <saltatlas/dnnd/detail/distance.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/knn_heap.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include "saltatlas/common/point_store.hpp"
@@ -190,9 +191,9 @@ class dnnd_kernel {
     for (const auto& [id, _] : m_point_store) {
       m_global_max_id = std::max(m_global_max_id, id);
     }
-    m_global_max_id = m_comm.all_reduce_max(m_global_max_id);
+    m_global_max_id = ygm::max(m_global_max_id, m_comm);
 
-    const auto num_points = m_comm.all_reduce_sum(m_point_store.size());
+    const auto num_points = ygm::sum(m_point_store.size(), m_comm);
     if (m_global_max_id + 1 != num_points) {
       m_comm.cerr0() << "Error: Point IDs must be consecutive integers from 0 "
                         "to N - 1, where N is the number of points."
@@ -236,15 +237,15 @@ class dnnd_kernel {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Epoch\t" << epoch_no << "]" << std::endl;
       }
-      ygm::timer epoch_timer;
+      ygm::utility::timer epoch_timer;
 
-      ygm::timer    gen_timer;
-      adj_lsit_type old_table;
-      adj_lsit_type new_table;
+      ygm::utility::timer gen_timer;
+      adj_lsit_type       old_table;
+      adj_lsit_type       new_table;
       priv_get_old_and_new(old_table, new_table);
       m_comm.cf_barrier();
       if (m_option.verbose) {
-        m_comm.cout0() << "Generating friend checking requests took (s)\t"
+        m_comm.cout0() << "Getting new and old neighbors took (s)\t"
                        << gen_timer.elapsed() << std::endl;
       }
 
@@ -257,7 +258,7 @@ class dnnd_kernel {
                        << std::endl;
       }
       // Test the terminal condition
-      const auto num_global_news = m_comm.all_reduce_sum(m_cnt_new_neighbors);
+      const auto num_global_news = ygm::sum(m_cnt_new_neighbors, m_comm);
       if (m_option.verbose) {
         m_comm.cout0() << "#of neighbor updates\t" << num_global_news
                        << std::endl;
@@ -273,14 +274,14 @@ class dnnd_kernel {
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
       m_comm.cout0() << "\nMessage Statistics" << std::endl;
       m_comm.cout0() << "#of sent neighbor suggestions\t"
-                     << m_comm.all_reduce_sum(m_num_neighbor_suggestion_msgs)
+                     << ygm::sum(m_num_neighbor_suggestion_msgs, m_comm)
                      << std::endl;
       m_comm.cout0() << "#of sent feature vectors\t"
-                     << m_comm.all_reduce_sum(m_num_feature_msgs) << std::endl;
+                     << ygm::sum(m_num_feature_msgs, m_comm) << std::endl;
       m_comm.cout0() << "#of returned distance\t"
-                     << m_comm.all_reduce_sum(m_num_distance_msgs) << std::endl;
+                     << ygm::sum(m_num_distance_msgs, m_comm) << std::endl;
       m_comm.cout0() << "#of pruned messages due to longer distance\t"
-                     << m_comm.all_reduce_sum(m_num_pruned_distance_msgs)
+                     << ygm::sum(m_num_pruned_distance_msgs, m_comm)
                      << std::endl;
 #endif
     }
@@ -294,10 +295,14 @@ class dnnd_kernel {
   /// This function can accept already partially filled heap.
   void priv_fill_knn_heap_with_random_value() {
     m_comm.cf_barrier();
-    ygm::timer init_timer;
+    ygm::utility::timer init_timer;
 
     // sqrt(k) is enough?
     const std::size_t init_k = m_option.k;
+
+    // Keep track of number of random neighbors generated
+    static std::size_t num_random_neighbors;
+    num_random_neighbors = 0;
 
     // Initialize the k-nn heap with random values using a batched algorithm to
     // avoid sending too many messages at once. A single task corresponds to all
@@ -337,6 +342,7 @@ class dnnd_kernel {
             }
 
             neighbors.insert(nid);
+            ++num_random_neighbors;
             // Visit 'nid' and come back to 'sid' with the distance between
             // them.
             m_comm.async(m_point_partitioner(nid), distance_calculator{},
@@ -350,9 +356,8 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Filling initial index took (s)\t"
                      << init_timer.elapsed() << std::endl;
-      m_comm.cout0() << "#of generated initial neighbors: "
-                     << m_comm.all_reduce_sum(m_knn_heap_table.size() * init_k)
-                     << std::endl;
+      m_comm.cout0() << "#of generated random initial neighbors: "
+                     << ygm::sum(num_random_neighbors, m_comm) << std::endl;
     }
   }
 
@@ -372,10 +377,12 @@ class dnnd_kernel {
                      sid, nid, point);
       }
     }
+    m_comm.barrier();
+
     if (!recheck) {
       priv_make_knn_heap_old();
     }
-    m_comm.barrier();
+    m_comm.cf_barrier();
   }
 
   /// \brief Fills k-NN heap with a given index.
@@ -393,10 +400,12 @@ class dnnd_kernel {
                      sid, nid, point);
       }
     }
+    m_comm.barrier();
+
     if (!recheck) {
       priv_make_knn_heap_old();
     }
-    m_comm.barrier();
+    m_comm.cf_barrier();
   }
 
   void priv_make_knn_heap_old() {
@@ -411,7 +420,7 @@ class dnnd_kernel {
 
   void priv_allocate_knn_heap() {
     m_comm.cf_barrier();
-    ygm::timer timer;
+    ygm::utility::timer timer;
 
     m_knn_heap_table.clear();
 
@@ -656,7 +665,16 @@ class dnnd_kernel {
     m_mini_batch_no = 0;
     m_comm.cf_barrier();
 
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nNeighbor check new-new" << std::endl;
+    }
     priv_update_neighbors_new_new(new_msg_srcs, new_table);
+    m_comm.cf_barrier();
+    m_mini_batch_no = 0;
+
+    if (m_option.verbose) {
+      m_comm.cout0() << "\nNeighbor check old-old" << std::endl;
+    }
     priv_update_neighbors_old_new(new_msg_srcs, old_table, new_table);
   }
 
@@ -698,7 +716,7 @@ class dnnd_kernel {
       const bool generated_all_tasks = task_generator(pos_src, pos1, pos2);
       priv_launch_neighbor_checking(targets);
       const bool finished = generated_all_tasks && targets.empty();
-      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
+      if (ygm::sum((int)finished, m_comm) == m_comm.size()) break;
     }
   }
 
@@ -745,7 +763,7 @@ class dnnd_kernel {
           task_generator(pos_src, pos_old, pos_new);
       priv_launch_neighbor_checking(targets);
       const bool finished = generated_all_tasks && targets.empty();
-      if (m_comm.all_reduce_sum((int)finished) == m_comm.size()) break;
+      if (ygm::sum((int)finished, m_comm) == m_comm.size()) break;
     }
   }
 
@@ -826,9 +844,12 @@ class dnnd_kernel {
   void priv_launch_neighbor_checking(
       std::queue<std::pair<id_type, id_type>>& targets) {
     if (m_option.verbose) {
-      m_comm.cout0() << "\nMini-batch No. " << m_mini_batch_no << std::endl;
+      if (m_mini_batch_no > 0) {
+        m_comm.cout0() << "\n";
+      }
+      m_comm.cout0() << "Mini-batch No. " << m_mini_batch_no << std::endl;
     }
-    ygm::timer mini_batch_timer;
+    ygm::utility::timer mini_batch_timer;
 
     const auto local_mini_batch_size = detail::mpi::assign_tasks(
         targets.size(), m_option.mini_batch_size, m_comm.rank(), m_comm.size(),

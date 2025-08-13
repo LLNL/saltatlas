@@ -17,7 +17,7 @@
 
 #include <ygm/comm.hpp>
 #include <ygm/container/map.hpp>
-#include <ygm/utility.hpp>
+#include <ygm/utility/timer.hpp>
 
 namespace saltatlas {
 template <typename DistType, typename IndexType, typename Point>

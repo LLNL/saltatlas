@@ -14,12 +14,13 @@
 #include <string_view>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/common/point_store.hpp"
-#include "saltatlas/dnnd/detail/distance.hpp"
+#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
@@ -431,7 +432,7 @@ class dnnd {
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
   std::size_t num_points() const {
-    return m_comm.all_reduce_sum(m_pstore.size());
+    return ygm::sum(m_pstore.size(), m_comm);
   }
 
   /// \brief Get the number of neighbors of the given point.
