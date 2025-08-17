@@ -9,6 +9,14 @@ The dataset consists of the following files:
   - White-space separated value (WSV) format.
   - Distance metric is L2 (Euclidean) distance.
 
+- [point_5-4_id.txt](./point_5-4_id.txt):
+  - Contains the same data as point_5-4.txt.
+  - Each line starts with an ID, followed by the feature vector.
+  - WSV-ID format.
+  - IDs are not sequential, but unique.
+  - The digit in the tens place of the ID indicates the cluster to which the
+    point belongs.
+
 - [query_5-4.txt](./query_5-4.txt):
   - Consists of 5 search queries.
   - Each query point is close to one of the clusters in the point_5-4.txt file.
