@@ -526,8 +526,7 @@ class dnnd {
 
       std::vector<point_type> neighbor_features;
       for (const auto& neighbor : neighbors) {
-        neighbor_features.push_back(
-            std::move(neighbor_features_table.at(neighbor.id)));
+        neighbor_features.push_back(neighbor_features_table.at(neighbor.id));
       }
 
       result[id] =
