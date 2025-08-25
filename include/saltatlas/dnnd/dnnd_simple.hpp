@@ -14,17 +14,17 @@
 #include <string_view>
 
 #include <ygm/comm.hpp>
-#include <ygm/detail/collective.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/common/point_store.hpp"
-#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
+#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
 
 namespace saltatlas {
@@ -321,15 +321,17 @@ class dnnd {
 
     std::vector<std::vector<point_type>> neighbor_features_store;
     neighbor_features_store.reserve(query_result.size());
+    std::set<id_type> neighbor_ids;
     for (const auto& neighbors : query_result) {
-      std::vector<id_type> neighbor_ids;
-      neighbor_ids.reserve(neighbors.size());
       for (const auto& neighbor : neighbors) {
-        neighbor_ids.push_back(neighbor.id);
+        neighbor_ids.insert(neighbor.id);
       }
-      auto neighbor_features =
-          get_points(neighbor_ids.begin(), neighbor_ids.end());
+    }
 
+    auto neighbor_features =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    for (const auto& neighbors : query_result) {
       std::vector<point_type> neighbor_features_vec;
       neighbor_features_vec.reserve(neighbor_ids.size());
       for (const auto& id : neighbor_ids) {
@@ -431,9 +433,7 @@ class dnnd {
 
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
-  std::size_t num_points() const {
-    return ygm::sum(m_pstore.size(), m_comm);
-  }
+  std::size_t num_points() const { return ygm::sum(m_pstore.size(), m_comm); }
 
   /// \brief Get the number of neighbors of the given point.
   /// If the point is not stored locally, the function returns 0.
@@ -526,8 +526,7 @@ class dnnd {
 
       std::vector<point_type> neighbor_features;
       for (const auto& neighbor : neighbors) {
-        neighbor_features.push_back(
-            std::move(neighbor_features_table.at(neighbor.id)));
+        neighbor_features.push_back(neighbor_features_table.at(neighbor.id));
       }
 
       result[id] =
