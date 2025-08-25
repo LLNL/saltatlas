@@ -87,8 +87,6 @@ int main(int argc, char **argv) {
     return saltatlas::distance::levenshtein<std::u32string, dist_t>(a32, b32);
   };
 
-  // saltatlas::dnnd<id_t, point_type, dist_t> g(
-  // saltatlas::distance::levenshtein<point_type, dist_t>, comm);
   saltatlas::dnnd<id_t, point_type, dist_t> g(levenshtein_utf8, comm);
 
   comm.cout0() << "<<Read Points>>" << std::endl;
@@ -114,9 +112,9 @@ int main(int argc, char **argv) {
         queries.begin(), queries.end(), opt.query_k, opt.epsilon);
     comm.cf_barrier();
 
-    // if (!opt.ground_truth_file_path.empty()) {
-    // show_query_recall_score(ngbr_points, opt.ground_truth_file_path, comm);
-    //}
+    if (!opt.ground_truth_file_path.empty()) {
+      show_query_recall_score(query_results, opt.ground_truth_file_path, comm);
+    }
 
     if (!opt.query_result_file_path.empty()) {
       comm.cout0() << "\nDumping query results to "
