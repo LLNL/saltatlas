@@ -169,15 +169,23 @@ int main(int argc, char** argv) {
   saltatlas::dhnsw<id_type, point_type, dist_type> my_dhnsw(l2_sqr, world,
                                                             params);
 
+  world.cout0("Loading points");
+  ygm::utility::timer load_timer;
   my_dhnsw.load_points(opt.point_file_names.begin(), opt.point_file_names.end(),
                        opt.point_file_format);
+  world.barrier();
+  world.cout0("Loaded points in ", load_timer.elapsed(), " seconds");
 
   // auto [ids, points] =
   // read_points(opt.point_file_names, opt.point_file_format, world);
 
   // my_dhnsw.add_points(ids.begin(), ids.end(), points.begin(), points.end());
 
+  world.cout0("Building DHNSW");
+  ygm::utility::timer build_timer;
   my_dhnsw.build();
+  world.barrier();
+  world.cout0("Built DHNSW in ", build_timer.elapsed(), " seconds");
 
   if (!opt.query_file_path.empty()) {
     world.cout0() << "\n<<Query>>" << std::endl;
