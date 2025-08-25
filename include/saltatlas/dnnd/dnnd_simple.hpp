@@ -333,9 +333,9 @@ class dnnd {
 
     for (const auto& neighbors : query_result) {
       std::vector<point_type> neighbor_features_vec;
-      neighbor_features_vec.reserve(neighbor_ids.size());
-      for (const auto& id : neighbor_ids) {
-        neighbor_features_vec.push_back(neighbor_features.at(id));
+      neighbor_features_vec.reserve(neighbors.size());
+      for (const auto& neighbor : neighbors) {
+        neighbor_features_vec.push_back(neighbor_features.at(neighbor.id));
       }
       neighbor_features_store.push_back(std::move(neighbor_features_vec));
     }
