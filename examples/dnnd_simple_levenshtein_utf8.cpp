@@ -114,16 +114,6 @@ int main(int argc, char **argv) {
         queries.begin(), queries.end(), opt.query_k, opt.epsilon);
     comm.cf_barrier();
 
-    /*
-    for (int i = 0; i < ngbr_points.size(); ++i) {
-      for (int j = 0; j < ngbr_points[i].size(); ++j) {
-        std::cout << ngbr_points[i][j] << "\t" << query_results[i][j].distance
-                  << "\t";
-      }
-      std::cout << std::endl;
-    }
-    */
-
     // if (!opt.ground_truth_file_path.empty()) {
     // show_query_recall_score(ngbr_points, opt.ground_truth_file_path, comm);
     //}
@@ -131,8 +121,9 @@ int main(int argc, char **argv) {
     if (!opt.query_result_file_path.empty()) {
       comm.cout0() << "\nDumping query results to "
                    << opt.query_result_file_path << std::endl;
-      saltatlas::utility::gather_and_dump_neighbors(
-          query_results, opt.query_result_file_path, comm);
+      saltatlas::utility::gather_and_dump_neighbors_with_features(
+          queries, query_results, ngbr_points, opt.query_result_file_path,
+          comm);
     }
   }
 
