@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
                                                             params);
 
   world.cout0("Loading points");
-  ygm::timer load_timer;
+  ygm::utility::timer load_timer;
   my_dhnsw.load_points(opt.point_file_names.begin(), opt.point_file_names.end(),
                        opt.point_file_format);
   world.barrier();
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
   // my_dhnsw.add_points(ids.begin(), ids.end(), points.begin(), points.end());
 
   world.cout0("Building DHNSW");
-  ygm::timer build_timer;
+  ygm::utility::timer build_timer;
   my_dhnsw.build();
   world.barrier();
   world.cout0("Built DHNSW in ", build_timer.elapsed(), " seconds");
