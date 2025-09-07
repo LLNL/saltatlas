@@ -114,8 +114,8 @@ int main(int argc, char **argv) {
   std::filesystem::remove_all(opt.datastore_path, ec);
   comm.cf_barrier();
   {
-    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::create_only,
-                                                opt.datastore_path, comm);
+    saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::create_only,
+                                                    opt.datastore_path, comm);
 
     g.load_points(opt.point_file_names.begin(), opt.point_file_names.end(),
                   opt.point_file_format);

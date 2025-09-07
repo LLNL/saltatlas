@@ -97,8 +97,8 @@ int main(int argc, char **argv) {
   }
 
   {
-    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_read_only,
-                                                opt.datastore_path, comm);
+    saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
+                                                    opt.datastore_path, comm);
 
     // Use the first index for demo
     const auto index_id = g.get_index_ids().front();

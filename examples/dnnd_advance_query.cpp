@@ -108,8 +108,8 @@ int main(int argc, char **argv) {
       saltatlas::distance::distance_function<point_type, dist_t>(
           opt.distance_name);
   {
-    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_read_only,
-                                                opt.datastore_path, comm);
+    saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
+                                                    opt.datastore_path, comm);
     const auto                                index_ids = g.get_index_ids();
 
     // Run queries
