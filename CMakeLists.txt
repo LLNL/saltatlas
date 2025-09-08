@@ -44,6 +44,12 @@ option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
 # User options to specify Boost source or URL
 set(BOOST_SOURCE_DIR CACHE STRING "Path to Boost libraries directory already uncompressed. Must be a version that supports CMake.")
 set(BOOST_FETCH_URL CACHE STRING "URL or file path to an archived Boost source. Must be a version that supports CMake.")
+set(HNSWLIB_FETCH_GIT 
+    "https://github.com/bwpriest/hnswlib.git" 
+    CACHE STRING "GIT to fetch hnswlib")
+set(HNSWLIB_GIT_BRANCH
+    "feature/cmake_facelift" 
+    CACHE STRING "Name of GIT branch for hnswlib")
 # Link Boost UUID with libatomic fails on LC machines
 option(BOOST_UUID_LINK_LIBATOMIC "Link Boost UUID with libatomic" OFF)
 
@@ -129,8 +135,8 @@ if (SALTATLAS_USE_HNSWLIB)
     set(JUST_INSTALL_HNSWLIB ON)
     FetchContent_Declare(
         hnswlib
-        GIT_REPOSITORY https://github.com/bwpriest/hnswlib.git
-        GIT_TAG feature/cmake_facelift
+        GIT_REPOSITORY ${HNSWLIB_FETCH_GIT}
+        GIT_TAG ${HNSWLIB_GIT_BRANCH}
     )
     FetchContent_MakeAvailable(hnswlib)
 endif ()
