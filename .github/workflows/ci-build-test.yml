@@ -1,6 +1,6 @@
 name: CI Test
 
-on: [push, pull_request]
+on: [ push, pull_request ]
 
 jobs:
   build:
@@ -9,8 +9,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install OpenMPI
         run: sudo apt-get install openmpi-bin libopenmpi-dev
-      - name: Build w/o HDF5 w/ Metall
+      - name: Build
         run: |
           mkdir build && cd build
-          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_HDF5=OFF -DSALTATLAS_USE_METALL=ON
-          make -j
+          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_METALL=ON -DSALTATLAS_USE_HNSWLIB=ON
+          make -j4
+      - name: Just Install
+        run: |
+          mkdir build && cd build
+          cmake ../ -DJUST_INSTALL_SALTATLAS=ON
+          make -j4
