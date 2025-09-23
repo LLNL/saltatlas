@@ -444,7 +444,7 @@ class dnnd_kernel {
     void operator()(ygm::ygm_ptr<self_type> local_this, const id_type sid,
                     const id_type nid, const distance_type d) {
       assert(local_this->m_knn_heap_table.count(sid));
-      local_this->m_knn_heap_table.at(sid).push_unique(nid, d, true);
+      local_this->m_knn_heap_table.at(sid).try_add(nid, d, true);
     }
   };
 
@@ -481,7 +481,7 @@ class dnnd_kernel {
       assert(local_this->m_knn_heap_table.count(sid));
       bool ret = false;
       if (nid != std::numeric_limits<id_type>::max()) {
-        ret = local_this->m_knn_heap_table.at(sid).push_unique(nid, d, true);
+        ret = local_this->m_knn_heap_table.at(sid).try_add(nid, d, true);
       }
       if (!ret) {
         // Couldn't add a neighbor, so try to find another one.
@@ -856,7 +856,7 @@ class dnnd_kernel {
       // current neighbors.
       const auto& u2_point = local_this->m_point_store[u2];
       const auto  d = local_this->m_distance_function(u1_point, u2_point);
-      local_this->m_cnt_new_neighbors += nn_heap.push_unique(u1, d, true);
+      local_this->m_cnt_new_neighbors += nn_heap.try_add(u1, d, true);
 
       if (d < u1_max_distance) {
         local_this->comm().async(local_this->m_point_partitioner(u1),
@@ -876,7 +876,7 @@ class dnnd_kernel {
     void operator()(const ygm::ygm_ptr<self_type>& local_this, const id_type u1,
                     const id_type u2, const distance_type& d) {
       auto& nn_heap = local_this->m_knn_heap_table.at(u1);
-      local_this->m_cnt_new_neighbors += nn_heap.push_unique(u2, d, true);
+      local_this->m_cnt_new_neighbors += nn_heap.try_add(u2, d, true);
     }
   };
 

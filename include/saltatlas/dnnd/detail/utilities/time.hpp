@@ -9,6 +9,10 @@
 
 namespace saltatlas::dndetail {
 
+inline std::chrono::high_resolution_clock::time_point launch_timer() {
+  return std::chrono::high_resolution_clock::now();
+}
+
 inline std::chrono::high_resolution_clock::time_point get_time() {
   return std::chrono::high_resolution_clock::now();
 }
