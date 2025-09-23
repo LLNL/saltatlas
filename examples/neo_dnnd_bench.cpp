@@ -40,52 +40,22 @@ using distance_type =
 using neo_dnnd_t = neo_dnnd<id_type, feature_elem_type, distance_type>;
 using point_type = typename neo_dnnd_t::point_type;
 
-template <typename knng_type>
-void dump_knng(const std::filesystem::path& base_path, const knng_type& knng,
-               const int rank, bool dump_distance = false) {
-  std::filesystem::path knng_out_path =
-      base_path.string() + "-" + std::to_string(rank) + ".txt";
-
-  std::ofstream ofs(knng_out_path);
-
-  if (!ofs.is_open()) {
-    std::cerr << "Failed to create kNNG file" << std::endl;
-    return;
-  }
-
-  for (const auto& elem : knng) {
-    ofs << elem.first;
-    for (const auto& neighbor : elem.second) {
-      ofs << " " << neighbor.id;
-    }
-    ofs << "\n";
-
-    if (!dump_distance) continue;
-    ofs << "0.0";  // dummy
-    for (const auto& neighbor : elem.second) {
-      ofs << " " << neighbor.distance;
-    }
-    ofs << "\n";
-  }
-  ofs.close();
-}
-
 struct options {
   std::string dataset_path;
   std::string dataset_format;
   std::string distance_function;
-  int         k{0};
-  double      rho   = 0.8;
-  double      delta = 0.001;
+  int k{0};
+  double rho = 0.8;
+  double delta = 0.001;
   std::string knng_dump_dir;
-  bool        optimize                      = false;
-  double      pruning_factor                = -1;
-  std::size_t batch_size                    = 1ULL << 25;
-  double      popular_fv_ratio              = 0.0f;
-  bool        donot_remove_dup_fvs          = false;
-  bool        donot_share_pstore_regionally = false;
-  bool        dump_distance                 = false;
-  bool        verbose                       = false;
+  bool optimize = false;
+  double pruning_factor = -1;
+  std::size_t batch_size = 1ULL << 25;
+  double popular_fv_ratio = 0.0f;
+  bool donot_remove_dup_fvs = false;
+  bool donot_share_pstore_regionally = false;
+  bool dump_distance = false;
+  bool verbose = false;
 
   template <typename out_stream_type>
   void show(out_stream_type& os) {
@@ -232,8 +202,8 @@ int main(int argc, char* argv[]) {
   ::MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
   {
     mpi::communicator comm;
-    const int         mpi_rank = comm.rank();
-    const int         mpi_size = comm.size();
+    const int mpi_rank = comm.rank();
+    const int mpi_size = comm.size();
 
     comm.cout0() << "========================================" << std::endl;
     comm.cout0() << "Start NEO-DNND" << std::endl;
@@ -247,7 +217,7 @@ int main(int argc, char* argv[]) {
     }
 
     options opt;
-    bool    show_usage = false;
+    bool show_usage = false;
     if (!parse_options(argc, argv, opt, show_usage)) {
       usage(comm.cerr0());
       return EXIT_FAILURE;
@@ -352,8 +322,7 @@ int main(int argc, char* argv[]) {
         std::error_code ec;
         std::filesystem::create_directories(opt.knng_dump_dir, ec);
         comm.barrier();
-        dump_knng(opt.knng_dump_dir + "/knng", knng, mpi_rank,
-                  opt.dump_distance);
+        dnnd.dump_graph(knng, opt.knng_dump_dir + "/knng", opt.dump_distance);
         comm.barrier();
       }
     }

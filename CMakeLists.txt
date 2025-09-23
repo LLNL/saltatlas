@@ -201,7 +201,7 @@ if (SALTATLAS_USE_METALL)
     FetchContent_Declare(
             Metall
             GIT_REPOSITORY https://github.com/LLNL/metall.git
-            GIT_TAG main
+            GIT_TAG master
     )
     FetchContent_MakeAvailable(Metall)
 
