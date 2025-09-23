@@ -44,18 +44,18 @@ struct options {
   std::string dataset_path;
   std::string dataset_format;
   std::string distance_function;
-  int k{0};
-  double rho = 0.8;
-  double delta = 0.001;
+  int         k{0};
+  double      rho   = 0.8;
+  double      delta = 0.001;
   std::string knng_dump_dir;
-  bool optimize = false;
-  double pruning_factor = -1;
-  std::size_t batch_size = 1ULL << 25;
-  double popular_fv_ratio = 0.0f;
-  bool donot_remove_dup_fvs = false;
-  bool donot_share_pstore_regionally = false;
-  bool dump_distance = false;
-  bool verbose = false;
+  bool        optimize                      = false;
+  double      pruning_factor                = -1;
+  std::size_t batch_size                    = 1ULL << 25;
+  double      popular_fv_ratio              = 0.0f;
+  bool        donot_remove_dup_fvs          = false;
+  bool        donot_share_pstore_regionally = false;
+  bool        dump_distance                 = false;
+  bool        verbose                       = false;
 
   template <typename out_stream_type>
   void show(out_stream_type& os) {
@@ -97,17 +97,17 @@ void usage(ost& os) {
         "\n \t'jaccard' (Jaccard index), "
         "\n \t'altjaccard' (alternative faster Jaccard index), "
         "\n \tor 'levenshtein' (Levenshtein distance)."
-     << "\n -k [int, required] k for KNNG construction."
+     << "\n -k [int, required] k for KNNG building."
      << "\n -r [double, optional] rho (sampling) parameter in NN-Descent. "
         "Default: 0.8."
      << "\n -d [double, optional] delta (terminal condition) parameter in "
         "NN-Descent. Default: 0.001."
-     << "\n -b [int, optional] KNNG construction batch size. Default: 2^25."
+     << "\n -b [int, optional] KNNG building batch size. Default: 2^25."
      << "\n -L [optional] Do not share point store in local node."
      << "\n -A [optional] Do not remove duplicate feature vectors."
      << "\n -P [double, optional] Ratio of FVs to replicate. Between 0 and "
         "1.0. Default: 0."
-     << "\n -O [optional] Optimize KNNG after construction."
+     << "\n -O [optional] Optimize KNNG after building."
      << "\n -m [double, optional] High-degree edge pruning factor for "
         "optimization.  Default: -1 (no pruning)."
      << "\n -G [string, optional] Directory to dump KNNG. Default: no dump."
@@ -202,8 +202,8 @@ int main(int argc, char* argv[]) {
   ::MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
   {
     mpi::communicator comm;
-    const int mpi_rank = comm.rank();
-    const int mpi_size = comm.size();
+    const int         mpi_rank = comm.rank();
+    const int         mpi_size = comm.size();
 
     comm.cout0() << "========================================" << std::endl;
     comm.cout0() << "Start NEO-DNND" << std::endl;
@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
     }
 
     options opt;
-    bool show_usage = false;
+    bool    show_usage = false;
     if (!parse_options(argc, argv, opt, show_usage)) {
       usage(comm.cerr0());
       return EXIT_FAILURE;
@@ -261,10 +261,10 @@ int main(int argc, char* argv[]) {
       comm.cout0() << "Construct KNNG" << std::endl;
       comm.cout0() << "========================================" << std::endl;
 
-      recorder.start("KNNG construction");
+      recorder.start("KNNG build");
       auto knng =
-          dnnd.construct(opt.k, opt.rho, opt.delta, !opt.donot_remove_dup_fvs,
-                         opt.batch_size, opt.popular_fv_ratio);
+          dnnd.build(opt.k, opt.rho, opt.delta, !opt.donot_remove_dup_fvs,
+                     opt.batch_size, opt.popular_fv_ratio);
       recorder.stop();
 
       if (opt.optimize) {
@@ -302,13 +302,13 @@ int main(int argc, char* argv[]) {
       } else {
         const auto& time_table = recorder.get_time_table();
         for (const auto& entry : time_table) {
-          if (entry.name != "KNNG construction") {
+          if (entry.name != "KNNG build") {
             continue;
           }
           std::vector<double> times(mpi_size);
           comm.all_gather(entry.t, times.data());
           const auto [min, mean, max, std] = detail::get_stats(times);
-          comm.cout0() << "KNNG construction took (s):\t" << std::fixed
+          comm.cout0() << "KNNG build took (s):\t" << std::fixed
                        << std::setprecision(2) << max << std::endl;
         }
       }
