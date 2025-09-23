@@ -181,12 +181,12 @@ void show_mpi_info(mpi::communicator& comm) {
   comm.cout0() << "MPI Info" << std::endl;
   comm.cout0() << "  #of comm ranks: " << comm.size() << std::endl;
   comm.cout0() << "  #of comp. nodes: " << comm.num_nodes() << std::endl;
-  comm.cout0() << "  Node size: " << comm.local_size() << std::endl;
+  comm.cout0() << "  Node size: " << comm.node_size() << std::endl;
   comm.cout0() << "  Rank\tLocal rank" << std::endl;
   for (int i = 0; i < comm.size(); ++i) {
     comm.barrier();
     if (i == comm.rank()) {
-      std::cout << "  \t" << comm.rank() << "\t" << comm.local_rank()
+      std::cout << "  \t" << comm.rank() << "\t" << comm.node_local_rank()
                 << std::endl;
     }
   }
@@ -253,8 +253,8 @@ int main(int argc, char* argv[]) {
       comm.cout0() << "Read dataset" << std::endl;
       comm.cout0() << "========================================" << std::endl;
       recorder.start("read_dataset");
-      dnnd.read_dataset(opt.dataset_path, opt.dataset_format,
-                        !opt.donot_share_pstore_regionally);
+      dnnd.load_points(opt.dataset_path, opt.dataset_format,
+                       !opt.donot_share_pstore_regionally);
       recorder.stop();
 
       comm.cout0() << "\n========================================" << std::endl;

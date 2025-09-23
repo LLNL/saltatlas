@@ -30,7 +30,6 @@
 #include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/dnnd/detail/knn_heap.hpp"
-#include "saltatlas/dnnd/detail/utilities/numa.hpp"
 #include "saltatlas/dnnd/detail/utilities/omp.hpp"
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
 #include "saltatlas/dnnd/distance.hpp"
@@ -142,13 +141,17 @@ class neo_dnnd {
         m_comm(comm),
         m_rng(rnd_seed + m_comm.rank()),
         m_verbose(verbose) {
+    if (!priv_check_mpi_rank_map()) {
+      m_comm.abort();
+    }
+
     if (!m_time_recorder) {
       m_time_recorder = m_default_time_recorder;
     }
     m_all_to_all_pairs =
         mpi::get_pair_wise_all_to_all_pattern(m_comm.size(), m_comm.rank());
-    m_all_to_all_region_pairs = mpi::get_pair_wise_all_to_all_pattern(
-        priv_num_regions(), priv_region_no());
+    m_all_to_all_node_pairs = mpi::get_pair_wise_all_to_all_pattern(
+        m_comm.num_nodes(), m_comm.node_rank());
   }
 
   ~neo_dnnd() noexcept {
@@ -160,12 +163,20 @@ class neo_dnnd {
     m_comm.barrier();
   }
 
-  void read_dataset(const std::filesystem::path& dataset_path,
-                    const std::string_view& dataset_format,
-                    const bool share_pstore_regionally = true) {
-    m_share_pstore_regionally = share_pstore_regionally;
-    priv_cout0(m_verbose) << "Share point store regionally: "
-                          << m_share_pstore_regionally << std::endl;
+  /// \brief Load points from a dataset file.
+  /// All ranks must call this function.
+  /// \param dataset_path Path to a directory or files.
+  /// \param dataset_format Dataset format. Supported formats are "wsv
+  /// (whitespace separated values)", "wsv-id (whitespace separated values with
+  /// IDs in the first column)", "bin (binary)", and "bin-id (binary with IDs)".
+  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
+  /// on the same node directly.
+  void load_points(const std::filesystem::path& dataset_path,
+                   const std::string_view& dataset_format,
+                   const bool read_nlocal_pstores_directly = true) {
+    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
+    priv_cout0(m_verbose) << "Read node local pstores directly: "
+                          << m_read_nlocal_pstores_directly << std::endl;
 
     auto partitioner = [this](const id_type id) {
       return saltatlas::partition(id, m_comm.size());
@@ -217,18 +228,18 @@ class neo_dnnd {
     m_comm.barrier();
     m_comm.cout0() << "Finished constructing point store" << std::endl;
 
-    priv_cout0(m_verbose) << "Opening shared point stores" << std::endl;
+    priv_cout0(m_verbose) << "Reopening point stores" << std::endl;
     {
       m_point_store_managers.clear();
       m_point_stores.clear();
-      for (std::size_t r = 0; r < priv_region_size(); ++r) {
-        if (!m_share_pstore_regionally && r != priv_regional_rank()) {
+      for (std::size_t r = 0; r < m_comm.node_size(); ++r) {
+        if (!m_read_nlocal_pstores_directly && r != m_comm.node_local_rank()) {
           m_point_store_managers.emplace_back(nullptr);
           m_point_stores.emplace_back(nullptr);
           continue;
         }
 
-        const int rank = r + priv_region_no() * priv_region_size();
+        const int rank = r + m_comm.node_rank() * m_comm.node_size();
         const std::string path = gen_pstore_name(rank);
 
         m_point_store_managers.emplace_back(
@@ -510,7 +521,7 @@ class neo_dnnd {
   }
 
  private:
-  std::ostream& priv_cout0(const bool verbose) const {
+  inline std::ostream& priv_cout0(const bool verbose) const {
     static std::ostringstream dummy;
     if (verbose) {
       return m_comm.cout0();
@@ -519,8 +530,51 @@ class neo_dnnd {
     }
   }
 
-  int priv_owner(const id_type id) const {
+  inline int priv_owner(const id_type id) const {
     return partition(id, m_comm.size());
+  }
+
+  inline int priv_node_rank(const int rank) const {
+    return rank / m_comm.node_size();
+  }
+
+  inline int priv_node_local_rank(const int rank) const {
+    return rank % m_comm.node_size();
+  }
+
+  /// \brief Check if MPI ranks are mapped to nodes as expected.
+  bool priv_check_mpi_rank_map() const {
+    // Send node rank and rank info to the root rank
+    const auto node_ranks = m_comm.gather(m_comm.node_rank(), 0);
+    if (m_comm.rank() == 0) {
+      for (int r = 0; r < m_comm.size(); ++r) {
+        if (node_ranks[r] != priv_node_rank(r)) {
+          std::cerr << "MPI ranks are not mapped to nodes as expected."
+                    << std::endl;
+          std::cerr << "rank: " << r << ", node_rank: " << node_ranks[r]
+                    << ", expected: " << priv_node_rank(r) << std::endl;
+          return false;
+        }
+      }
+    }
+
+    const auto node_local_ranks = m_comm.gather(m_comm.node_local_rank(), 0);
+    if (m_comm.rank() == 0) {
+      for (int r = 0; r < m_comm.size(); ++r) {
+        if (node_local_ranks[r] != priv_node_local_rank(r)) {
+          std::cerr << "MPI ranks are not mapped to nodes as expected."
+                    << std::endl;
+          std::cerr << "rank: " << r
+                    << ", node_local_rank: " << node_local_ranks[r]
+                    << ", expected: " << priv_node_local_rank(r) << std::endl;
+          return false;
+        }
+      }
+    }
+
+    m_comm.barrier();
+
+    return true;
   }
 
   inline void priv_show_dram_usage() const {
@@ -598,7 +652,7 @@ class neo_dnnd {
   }
 
   void priv_init_graph() {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     // init m_graph space
     m_graph.reserve(point_store.num_points());
@@ -683,7 +737,7 @@ class neo_dnnd {
 
   void priv_set_old_and_new(adj_list<id_type>& old_ng,
                             adj_list<id_type>& new_ng) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     old_ng.clear();
     new_ng.clear();
@@ -738,7 +792,7 @@ class neo_dnnd {
   }
 
   void priv_add_reverse_neighbors(adj_list<id_type>& ng) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     // generate reversed neighbors, grouping by the owner of the neighbor
 
@@ -809,7 +863,7 @@ class neo_dnnd {
   std::size_t priv_gen_and_launch_neighbor_checks(
       const adj_list<id_type>& old_ng, const adj_list<id_type>& new_ng,
       const std::size_t batch_size) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
     matrix2d<id_pair_type> neighbor_intros(m_comm.size());
 
     std::size_t batch_no = 0;
@@ -996,16 +1050,16 @@ class neo_dnnd {
           pair_rank, std::move(cached_neighbor_checks[pair_rank]));
       m_time_recorder->get().stop();
 
-      if (m_share_pstore_regionally &&
-          priv_region_no(pair_rank) == priv_region_no()) {
+      if (m_read_nlocal_pstores_directly &&
+          priv_node_rank(pair_rank) == m_comm.node_rank()) {
         // Share the point store with the pair rank
-        const auto& my_pstore = *(m_point_stores.at(priv_regional_rank()));
+        const auto& my_pstore = *(m_point_stores.at(m_comm.node_local_rank()));
         const auto& pair_pstore =
-            *(m_point_stores.at(priv_regional_rank(pair_rank)));
+            *(m_point_stores.at(priv_node_local_rank(pair_rank)));
 
         m_counter_db.add("RegionallyCheckedFVs", assigned_checks.size());
 
-        m_time_recorder->get().start("Calc dist (regional)");
+        m_time_recorder->get().start("Calc dist (nlocal)");
         distances.resize(assigned_checks.size());
         OMP_DIRECTIVE(parallel for)
         for (std::size_t c = 0; c < assigned_checks.size(); ++c) {
@@ -1035,16 +1089,16 @@ class neo_dnnd {
         MPI_Request recv_distances_req;
         m_comm.irecv(pair_rank, recv_distances, recv_distances_req);
 
-        m_time_recorder->get().start("Update kNNG sender (regional)");
+        m_time_recorder->get().start("Update kNNG sender (nlocal)");
         num_updated += priv_update_knng(assigned_checks, false, distances);
         m_time_recorder->get().stop();
 
-        m_time_recorder->get().start("Wait for CHKs&DISTs (regional)");
+        m_time_recorder->get().start("Wait for CHKs&DISTs (nlocal)");
         m_comm.wait(recv_checks_req);
         m_comm.wait(recv_distances_req);
         m_time_recorder->get().stop();
 
-        m_time_recorder->get().start("Update kNNG receiver (regional)");
+        m_time_recorder->get().start("Update kNNG receiver (nlocal)");
         num_updated += priv_update_knng(recv_checks, true, recv_distances);
         m_time_recorder->get().stop();
 
@@ -1109,7 +1163,7 @@ class neo_dnnd {
   void priv_send_fvs(const std::vector<id_pair_type>& checks,
                      const int pair_rank, std::vector<fe_type>& fvs_recv,
                      std::vector<std::size_t>& fv_indices_recv) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     // Check the limitation of this implementation
     if (std::size_t(point_store.num_points() * num_dims() * sizeof(fe_type)) >
@@ -1210,7 +1264,7 @@ class neo_dnnd {
                           const std::vector<fe_type>& features,
                           const std::vector<std::size_t>& indices,
                           std::vector<distance_type>& out_distances) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     out_distances.resize(checks.size());
     OMP_DIRECTIVE(parallel for)
@@ -1248,47 +1302,6 @@ class neo_dnnd {
     return num_updated;
   }
 
-  std::size_t priv_num_regions() const {
-    return priv_num_regions_per_node() * m_comm.num_nodes();
-  }
-
-  std::size_t priv_region_no() const { return priv_region_no(m_comm.rank()); }
-
-  std::size_t priv_region_no(const int rank) const {
-    return rank / priv_region_size();
-  }
-
-  std::size_t priv_num_regions_per_node() const {
-    if (m_numa_separate_node) {
-      return dndetail::numa::get_num_avail_nodes();
-    } else {
-      return 1;
-    }
-  }
-
-  // The number of ranks in a region
-  std::size_t priv_region_size() const {
-    if (m_numa_separate_node) {
-      if (m_comm.local_size() % priv_num_regions_per_node() != 0) {
-        m_comm.cerr0()
-            << "ERROR: local_size() % priv_num_regions_per_node() != 0"
-            << std::endl;
-        m_comm.abort();
-      }
-      return m_comm.local_size() / priv_num_regions_per_node();
-    } else {
-      return m_comm.local_size();
-    }
-  }
-
-  std::size_t priv_regional_rank() const {
-    return priv_regional_rank(m_comm.local_rank());
-  }
-
-  std::size_t priv_regional_rank(const int rank) const {
-    return rank % priv_region_size();
-  }
-
   void priv_cache_popular_fvs(const double popular_fv_ratio) {
     if (popular_fv_ratio == 0.0) {
       m_comm.cout0() << "No popular feature vectors are cached" << std::endl;
@@ -1298,7 +1311,7 @@ class neo_dnnd {
 
     priv_cout0(m_verbose) << std::endl;
     priv_cout0(true) << "Replicate popular feature vectors" << std::endl;
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     if (popular_fv_ratio >= 1) {
       m_min_cache_id = 0;
@@ -1319,18 +1332,18 @@ class neo_dnnd {
     }
     {
       const auto max_count = m_comm.all_reduce_max(popular_fvs.size());
-      const auto max_capacity = max_count * priv_num_regions();
+      const auto max_capacity = max_count * m_comm.num_nodes();
       m_pop_fv_store = std::make_unique<pop_fv_cache_t>(
-          num_dims(), max_capacity, priv_region_size(), priv_regional_rank(),
-          std::to_string(priv_region_no()), m_comm);
+          num_dims(), max_capacity, m_comm.node_size(),
+          m_comm.node_local_rank(), std::to_string(m_comm.node_rank()), m_comm);
     }
 
     // Construct my feature vector plication store
     m_pop_fv_store->create_mine();
-    for (std::size_t n = 0; n < m_all_to_all_region_pairs.size(); ++n) {
-      const auto pair_cache_no = m_all_to_all_region_pairs[n];
+    for (std::size_t n = 0; n < m_all_to_all_node_pairs.size(); ++n) {
+      const auto pair_cache_no = m_all_to_all_node_pairs[n];
       const auto pair_rank =
-          pair_cache_no * priv_region_size() + priv_regional_rank();
+          pair_cache_no * m_comm.node_size() + m_comm.node_local_rank();
 
       std::vector<id_type> id_recv_buf;
       m_comm.sendrecv_arb_size(pair_rank, popular_fvs, id_recv_buf);
@@ -1338,12 +1351,12 @@ class neo_dnnd {
       priv_sendrecv_fvs(
           popular_fvs, pair_rank,
           m_pop_fv_store->my_fv_pool() +
-              m_pop_fv_store->size(priv_regional_rank()) * num_dims(),
+              m_pop_fv_store->size(m_comm.node_local_rank()) * num_dims(),
           id_recv_buf.size());
 
       for (const auto& id : id_recv_buf) {
         assert(priv_owner(id) == pair_rank);
-        assert(priv_regional_rank() == priv_regional_rank(pair_rank));
+        assert(m_comm.node_local_rank() == priv_node_local_rank(pair_rank));
         m_pop_fv_store->register_id(id);
       }
     }
@@ -1355,7 +1368,7 @@ class neo_dnnd {
 
   std::size_t priv_check_cached_neighbors(const int pair_rank,
                                           std::vector<id_pair_type>&& checks) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     if (!m_pop_fv_store) {
       return 0;
@@ -1371,7 +1384,7 @@ class neo_dnnd {
       assert(priv_owner(sid) == m_comm.rank());
       const auto* sfv = point_store[sid];
       assert(sfv);
-      const auto nfv_bank_no = priv_regional_rank(priv_owner(nid));
+      const auto nfv_bank_no = priv_node_local_rank(priv_owner(nid));
       const auto* const nfv = m_pop_fv_store->get(nfv_bank_no, nid);
       assert(nfv);
       const auto dist =
@@ -1418,7 +1431,7 @@ class neo_dnnd {
   void priv_sendrecv_fvs(const std::vector<id_type>& ids_to_send,
                          const int pair_rank, fe_type* recv_buf,
                          const std::size_t total_recv_count) {
-    const auto& point_store = *(m_point_stores.at(priv_regional_rank()));
+    const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     // Check the limitation of this implementation
     if (std::size_t(point_store.num_points() * num_dims() * sizeof(fe_type)) >
@@ -1501,7 +1514,7 @@ class neo_dnnd {
   std::vector<int> m_fvs_block_lengths{};
   std::vector<::MPI_Datatype> m_fvs_types{};
   std::vector<int> m_all_to_all_pairs{};
-  std::vector<int> m_all_to_all_region_pairs{};
+  std::vector<int> m_all_to_all_node_pairs{};
 #ifdef PROFILE_FV
   // Counts how many times each feature vector was received.
   bstuo::unordered_flat_map<id_type, std::size_t> m_fv_count;
@@ -1509,11 +1522,9 @@ class neo_dnnd {
   int m_super_step_no{0};
   std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
   std::size_t m_min_cache_id{0};
-  bool m_share_pstore_regionally{false};
+  bool m_read_nlocal_pstores_directly{false};
   std::vector<const point_store*> m_point_stores;
   std::vector<metall::manager*> m_point_store_managers;
   std::size_t m_num_dims{0};
-  // Always false for now since this optimization does not work well.
-  bool m_numa_separate_node{false};
 };
 }  // namespace saltatlas

@@ -31,4 +31,4 @@ int get_num_avail_nodes() noexcept {
 #endif
 }
 
-}  // namespace saltatlas::neo_dnnd::numa
+}  // namespace saltatlas::dndetail::numa

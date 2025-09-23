@@ -9,17 +9,17 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 #include <cassert>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <metall/detail/file.hpp>
+#include <metall/detail/mmap.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <metall/detail/file.hpp>
-#include <metall/detail/mmap.hpp>
 
 #include "../../mpi.hpp"
 
@@ -44,7 +44,7 @@ struct shm_unique_ptr {
 
   ~shm_unique_ptr() noexcept { priv_destroy(); }
 
-  shm_unique_ptr(const shm_unique_ptr&)            = delete;
+  shm_unique_ptr(const shm_unique_ptr&) = delete;
   shm_unique_ptr& operator=(const shm_unique_ptr&) = delete;
 
   shm_unique_ptr(shm_unique_ptr&& other) noexcept
@@ -53,24 +53,24 @@ struct shm_unique_ptr {
         m_addr(other.m_addr),
         m_length(other.m_length),
         m_is_owner(other.m_is_owner) {
-    other.m_fd       = -1;
-    other.m_addr     = nullptr;
-    other.m_length   = 0;
+    other.m_fd = -1;
+    other.m_addr = nullptr;
+    other.m_length = 0;
     other.m_is_owner = false;
   }
 
   shm_unique_ptr& operator=(shm_unique_ptr&& other) noexcept {
     if (this != &other) {
       priv_destroy();
-      m_name     = std::move(other.m_name);
-      m_fd       = other.m_fd;
-      m_addr     = other.m_addr;
-      m_length   = other.m_length;
+      m_name = std::move(other.m_name);
+      m_fd = other.m_fd;
+      m_addr = other.m_addr;
+      m_length = other.m_length;
       m_is_owner = other.m_is_owner;
 
-      other.m_fd       = -1;
-      other.m_addr     = nullptr;
-      other.m_length   = 0;
+      other.m_fd = -1;
+      other.m_addr = nullptr;
+      other.m_length = 0;
       other.m_is_owner = false;
     }
     return *this;
@@ -110,63 +110,63 @@ struct shm_unique_ptr {
       shm_unlink(m_name.c_str());
     }
 
-    m_addr   = nullptr;
-    m_fd     = -1;
+    m_addr = nullptr;
+    m_fd = -1;
     m_length = 0;
     m_name.clear();
     m_is_owner = false;
   }
 
   std::string m_name{};
-  int         m_fd{-1};
-  T*          m_addr{nullptr};
-  size_t      m_length{0};
-  bool        m_is_owner{false};
+  int m_fd{-1};
+  T* m_addr{nullptr};
+  size_t m_length{0};
+  bool m_is_owner{false};
 };
 
 template <typename T>
 inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
     const std::string& shm_name, const size_t length, mpi::communicator& comm) {
-  const auto          lc_size  = comm.local_size();
-  const auto          lc_rank  = comm.local_rank();
-  const auto          mem_size = length * sizeof(T);
+  const auto node_size = comm.node_size();
+  const auto nlc_rank = comm.node_local_rank();
+  const auto mem_size = length * sizeof(T);
   std::vector<size_t> mem_sizes;
   comm.all_gather(mem_size, mem_sizes, false);
 
-  std::vector<std::string> shm_names(lc_size);
-  for (int i = 0; i < lc_size; ++i) {
+  std::vector<std::string> shm_names(node_size);
+  for (int i = 0; i < node_size; ++i) {
     shm_names[i] = "/" + shm_name + "-" + std::to_string(i);
   }
 
   // Each rank creates its own shared memory region
   {
-    int fd = shm_open(shm_names[lc_rank].c_str(), O_CREAT | O_RDWR, 0666);
+    int fd = shm_open(shm_names[nlc_rank].c_str(), O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
       perror("shm_open (create)");
       comm.abort();
     }
 
-    if (ftruncate(fd, mem_sizes[lc_rank]) == -1) {
+    if (ftruncate(fd, mem_sizes[nlc_rank]) == -1) {
       perror("ftruncate");
       comm.abort();
     }
 
     close(fd);  // Will reopen all for mmap
   }
-  comm.local_barrier();
+  comm.node_local_barrier();
 
   // Open and mmap all shared memory regions
-  std::vector<shm_unique_ptr<T>> shm_regions(lc_size);
-  for (int i = 0; i < lc_size; ++i) {
-    int flags = (i == lc_rank) ? O_RDWR : O_RDONLY;
-    int fd    = shm_open(shm_names[i].c_str(), flags, 0666);
+  std::vector<shm_unique_ptr<T>> shm_regions(node_size);
+  for (int i = 0; i < node_size; ++i) {
+    int flags = (i == nlc_rank) ? O_RDWR : O_RDONLY;
+    int fd = shm_open(shm_names[i].c_str(), flags, 0666);
     if (fd == -1) {
       perror("shm_open (access)");
       comm.abort();
     }
 
     int prot = PROT_READ;
-    if (i == lc_rank) prot |= PROT_WRITE;
+    if (i == nlc_rank) prot |= PROT_WRITE;
 
     auto* addr = mdtl::os_mmap(nullptr, mem_sizes[i], prot, MAP_SHARED, fd, 0);
     if (!addr) {
@@ -175,9 +175,9 @@ inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
       comm.abort();
     }
     shm_regions[i] = shm_unique_ptr<T>(shm_names[i], fd, static_cast<T*>(addr),
-                                       mem_sizes[i] / sizeof(T), i == lc_rank);
+                                       mem_sizes[i] / sizeof(T), i == nlc_rank);
   }
   return shm_regions;
 }
 
-}  // namespace saltatlas::dnnd3::shm_manager
+}  // namespace saltatlas::dndetail

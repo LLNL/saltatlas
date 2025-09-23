@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
     neo_dnnd_t dnnd(l2_func, comm);
     comm.barrier();
 
-    dnnd.read_dataset("./examples/datasets/point_5-4.txt", "wsv");
+    dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
 
     const int k = 4;
     auto knng = dnnd.construct(k);
