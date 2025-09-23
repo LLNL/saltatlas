@@ -1,21 +1,23 @@
 name: CI Test
 
-on: [push, pull_request]
+on: [ push, pull_request ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install OpenMPI
+      - &checkout
+        uses: actions/checkout@v4
+      - &install_openmpi
+        name: Install OpenMPI
         run: sudo apt-get install openmpi-bin libopenmpi-dev
-      - name: Build w/o HDF5 w/ Metall
+      - name: Build
         run: |
           mkdir build && cd build
           cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_METALL=ON -DSALTATLAS_USE_HNSWLIB=ON
           make -j4
 
-  just-install:
+  build-just-install:
     runs-on: ubuntu-latest
     steps:
       - *checkout
