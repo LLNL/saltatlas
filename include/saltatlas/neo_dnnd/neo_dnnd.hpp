@@ -142,6 +142,9 @@ class neo_dnnd {
         m_comm(comm),
         m_rng(rnd_seed + m_comm.rank()),
         m_verbose(verbose) {
+    if (!m_time_recorder) {
+      m_time_recorder = m_default_time_recorder;
+    }
     m_all_to_all_pairs =
         mpi::get_pair_wise_all_to_all_pattern(m_comm.size(), m_comm.rank());
     m_all_to_all_region_pairs = mpi::get_pair_wise_all_to_all_pattern(
@@ -159,7 +162,7 @@ class neo_dnnd {
 
   void read_dataset(const std::filesystem::path& dataset_path,
                     const std::string_view& dataset_format,
-                    const bool share_pstore_regionally) {
+                    const bool share_pstore_regionally = true) {
     m_share_pstore_regionally = share_pstore_regionally;
     priv_cout0(m_verbose) << "Share point store regionally: "
                           << m_share_pstore_regionally << std::endl;
@@ -243,7 +246,7 @@ class neo_dnnd {
 
   std::size_t num_dims() const { return m_num_dims; }
 
-  knng_type construct(const std::size_t k, const double rho = 0.8,
+  knng_type construct(const std::size_t k, const double rho = 0.5,
                       const double delta = 0.001,
                       const bool remove_duplicate_fvs = true,
                       const std::size_t batch_size = 1 << 20,
@@ -1477,6 +1480,7 @@ class neo_dnnd {
   }
 
   distance_function m_distance_func;
+  time_recorder m_default_time_recorder;
   std::optional<std::reference_wrapper<time_recorder>> m_time_recorder;
   mpi::communicator& m_comm;
   std::mt19937_64 m_rng;  // Must be initialized after m_comm as it uses rank
