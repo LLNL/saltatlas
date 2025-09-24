@@ -34,27 +34,65 @@ int main(int argc, char* argv[]) {
   {
     mpi::communicator comm;
 
-    auto l2_func = distance::distance_function<point_type, distance_type>("l2");
-    neo_dnnd_t dnnd(l2_func, comm);
+    // Build and optimize knng from scratch
+    {
+      auto l2_func =
+          distance::distance_function<point_type, distance_type>("l2");
+      neo_dnnd_t dnnd(l2_func, comm);
+
+      comm.cout0() << "Load points from a file" << std::endl;
+      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+
+      comm.cout0() << "Build a KNNG" << std::endl;
+      const int k    = 4;
+      auto      knng = dnnd.build(k);
+
+      comm.cout0() << "Optimize KNNG" << std::endl;
+      const double pruning_factor = -1;  // No pruning
+      dnnd.optimize(pruning_factor, knng);
+
+      std::filesystem::path dump_path = "neo_dnnd_knng_dump";
+      comm.cout0() << "\nDump to " << dump_path << std::endl;
+      std::error_code ec;
+      std::filesystem::create_directories(dump_path, ec);
+      comm.barrier();
+      const bool dump_distance = true;
+      dnnd.dump_graph(knng, dump_path / "knng", dump_distance);
+    }
     comm.barrier();
 
-    dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+    // Use add_points() function to add points
+    comm.cout0() << "\nAdd points using add_points() function" << std::endl;
+    {
+      neo_dnnd_t dnnd(
+          distance::distance_function<point_type, distance_type>("cosine"),
+          comm);
 
-    const int k    = 4;
-    auto      knng = dnnd.build(k);
+      std::vector<id_type>                        ids;
+      std::vector<std::vector<feature_elem_type>> points;
+      if (comm.rank() == 0) {
+        ids.push_back(0);
+        ids.push_back(1);
+        ids.push_back(2);
+        points.push_back(
+            std::vector<feature_elem_type>{1.0f, 0.0f, 0.0f, 0.0f});
+        points.push_back(
+            std::vector<feature_elem_type>{0.0f, 1.0f, 0.0f, 0.0f});
+        points.push_back(
+            std::vector<feature_elem_type>{0.0f, 0.0f, 1.0f, 0.0f});
+      }
+      if (comm.size() >= 2 && comm.rank() == 1) {
+        ids.push_back(3);
+        ids.push_back(4);
+        points.push_back(
+            std::vector<feature_elem_type>{0.0f, 0.0f, 0.0f, 1.0f});
+        points.push_back(
+            std::vector<feature_elem_type>{1.0f, 1.0f, 1.0f, 1.0f});
+      }
+      dnnd.add_points(ids.begin(), ids.end(), points.begin(), points.end());
 
-    comm.cout0() << "Optimize KNNG" << std::endl;
-    const double pruning_factor = -1;  // No pruning
-    dnnd.optimize(pruning_factor, knng);
-
-    std::filesystem::path dump_path = "neo_dnnd_knng_dump";
-    comm.cout0() << "\nDump to " << dump_path << std::endl;
-    std::error_code ec;
-    std::filesystem::create_directories(dump_path, ec);
-    comm.barrier();
-    const bool dump_distance = true;
-    dnnd.dump_graph(knng, dump_path / "knng", dump_distance);
-
+      dnnd.build(2);
+    }
     comm.barrier();
   }
   ::MPI_Finalize();

@@ -186,75 +186,49 @@ class neo_dnnd {
     const auto [ids, fvs] =
         saltatlas::dndetail::dataset_reader<id_type, fe_type>::read(
             dataset_path, dataset_format, partitioner, m_comm);
-    m_comm.barrier();
 
-    const std::size_t n_local_points = ids.size();
-    if (n_local_points == 0) {
-      // Current implementation requires at least one point to be assigned to
-      // each MPI rank.
-      std::cerr << m_comm.rank() << ": No points are assigned." << std::endl;
+    m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());
+    m_fv_send_batch_size =
+        FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
+
+    priv_ingest_points(ids, fvs);
+  }
+
+  /// \brief Add points to the internal point store.
+  /// All ranks must call this function although some ranks add no points.
+  /// \tparam id_iterator Iterator type for point IDs.
+  /// \tparam point_iterator Iterator type for points.
+  /// A single point type must support range-based for loop and its value type
+  /// must be fe_type.
+  /// \param ids_begin Iterator to the beginning of point IDs.
+  /// \param ids_end Iterator to the end of point IDs.
+  /// \param points_begin Iterator to the beginning of points.
+  /// \param points_end Iterator to the end of points.
+  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
+  /// on the same node directly.
+  template <typename id_iterator, typename point_iterator>
+  void add_points(id_iterator ids_begin, id_iterator ids_end,
+                  point_iterator points_begin, point_iterator points_end,
+                  const bool read_nlocal_pstores_directly = true) {
+    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
+    priv_cout0(m_verbose) << "Read node local pstores directly: "
+                          << m_read_nlocal_pstores_directly << std::endl;
+
+    const std::size_t dims =
+        (points_begin == points_end)
+            ? 0
+            : std::distance(points_begin->begin(), points_begin->end());
+    m_num_dims = m_comm.all_reduce_max(dims);
+    if (m_num_dims == 0) {
+      m_comm.cerr0() << "ERROR: point dimensionality is zero" << std::endl;
       m_comm.abort();
     }
+    m_fv_send_batch_size =
+        FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
 
-    id_type max_id = 0;
-    for (const auto& id : ids) {
-      max_id = std::max(max_id, id);
-    }
-    max_id = m_comm.all_reduce_max(max_id);
-    priv_cout0(m_verbose) << "Max ID: " << max_id << std::endl;
-    assert(max_id + 1 == m_comm.all_reduce_sum(n_local_points));
-    m_num_total_points = max_id + 1;
-
-    auto gen_pstore_name = [](const int rank) {
-      std::string name = k_shm_dir;
-      name += "/";
-      name += k_point_store_shm_name;
-      name += "-";
-      name += std::to_string(rank);
-      return name;
-    };
-
-    m_comm.cout0() << "\nIngesting to point store..." << std::endl;
-    m_num_dims = (n_local_points > 0) ? fvs.front().size() : 0;
-    {
-      const std::string path = gen_pstore_name(m_comm.rank());
-      metall::manager   manager(metall::create_only, path);
-      auto* pstore = manager.construct<point_store>(metall::unique_instance)(
-          manager.get_allocator());
-      pstore->init(n_local_points, m_num_dims);
-      for (std::size_t i = 0; i < n_local_points; ++i) {
-        std::memcpy((*pstore)[ids[i]], fvs[i].data(),
-                    fvs[i].size() * sizeof(fe_type));
-      }
-    }
-    m_comm.barrier();
-    m_comm.cout0() << "Finished constructing point store" << std::endl;
-
-    priv_cout0(m_verbose) << "Reopening point stores" << std::endl;
-    {
-      m_point_store_managers.clear();
-      m_point_stores.clear();
-      for (std::size_t r = 0; r < m_comm.node_size(); ++r) {
-        if (!m_read_nlocal_pstores_directly && r != m_comm.node_local_rank()) {
-          m_point_store_managers.emplace_back(nullptr);
-          m_point_stores.emplace_back(nullptr);
-          continue;
-        }
-
-        const int         rank = r + m_comm.node_rank() * m_comm.node_size();
-        const std::string path = gen_pstore_name(rank);
-
-        m_point_store_managers.emplace_back(
-            new metall::manager(metall::open_read_only, path));
-        assert(m_point_store_managers.back());
-        auto* pstore = m_point_store_managers.back()
-                           ->find<point_store>(metall::unique_instance)
-                           .first;
-        assert(pstore);
-        m_point_stores.emplace_back(pstore);
-      }
-    }
-    m_comm.barrier();
+    auto [ids, fvs] =
+        priv_partition_points(ids_begin, ids_end, points_begin, points_end);
+    priv_ingest_points(ids, fvs);
   }
 
   std::size_t num_dims() const { return m_num_dims; }
@@ -263,6 +237,7 @@ class neo_dnnd {
   /// All ranks must call this function.
   /// \warning inital_knng must be valid, e.g., already partitioned as same as
   /// the points, neighbors are sorted by distance, and no duplicate neighbors.
+  /// It is designed to take a kNNG constructed previously by this class.
   knng_type build(const std::size_t k, const double rho = 0.5,
                   const double      delta                = 0.001,
                   const bool        remove_duplicate_fvs = true,
@@ -270,8 +245,6 @@ class neo_dnnd {
                   const double      popular_fv_ratio     = 0.0,
                   const knng_type&  initial_knng         = knng_type()) {
     {
-      m_fv_send_batch_size =
-          FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
       m_fvs_disp.resize(m_fv_send_batch_size);
       m_fvs_block_lengths.resize(m_fv_send_batch_size, 1);
       priv_commit_mpi_types();
@@ -443,7 +416,6 @@ class neo_dnnd {
         base_path.string() + "-" + std::to_string(m_comm.rank()) + ".txt";
 
     std::ofstream ofs(knng_out_path);
-
     if (!ofs.is_open()) {
       std::cerr << "Failed to create kNNG file" << std::endl;
       return;
@@ -464,6 +436,7 @@ class neo_dnnd {
       ofs << "\n";
     }
     ofs.close();
+    m_comm.barrier();
   }
 
   void print_profile([[maybe_unused]] const bool final) const {
@@ -655,6 +628,167 @@ class neo_dnnd {
     if (m_feature_type != MPI_DATATYPE_NULL) {
       DNND2_CHECK_MPI(::MPI_Type_free(&m_feature_type));
       m_feature_type = MPI_DATATYPE_NULL;
+    }
+  }
+
+  static std::string priv_get_pstore_name(const int rank) {
+    std::string name = k_shm_dir;
+    name += "/";
+    name += k_point_store_shm_name;
+    name += "-";
+    name += std::to_string(rank);
+    return name;
+  }
+
+  template <typename id_iterator, typename point_iterator>
+  std::pair<std::vector<id_type>, std::vector<std::vector<fe_type>>>
+  priv_partition_points(id_iterator ids_begin, id_iterator ids_end,
+                        point_iterator points_begin,
+                        point_iterator points_end) {
+    std::vector<std::size_t> counts(m_comm.size(), 0);
+    for (auto id_itr = ids_begin; id_itr != ids_end; ++id_itr) {
+      const auto owner = priv_owner(*id_itr);
+      ++counts[owner];
+    }
+    const auto n_local_points =
+        m_comm.all_reduce(counts, MPI_SUM).at(m_comm.rank());
+
+    std::vector<id_type>              ids;
+    std::vector<std::vector<fe_type>> fvs;
+    ids.reserve(n_local_points);
+    fvs.resize(n_local_points);
+
+    auto iitr = ids_begin;
+    auto pitr = points_begin;
+    while (true) {
+      const bool terminate = (iitr == ids_end);
+      if (m_comm.all_reduce_sum<int>(terminate ? 1 : 0) == m_comm.size()) {
+        break;
+      }
+
+      std::vector<std::vector<id_type>> send_ids(m_comm.size());
+      std::size_t                       n_sends = 0;
+      for (; n_sends < m_fv_send_batch_size && iitr != ids_end;
+           ++iitr, ++n_sends) {
+        const auto id = *iitr;
+        send_ids[priv_owner(id)].emplace_back(id);
+      }
+
+      // Prepare send FVs buffer
+      std::vector<std::vector<fe_type>> send_fvs(m_comm.size());
+      for (int r = 0; r < m_comm.size(); ++r) {
+        send_fvs[r].reserve(send_ids[r].size() * num_dims());
+      }
+
+      // Fill send FVs buffer
+      for (std::size_t i = 0; i < n_sends; ++i, ++pitr) {
+        const auto owner = priv_owner(ids_begin[i]);
+        if (pitr == points_end) {
+          m_comm.cerr0() << "Error: less number of points than IDs."
+                         << std::endl;
+          m_comm.abort();
+        }
+        const auto& point = *pitr;
+        for (const auto& v : point) {
+          send_fvs[owner].push_back(v);
+        }
+      }
+
+      // Send Ids and Fvs
+      mpi::pair_wise_all_to_all(
+          m_comm.size(), m_comm.rank(), [&](const int pair_rank) {
+            std::vector<id_type> recv_ids;
+            m_comm.sendrecv_arb_size(pair_rank, send_ids[pair_rank], recv_ids);
+            ids.insert(ids.end(), recv_ids.begin(), recv_ids.end());
+            std::vector<fe_type> recv_fvs;
+            m_comm.sendrecv_arb_size(pair_rank, send_fvs[pair_rank], recv_fvs);
+            for (std::size_t i = 0; i < recv_ids.size(); ++i) {
+              std::vector<fe_type> fv(num_dims());
+              std::memcpy(fv.data(), recv_fvs.data() + i * num_dims(),
+                          num_dims() * sizeof(fe_type));
+              fvs.emplace_back(std::move(fv));
+            }
+          });
+    }
+    m_comm.barrier();
+
+    return {ids, fvs};
+  }
+
+  void priv_ingest_points(const std::vector<id_type>&              ids,
+                          const std::vector<std::vector<fe_type>>& fvs) {
+    const std::size_t n_local_points = ids.size();
+    if (n_local_points == 0) {
+      // Current implementation requires at least one point to be assigned to
+      // each MPI rank.
+      std::cerr << m_comm.rank() << ": No points are assigned." << std::endl;
+      m_comm.abort();
+    }
+
+    id_type max_id = 0;
+    for (const auto& id : ids) {
+      max_id = std::max(max_id, id);
+    }
+    max_id = m_comm.all_reduce_max(max_id);
+    priv_cout0(m_verbose) << "Max ID: " << max_id << std::endl;
+    assert(max_id + 1 == m_comm.all_reduce_sum(n_local_points));
+    m_num_total_points = max_id + 1;
+
+    priv_crete_pstore(ids, fvs);
+    m_comm.barrier();
+
+    priv_open_pstores();
+    m_comm.barrier();
+  }
+
+  void priv_crete_pstore(const std::vector<id_type>&              ids,
+                         const std::vector<std::vector<fe_type>>& fvs) {
+    m_comm.cout0() << "\nIngesting to point store..." << std::endl;
+
+    const std::string path = priv_get_pstore_name(m_comm.rank());
+    metall::manager   manager(metall::create_only, path);
+    auto* pstore = manager.construct<point_store>(metall::unique_instance)(
+        manager.get_allocator());
+    const auto dims = (ids.size() > 0) ? fvs.front().size() : 0;
+    pstore->init(ids.size(), m_num_dims);
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+      if (fvs[i].size() != dims) {
+        m_comm.cerr() << "Error: inconsistent number of dimensions."
+                      << " Id: " << ids[i] << ", expected: " << dims
+                      << ", actual: " << fvs[i].size() << std::endl;
+        m_comm.abort();
+      }
+      std::memcpy((*pstore)[ids[i]], fvs[i].data(),
+                  fvs[i].size() * sizeof(fe_type));
+    }
+    m_comm.barrier();
+    m_comm.cout0() << "Finished ingesting points into point store" << std::endl;
+  }
+
+  void priv_open_pstores() {
+    priv_cout0(m_verbose) << "Opening point stores with read-only mode"
+                          << std::endl;
+
+    m_point_store_managers.clear();
+    m_point_stores.clear();
+    for (std::size_t r = 0; r < m_comm.node_size(); ++r) {
+      if (!m_read_nlocal_pstores_directly && r != m_comm.node_local_rank()) {
+        m_point_store_managers.emplace_back(nullptr);
+        m_point_stores.emplace_back(nullptr);
+        continue;
+      }
+
+      const int         rank = r + m_comm.node_rank() * m_comm.node_size();
+      const std::string path = priv_get_pstore_name(rank);
+
+      m_point_store_managers.emplace_back(
+          new metall::manager(metall::open_read_only, path));
+      assert(m_point_store_managers.back());
+      auto* pstore = m_point_store_managers.back()
+                         ->find<point_store>(metall::unique_instance)
+                         .first;
+      assert(pstore);
+      m_point_stores.emplace_back(pstore);
     }
   }
 
@@ -1518,21 +1652,25 @@ class neo_dnnd {
     assert(num_recved == total_recv_count);
   }
 
+  // Variables initialized in the constructor
   distance_function                                    m_distance_func;
   time_recorder                                        m_default_time_recorder;
   std::optional<std::reference_wrapper<time_recorder>> m_time_recorder;
   mpi::communicator&                                   m_comm;
   std::mt19937_64 m_rng;  // Must be initialized after m_comm as it uses rank
   bool            m_verbose{false};
-  bool            m_remove_duplicate_fvs{false};
-  knn_heap_adj_list_t  m_graph{};
+
+  bool                 m_read_nlocal_pstores_directly{false};
+  bool                 m_remove_duplicate_fvs{false};
   std::size_t          m_k{0};
   double               m_rho{1.0};
   double               m_delta{0.001};
   std::size_t          m_num_total_points{0};
   dndetail::counter_db m_counter_db;
+
+  knn_heap_adj_list_t m_graph{};
   // For sending feature vectors
-  int                         m_fv_send_batch_size{0};
+  std::size_t                 m_fv_send_batch_size{0};
   ::MPI_Datatype              m_nb_dist_type{MPI_DATATYPE_NULL};
   ::MPI_Datatype              m_id_pair_type{MPI_DATATYPE_NULL};
   ::MPI_Datatype              m_feature_type{MPI_DATATYPE_NULL};
@@ -1545,10 +1683,9 @@ class neo_dnnd {
   // Counts how many times each feature vector was received.
   bstuo::unordered_flat_map<id_type, std::size_t> m_fv_count;
 #endif
-  int                             m_super_step_no{0};
+  std::size_t                     m_super_step_no{0};
   std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
   std::size_t                     m_min_cache_id{0};
-  bool                            m_read_nlocal_pstores_directly{false};
   std::vector<const point_store*> m_point_stores;
   std::vector<metall::manager*>   m_point_store_managers;
   std::size_t                     m_num_dims{0};
