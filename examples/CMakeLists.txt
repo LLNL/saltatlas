@@ -79,6 +79,7 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_advance_query)
 
     add_saltatlas_neo_dnnd_example(neo_dnnd_example)
+    add_saltatlas_neo_dnnd_example(neo_dnnd_initial_knng_example)
 
     add_saltatlas_neo_dnnd_example_feature_type(neo_dnnd_bench float)
     add_saltatlas_neo_dnnd_example_feature_type(neo_dnnd_bench uint8_t)

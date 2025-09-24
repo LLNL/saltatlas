@@ -43,8 +43,8 @@
 namespace saltatlas {
 
 namespace {
-namespace bst = boost;
-namespace bstc = bst::container;
+namespace bst   = boost;
+namespace bstc  = bst::container;
 namespace bstuo = bst::unordered;
 }  // namespace
 
@@ -57,8 +57,8 @@ inline int partition(const id_type id, const int comm_size) {
 template <typename _id_type, typename _fe_type, typename _distance_type>
 class neo_dnnd {
  public:
-  using id_type = _id_type;
-  using fe_type = _fe_type;
+  using id_type       = _id_type;
+  using fe_type       = _fe_type;
   using distance_type = _distance_type;
   using point_store =
       saltatlas::point_store<id_type, fe_type,
@@ -90,8 +90,8 @@ class neo_dnnd {
                  const distance_type dist)
         : first(first), second(second), distance(dist) {}
 
-    id_type first;
-    id_type second;
+    id_type       first;
+    id_type       second;
     distance_type distance;
   };
 
@@ -119,10 +119,10 @@ class neo_dnnd {
   // For macOS
 #ifdef __APPLE__
   static constexpr std::size_t k_def_cache_capacity = 1 << 10;
-  static constexpr const char* k_shm_dir = "/tmp/";
+  static constexpr const char* k_shm_dir            = "/tmp/";
 #else
-  static constexpr std::size_t k_def_cache_capacity = 1 << 18;
-  static constexpr const char* const k_shm_dir = "/dev/shm/";
+  static constexpr std::size_t       k_def_cache_capacity = 1 << 18;
+  static constexpr const char* const k_shm_dir            = "/dev/shm/";
 #endif
   static constexpr const char* k_point_store_shm_name = "pstore";
 
@@ -132,7 +132,7 @@ class neo_dnnd {
       bstuo::unordered_flat_map<id_type, std::vector<neighbor_type>>;
 
   neo_dnnd(const distance_function& distance_func, mpi::communicator& comm,
-           const bool verbose = false,
+           const bool         verbose  = false,
            const unsigned int rnd_seed = std::random_device{}(),
            std::optional<std::reference_wrapper<time_recorder>> recorder =
                std::nullopt)
@@ -152,6 +152,8 @@ class neo_dnnd {
         mpi::get_pair_wise_all_to_all_pattern(m_comm.size(), m_comm.rank());
     m_all_to_all_node_pairs = mpi::get_pair_wise_all_to_all_pattern(
         m_comm.num_nodes(), m_comm.node_rank());
+
+    m_comm.barrier();
   }
 
   ~neo_dnnd() noexcept {
@@ -172,7 +174,7 @@ class neo_dnnd {
   /// \param read_nlocal_pstores_directly If true, each rank reads point stores
   /// on the same node directly.
   void load_points(const std::filesystem::path& dataset_path,
-                   const std::string_view& dataset_format,
+                   const std::string_view&      dataset_format,
                    const bool read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
@@ -216,7 +218,7 @@ class neo_dnnd {
     m_num_dims = (n_local_points > 0) ? fvs.front().size() : 0;
     {
       const std::string path = gen_pstore_name(m_comm.rank());
-      metall::manager manager(metall::create_only, path);
+      metall::manager   manager(metall::create_only, path);
       auto* pstore = manager.construct<point_store>(metall::unique_instance)(
           manager.get_allocator());
       pstore->init(n_local_points, m_num_dims);
@@ -239,7 +241,7 @@ class neo_dnnd {
           continue;
         }
 
-        const int rank = r + m_comm.node_rank() * m_comm.node_size();
+        const int         rank = r + m_comm.node_rank() * m_comm.node_size();
         const std::string path = gen_pstore_name(rank);
 
         m_point_store_managers.emplace_back(
@@ -257,11 +259,16 @@ class neo_dnnd {
 
   std::size_t num_dims() const { return m_num_dims; }
 
-  knng_type construct(const std::size_t k, const double rho = 0.5,
-                      const double delta = 0.001,
-                      const bool remove_duplicate_fvs = true,
-                      const std::size_t batch_size = 1 << 20,
-                      const double popular_fv_ratio = 0.0) {
+  /// \brief Build kNNG using NN-Descent.
+  /// All ranks must call this function.
+  /// \warning inital_knng must be valid, e.g., already partitioned as same as
+  /// the points, neighbors are sorted by distance, and no duplicate neighbors.
+  knng_type build(const std::size_t k, const double rho = 0.5,
+                  const double      delta                = 0.001,
+                  const bool        remove_duplicate_fvs = true,
+                  const std::size_t batch_size           = 1 << 20,
+                  const double      popular_fv_ratio     = 0.0,
+                  const knng_type&  initial_knng         = knng_type()) {
     {
       m_fv_send_batch_size =
           FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
@@ -277,9 +284,9 @@ class neo_dnnd {
       priv_show_dram_usage();
     }
 
-    m_k = k;
-    m_rho = rho;
-    m_delta = delta;
+    m_k                    = k;
+    m_rho                  = rho;
+    m_delta                = delta;
     m_remove_duplicate_fvs = remove_duplicate_fvs;
 
     assert(m_num_total_points > 0);
@@ -294,7 +301,7 @@ class neo_dnnd {
     priv_cout0(m_verbose) << std::endl;
     priv_cout0(true) << "Initialize graph" << std::endl;
     m_time_recorder->get().start("Init graph");
-    priv_init_graph();
+    priv_init_graph(initial_knng);
     m_time_recorder->get().stop();
 
     priv_cout0(m_verbose) << std::endl;
@@ -339,8 +346,8 @@ class neo_dnnd {
     knng.reserve(m_graph.size());
     for (auto& elem : m_graph) {
       const auto sid = elem.first;
-      auto& nn = elem.second;
-      knng[sid] = nn.extract_neighbors();
+      auto&      nn  = elem.second;
+      knng[sid]      = nn.extract_neighbors();
     }
     m_comm.barrier();
     m_time_recorder->get().stop_and_report(priv_cout0(m_verbose));
@@ -354,11 +361,11 @@ class neo_dnnd {
     m_comm.cout0() << "Start optimization" << std::endl;
     priv_cout0(m_verbose) << "m: " << m << std::endl;
 
-    matrix2d<id_type> r_nids(m_comm.size());
+    matrix2d<id_type>                       r_nids(m_comm.size());
     std::vector<std::vector<distance_type>> r_dits(m_comm.size());
 
     for (const auto& item : knng) {
-      const auto sid = item.first;
+      const auto  sid       = item.first;
       const auto& neighbors = item.second;
       for (const auto& neighbor : neighbors) {
         const auto nid = neighbor.id;
@@ -578,10 +585,10 @@ class neo_dnnd {
   }
 
   inline void priv_show_dram_usage() const {
-    const ssize_t total_ram = dndetail::get_total_ram_size();
-    const ssize_t used_ram = dndetail::get_used_ram_size();
-    const ssize_t free_ram = dndetail::get_free_ram_size();
-    const ssize_t page_cache = dndetail::get_page_cache_size();
+    const ssize_t total_ram     = dndetail::get_total_ram_size();
+    const ssize_t used_ram      = dndetail::get_used_ram_size();
+    const ssize_t free_ram      = dndetail::get_free_ram_size();
+    const ssize_t page_cache    = dndetail::get_page_cache_size();
     const ssize_t available_ram = dndetail::get_available_ram_size();
 
     auto show_procedure = [&](const ssize_t val, const std::string& name) {
@@ -589,8 +596,8 @@ class neo_dnnd {
       // show min, max, mean, total
       const auto min_val = m_comm.all_node_reduce_min(val_gb);
       const auto max_val = m_comm.all_node_reduce_max(val_gb);
-      const auto total = m_comm.all_node_reduce_sum(val_gb);
-      const auto mean = total / m_comm.num_nodes();
+      const auto total   = m_comm.all_node_reduce_sum(val_gb);
+      const auto mean    = total / m_comm.num_nodes();
       m_comm.cout0() << name << ":\t";
       m_comm.cout0() << std::setprecision(3) << min_val << "\t" << max_val
                      << "\t" << mean << "\t" << total << std::endl;
@@ -607,11 +614,11 @@ class neo_dnnd {
   void priv_commit_mpi_types() {
     priv_free_mpi_types();
     {
-      int blocklengths[3] = {1, 1, 1};
-      MPI_Datatype types[3] = {mpi::data_type::get<id_type>(),
-                               mpi::data_type::get<id_type>(),
-                               mpi::data_type::get<distance_type>()};
-      MPI_Aint offsets[3];
+      int          blocklengths[3] = {1, 1, 1};
+      MPI_Datatype types[3]        = {mpi::data_type::get<id_type>(),
+                                      mpi::data_type::get<id_type>(),
+                                      mpi::data_type::get<distance_type>()};
+      MPI_Aint     offsets[3];
       offsets[0] = offsetof(nb_dist_type, first);
       offsets[1] = offsetof(nb_dist_type, second);
       offsets[2] = offsetof(nb_dist_type, distance);
@@ -651,7 +658,10 @@ class neo_dnnd {
     }
   }
 
-  void priv_init_graph() {
+  /// \brief Initialize the graph.
+  /// \param init_knng Initial kNNG. If empty or not having enough number of
+  /// neighbors, random edges are used.
+  void priv_init_graph(const knng_type& init_knng) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     // init m_graph space
@@ -674,13 +684,27 @@ class neo_dnnd {
     const auto max_point_id = m_comm.all_reduce_max(local_max_id);
     priv_cout0(m_verbose) << "Max point ID: " << max_point_id << std::endl;
 
+    std::size_t n_init_edges = 0;
     for (auto id_itr = point_store.ids_begin(); id_itr != point_store.ids_end();
          ++id_itr) {
       const auto sid = *id_itr;
       assert(priv_owner(sid) == m_comm.rank());
 
       bstc::flat_set<id_type> used;
-      for (std::size_t k = 0; k < m_k; ++k) {
+
+      // Add edges from the provided initial kNNG
+      if (init_knng.count(sid) > 0) {
+        const auto& neighbors = init_knng.at(sid);
+        for (std::size_t k = 0; k < m_k && k < neighbors.size(); ++k) {
+          const auto nid = neighbors[k].id;
+          init_neighbors_table[priv_owner(nid)].emplace_back(sid, nid);
+          ++n_init_edges;
+          used.insert(neighbors[k].id);
+        }
+      }
+
+      // Add random edges to reach k edges
+      while (used.size() < m_k) {
         id_type nid = -1;
         do {
           nid = std::uniform_int_distribution<id_type>(0, max_point_id)(m_rng);
@@ -689,12 +713,14 @@ class neo_dnnd {
         used.insert(nid);
       }
     }
+    priv_cout0(m_verbose) << "#of initial edges from the provided kNNG: "
+                          << m_comm.all_reduce_sum(n_init_edges) << std::endl;
 
     std::vector<id_type> recv_buf;
     std::vector<fe_type> feature_recv_buf;
     for (std::size_t ri = 0; ri < m_all_to_all_pairs.size(); ++ri) {
-      const auto pair_rank = m_all_to_all_pairs[ri];
-      auto& init_neighbors = init_neighbors_table[pair_rank];
+      const auto pair_rank      = m_all_to_all_pairs[ri];
+      auto&      init_neighbors = init_neighbors_table[pair_rank];
 
       // Send feature vector requests to the pair rank
       std::vector<id_type> send_buf;
@@ -748,15 +774,15 @@ class neo_dnnd {
     std::size_t num_news = 0;
     for (auto id_itr = point_store.ids_begin(); id_itr != point_store.ids_end();
          ++id_itr) {
-      const auto sid = *id_itr;
-      auto& old_nbs = old_ng[sid];
-      auto& new_nbs = new_ng[sid];
+      const auto sid     = *id_itr;
+      auto&      old_nbs = old_ng[sid];
+      auto&      new_nbs = new_ng[sid];
       old_nbs.clear();
       new_nbs.clear();
 
       assert(m_graph.count(sid) > 0);
       for (const auto& n : m_graph.at(sid)) {
-        const auto nid = n.first;
+        const auto  nid  = n.first;
         const auto& flag = n.second;
         if (flag) {
           new_nbs.push_back(nid);  // sample news later
@@ -800,7 +826,7 @@ class neo_dnnd {
     matrix2d<id_pair_type> r_ng(m_comm.size());
     for (auto id_itr = point_store.ids_begin(); id_itr != point_store.ids_end();
          ++id_itr) {
-      const auto sid = *id_itr;
+      const auto  sid     = *id_itr;
       const auto& nb_list = ng.at(sid);
       for (const auto& nid : nb_list) {
         r_ng[priv_owner(nid)].emplace_back(nid, sid);
@@ -866,7 +892,7 @@ class neo_dnnd {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
     matrix2d<id_pair_type> neighbor_intros(m_comm.size());
 
-    std::size_t batch_no = 0;
+    std::size_t batch_no    = 0;
     std::size_t num_updates = 0;
     // flag to check if all checks have been performed by this rank
     bool finished_all_local = false;
@@ -924,7 +950,7 @@ class neo_dnnd {
                           << m_comm.all_reduce_sum(cnt_checks) << std::endl;
 
     // old-new neighbor checks
-    cnt_checks = 0;
+    cnt_checks         = 0;
     finished_all_local = false;
     while (true) {
       if (!finished_all_local) {
@@ -998,8 +1024,8 @@ class neo_dnnd {
 
   void priv_exchange_neighbor_intros(
       const matrix2d<id_pair_type>& nb_intros,
-      matrix2d<id_pair_type>& recv_nb_chks,
-      matrix2d<id_pair_type>& recv_cached_nb_chks) {
+      matrix2d<id_pair_type>&       recv_nb_chks,
+      matrix2d<id_pair_type>&       recv_cached_nb_chks) {
     std::size_t num_cached_checks = 0;
     for (std::size_t ri = 0; ri < m_all_to_all_pairs.size(); ++ri) {
       const auto pair_rank = m_all_to_all_pairs[ri];
@@ -1033,17 +1059,17 @@ class neo_dnnd {
       matrix2d<id_pair_type>&& neighbor_checks,
       matrix2d<id_pair_type>&& cached_neighbor_checks) {
     // Construct the following containers here to reuse memory over iterations
-    std::vector<fe_type> recv_features;
-    std::vector<std::size_t> fv_indices_recv;
-    std::vector<id_pair_type> received_checks;
+    std::vector<fe_type>       recv_features;
+    std::vector<std::size_t>   fv_indices_recv;
+    std::vector<id_pair_type>  received_checks;
     std::vector<distance_type> distances;
     std::vector<distance_type> recv_distances;
 
     std::size_t num_updated = 0;
 
     for (std::size_t ri = 0; ri < m_all_to_all_pairs.size(); ++ri) {
-      const auto pair_rank = m_all_to_all_pairs[ri];
-      auto assigned_checks = std::move(neighbor_checks[pair_rank]);
+      const auto pair_rank       = m_all_to_all_pairs[ri];
+      auto       assigned_checks = std::move(neighbor_checks[pair_rank]);
 
       m_time_recorder->get().start("Replicated neighbor check");
       num_updated += priv_check_cached_neighbors(
@@ -1067,8 +1093,8 @@ class neo_dnnd {
           assert(priv_owner(src) == m_comm.rank());
           assert(priv_owner(nb) == pair_rank);
           const auto* src_fv = my_pstore[src];
-          const auto* nb_fv = pair_pstore[nb];
-          const auto dist = m_distance_func(
+          const auto* nb_fv  = pair_pstore[nb];
+          const auto  dist   = m_distance_func(
               std::span(const_cast<fe_type*>(src_fv), num_dims()),
               std::span(const_cast<fe_type*>(nb_fv), num_dims()));
           distances[c] = dist;
@@ -1083,7 +1109,7 @@ class neo_dnnd {
         m_comm.isend(distances, pair_rank, send_distances_req);
 
         std::vector<id_pair_type> recv_checks;
-        MPI_Request recv_checks_req;
+        MPI_Request               recv_checks_req;
         m_comm.irecv(pair_rank, recv_checks, m_id_pair_type, recv_checks_req);
 
         MPI_Request recv_distances_req;
@@ -1177,7 +1203,7 @@ class neo_dnnd {
 
     // Find a set of feature vectors to send and the positions of the feature
     // vectors in the packed send buffer.
-    std::size_t num_to_sends_total = 0;
+    std::size_t              num_to_sends_total = 0;
     std::vector<std::size_t> fvs_indices_send;
     if (m_remove_duplicate_fvs) {
       bstuo::unordered_flat_map<id_type, std::size_t> unique_fvs;
@@ -1185,7 +1211,7 @@ class neo_dnnd {
         const auto& src = check.first;
         if (unique_fvs.count(src) == 0) {
           // The position of the FV is at the end of the packed FV buffer
-          const auto idx = unique_fvs.size();
+          const auto idx  = unique_fvs.size();
           unique_fvs[src] = idx;
         }
         fvs_indices_send.push_back(unique_fvs.at(src));
@@ -1261,9 +1287,9 @@ class neo_dnnd {
   }
 
   void priv_cal_distances(const std::vector<id_pair_type>& checks,
-                          const std::vector<fe_type>& features,
-                          const std::vector<std::size_t>& indices,
-                          std::vector<distance_type>& out_distances) {
+                          const std::vector<fe_type>&      features,
+                          const std::vector<std::size_t>&  indices,
+                          std::vector<distance_type>&      out_distances) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     out_distances.resize(checks.size());
@@ -1271,22 +1297,22 @@ class neo_dnnd {
     for (std::size_t i = 0; i < checks.size(); ++i) {
       const auto pid = checks[i].second;
       assert(priv_owner(pid) == m_comm.rank());
-      const auto fv_idx = (indices.size() > 0) ? indices[i] : i;
+      const auto fv_idx      = (indices.size() > 0) ? indices[i] : i;
       const auto sent_fv_pos = fv_idx * num_dims();
-      const auto dist = m_distance_func(
+      const auto dist        = m_distance_func(
           std::span(point_store[pid], num_dims()),
           std::span(const_cast<fe_type*>(&features.at(sent_fv_pos)),
-                    num_dims()));
+                           num_dims()));
       out_distances[i] = dist;
     }
   }
 
-  std::size_t priv_update_knng(const std::vector<id_pair_type>& checks,
-                               const bool reverse,
+  std::size_t priv_update_knng(const std::vector<id_pair_type>&  checks,
+                               const bool                        reverse,
                                const std::vector<distance_type>& distances) {
     std::size_t num_updated = 0;
     OMP_DIRECTIVE(parallel reduction(+ : num_updated)) {
-      const auto tid = utility::omp::get_thread_num();
+      const auto tid         = utility::omp::get_thread_num();
       const auto num_threads = utility::omp::get_num_threads();
       for (std::size_t i = 0; i < checks.size(); ++i) {
         const auto sid = (reverse) ? checks[i].second : checks[i].first;
@@ -1331,9 +1357,9 @@ class neo_dnnd {
       }
     }
     {
-      const auto max_count = m_comm.all_reduce_max(popular_fvs.size());
+      const auto max_count    = m_comm.all_reduce_max(popular_fvs.size());
       const auto max_capacity = max_count * m_comm.num_nodes();
-      m_pop_fv_store = std::make_unique<pop_fv_cache_t>(
+      m_pop_fv_store          = std::make_unique<pop_fv_cache_t>(
           num_dims(), max_capacity, m_comm.node_size(),
           m_comm.node_local_rank(), std::to_string(m_comm.node_rank()), m_comm);
     }
@@ -1366,7 +1392,7 @@ class neo_dnnd {
     m_time_recorder->get().stop();
   }
 
-  std::size_t priv_check_cached_neighbors(const int pair_rank,
+  std::size_t priv_check_cached_neighbors(const int                   pair_rank,
                                           std::vector<id_pair_type>&& checks) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
@@ -1384,8 +1410,8 @@ class neo_dnnd {
       assert(priv_owner(sid) == m_comm.rank());
       const auto* sfv = point_store[sid];
       assert(sfv);
-      const auto nfv_bank_no = priv_node_local_rank(priv_owner(nid));
-      const auto* const nfv = m_pop_fv_store->get(nfv_bank_no, nid);
+      const auto        nfv_bank_no = priv_node_local_rank(priv_owner(nid));
+      const auto* const nfv         = m_pop_fv_store->get(nfv_bank_no, nid);
       assert(nfv);
       const auto dist =
           m_distance_func(std::span(const_cast<fe_type*>(sfv), num_dims()),
@@ -1402,11 +1428,11 @@ class neo_dnnd {
     m_comm.isend(distances, pair_rank, send_distances_req);
 
     std::vector<id_pair_type> recv_checks;
-    MPI_Request recv_checks_req;
+    MPI_Request               recv_checks_req;
     m_comm.irecv(pair_rank, recv_checks, m_id_pair_type, recv_checks_req);
 
     std::vector<distance_type> recv_distances;
-    MPI_Request recv_distances_req;
+    MPI_Request                recv_distances_req;
     m_comm.irecv(pair_rank, recv_distances, recv_distances_req);
 
     m_time_recorder->get().start("Update kNNG sender (cached FVs)");
@@ -1448,7 +1474,7 @@ class neo_dnnd {
         (std::max(ids_to_send.size(), total_recv_count) + batch_size - 1) /
         batch_size;
 
-    std::size_t num_sent = 0;
+    std::size_t num_sent   = 0;
     std::size_t num_recved = 0;
     for (int i = 0; i < num_batches; ++i) {
       const std::size_t num_to_send =
@@ -1465,7 +1491,7 @@ class neo_dnnd {
       // our side.
       for (std::size_t n = 0; n < num_to_send; ++n) {
         const auto idx = i * batch_size + n;
-        MPI_Aint base_address;
+        MPI_Aint   base_address;
         MPI_Get_address(point_store.data(), &base_address);
         MPI_Aint fv_address;
         MPI_Get_address(point_store[ids_to_send.at(idx)], &fv_address);
@@ -1492,39 +1518,39 @@ class neo_dnnd {
     assert(num_recved == total_recv_count);
   }
 
-  distance_function m_distance_func;
-  time_recorder m_default_time_recorder;
+  distance_function                                    m_distance_func;
+  time_recorder                                        m_default_time_recorder;
   std::optional<std::reference_wrapper<time_recorder>> m_time_recorder;
-  mpi::communicator& m_comm;
+  mpi::communicator&                                   m_comm;
   std::mt19937_64 m_rng;  // Must be initialized after m_comm as it uses rank
-  bool m_verbose{false};
-  bool m_remove_duplicate_fvs{false};
-  knn_heap_adj_list_t m_graph{};
-  std::size_t m_k{0};
-  double m_rho{1.0};
-  double m_delta{0.001};
-  std::size_t m_num_total_points{0};
+  bool            m_verbose{false};
+  bool            m_remove_duplicate_fvs{false};
+  knn_heap_adj_list_t  m_graph{};
+  std::size_t          m_k{0};
+  double               m_rho{1.0};
+  double               m_delta{0.001};
+  std::size_t          m_num_total_points{0};
   dndetail::counter_db m_counter_db;
   // For sending feature vectors
-  int m_fv_send_batch_size{0};
-  ::MPI_Datatype m_nb_dist_type{MPI_DATATYPE_NULL};
-  ::MPI_Datatype m_id_pair_type{MPI_DATATYPE_NULL};
-  ::MPI_Datatype m_feature_type{MPI_DATATYPE_NULL};
-  std::vector<::MPI_Aint> m_fvs_disp{};
-  std::vector<int> m_fvs_block_lengths{};
+  int                         m_fv_send_batch_size{0};
+  ::MPI_Datatype              m_nb_dist_type{MPI_DATATYPE_NULL};
+  ::MPI_Datatype              m_id_pair_type{MPI_DATATYPE_NULL};
+  ::MPI_Datatype              m_feature_type{MPI_DATATYPE_NULL};
+  std::vector<::MPI_Aint>     m_fvs_disp{};
+  std::vector<int>            m_fvs_block_lengths{};
   std::vector<::MPI_Datatype> m_fvs_types{};
-  std::vector<int> m_all_to_all_pairs{};
-  std::vector<int> m_all_to_all_node_pairs{};
+  std::vector<int>            m_all_to_all_pairs{};
+  std::vector<int>            m_all_to_all_node_pairs{};
 #ifdef PROFILE_FV
   // Counts how many times each feature vector was received.
   bstuo::unordered_flat_map<id_type, std::size_t> m_fv_count;
 #endif
-  int m_super_step_no{0};
+  int                             m_super_step_no{0};
   std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
-  std::size_t m_min_cache_id{0};
-  bool m_read_nlocal_pstores_directly{false};
+  std::size_t                     m_min_cache_id{0};
+  bool                            m_read_nlocal_pstores_directly{false};
   std::vector<const point_store*> m_point_stores;
-  std::vector<metall::manager*> m_point_store_managers;
-  std::size_t m_num_dims{0};
+  std::vector<metall::manager*>   m_point_store_managers;
+  std::size_t                     m_num_dims{0};
 };
 }  // namespace saltatlas

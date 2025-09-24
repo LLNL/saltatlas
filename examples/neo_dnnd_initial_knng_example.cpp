@@ -27,6 +27,7 @@ using feature_elem_type = float;
 using distance_type     = double;
 using neo_dnnd_t        = neo_dnnd<id_type, feature_elem_type, distance_type>;
 using point_type        = typename neo_dnnd_t::point_type;
+using knng_type         = typename neo_dnnd_t::knng_type;
 
 int main(int argc, char* argv[]) {
   int provided;
@@ -34,27 +35,28 @@ int main(int argc, char* argv[]) {
   {
     mpi::communicator comm;
 
-    auto l2_func = distance::distance_function<point_type, distance_type>("l2");
-    neo_dnnd_t dnnd(l2_func, comm);
+    knng_type initial_knng;
+    {
+      neo_dnnd_t dnnd(
+          distance::distance_function<point_type, distance_type>("l2"), comm);
+
+      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+      initial_knng = dnnd.build(2);
+    }
     comm.barrier();
 
-    dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+    {
+      neo_dnnd_t dnnd(
+          distance::distance_function<point_type, distance_type>("cosine"),
+          comm, true);
+      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+      auto knng = dnnd.build(4, 0.5, 0.001, 0.0, 1 << 25, 123, initial_knng);
 
-    const int k    = 4;
-    auto      knng = dnnd.build(k);
-
-    comm.cout0() << "Optimize KNNG" << std::endl;
-    const double pruning_factor = -1;  // No pruning
-    dnnd.optimize(pruning_factor, knng);
-
-    std::filesystem::path dump_path = "neo_dnnd_knng_dump";
-    comm.cout0() << "\nDump to " << dump_path << std::endl;
-    std::error_code ec;
-    std::filesystem::create_directories(dump_path, ec);
-    comm.barrier();
-    const bool dump_distance = true;
-    dnnd.dump_graph(knng, dump_path / "knng", dump_distance);
-
+      std::error_code ec;
+      std::filesystem::create_directories("second-knng", ec);
+      comm.barrier();
+      dnnd.dump_graph(knng, "second-knng/knng", true);
+    }
     comm.barrier();
   }
   ::MPI_Finalize();
