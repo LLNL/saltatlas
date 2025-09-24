@@ -60,7 +60,8 @@ To avoid copying and make it easier to write distance functions with more intere
 std::string, etc.) that don't necessarily have fixed sizes, we provide a wrapper that handles the casting of datatypes in
 distance functions, so a user can write a simpler function that takes two std::vector's. When used in this way, an
 std::vector gets added to hnswlib by performing a memcpy on the vector (copying a pointer, not the actual data). This
-data is already stored in our distributed data structure, so we end up with a single copy instead of two.
+data is already stored in our distributed data structure, so we end up with
+a single copy instead of two.
 
 In dknn_example.cpp, the first example uses this wrapper around a distance function working on std::vector's. The second
 example uses a built-in distance function and std::array's for data points, more like how hnswlib appears to be designed
@@ -69,32 +70,26 @@ for.
 While the second example should be faster, the first is easier to use and more easily supports variable length data
 (i.e. strings).
 
+# DNND and NEO-DNND
 
-## Running DNND (Distributed NNDescent) Example
+DNND is a distributed NN-Descent code.
+NEO-DNND is a communication-efficient version of DNND.
+DNND has more APIs and flexibility, targeting a wider range of use cases.
+For more details, please refer to the publications below.
 
-```shell
-cd build
-mpirun -n 2 ./examples/dnnd_simple_example
+Example codes are available in [./examples](./examples) directory.
+They are MPI programs. To run them, for example, use the following command:
+
+```bash
+mpirun -n 2 ./examples/dnnd_simple
+mpirun -n 2 ./examples/neo_dnnd_example
 ```
 
-## Running DNND Advanced API Examples
+# Publications
 
-### Build
+- [DNND](https://dl.acm.org/doi/abs/10.1145/3624062.3625132)
 
-The DNND advanced-API examples require [Metall](https://github.com/LLNL/metall) and [Boost C++ Libraries](https://www.boost.org/) in addition to saltatlas's basic components.
-Add `-DSALTATLAS_USE_METALL=ON` when running CMake.
-Those libraries are automatically downloaded and set up properly.
-
-HDF5 is not used by DNND.
-
-An example build step is:
-
-```shell
-git clone https://github.com/LLNL/saltatlas.git
-cd saltatlas
-mkdir build && cd build
-cmake ../ -DSALTATLAS_USE_METALL=ON -DCMAKE_BUILD_TYPE=RELEASE
-```
+- [NEO-DNND](https://ieeexplore.ieee.org/abstract/document/10820763)
 
 # License
 saltatlas is distributed under the MIT license.
