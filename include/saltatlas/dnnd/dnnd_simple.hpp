@@ -12,19 +12,18 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-
 #include <ygm/comm.hpp>
-#include <ygm/detail/collective.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/common/point_store.hpp"
-#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
+#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
 
 namespace saltatlas {
@@ -33,8 +32,8 @@ namespace saltatlas {
 /// \tparam Id Point ID type.
 /// \tparam Point Point type.
 /// \tparam Distance Distance type.
-template <typename Id       = uint64_t,
-          typename Point    = saltatlas::feature_vector<double>,
+template <typename Id = uint64_t,
+          typename Point = saltatlas::feature_vector<double>,
           typename Distance = double>
 class dnnd {
  private:
@@ -95,7 +94,7 @@ class dnnd {
   /// \param verbose If true, enable the verbose mode.
   dnnd(const distance::id& distance_func_id, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
-       const bool     verbose  = false)
+       const bool verbose = false)
       : m_distance_func(distance::distance_function<point_type, distance_type>(
             distance_func_id)),
         m_comm(comm),
@@ -111,7 +110,7 @@ class dnnd {
   /// \param verbose If true, enable the verbose mode.
   dnnd(const distance_function_type& distance_func, ygm::comm& comm,
        const uint64_t rnd_seed = std::random_device{}(),
-       const bool     verbose  = false)
+       const bool verbose = false)
       : m_distance_func(distance_func),
         m_comm(comm),
         m_rnd_seed(rnd_seed),
@@ -222,8 +221,8 @@ class dnnd {
     const auto parser_wrapper = [&line_parser](const std::string& line,
                                                id_type& id, point_type& point) {
       auto ret = line_parser(line);
-      id       = ret.first;
-      point    = ret.second;
+      id = ret.first;
+      point = ret.second;
       return true;
     };
 
@@ -239,13 +238,13 @@ class dnnd {
   /// \param delta Delta parameter in NN-Descent.
   void build(const int k, const double rho = 0.8, const double delta = 0.001,
              const std::size_t batch_size = 1 << 26) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+    typename nn_kernel_type::option option{.k = k,
+                                           .r = rho,
+                                           .delta = delta,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = batch_size,
-                                           .rnd_seed        = m_rnd_seed,
-                                           .verbose         = m_verbose};
+                                           .rnd_seed = m_rnd_seed,
+                                           .verbose = m_verbose};
 
     nn_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
                           m_distance_func, m_comm);
@@ -262,14 +261,14 @@ class dnnd {
   /// Each point keeps up to k * pruning_degree_multiplier nearest neighbors,
   /// where k is the number of neighbors each point in the index has.
   /// if this value is less than 0, there is no pruning.
-  void optimize(const bool   make_index_undirected     = true,
+  void optimize(const bool make_index_undirected = true,
                 const double pruning_degree_multiplier = 1.5) {
     const typename nn_index_optimizer_type::option opt{
-        .index_k                   = m_index_k,
-        .undirected                = make_index_undirected,
+        .index_k = m_index_k,
+        .undirected = make_index_undirected,
         .pruning_degree_multiplier = pruning_degree_multiplier,
-        .remove_long_paths         = false,
-        .verbose                   = m_verbose};
+        .remove_long_paths = false,
+        .verbose = m_verbose};
     nn_index_optimizer_type optimizer{
         opt,         m_pstore, priv_get_point_partitioner(), m_distance_func,
         m_knn_index, m_comm};
@@ -294,17 +293,17 @@ class dnnd {
   neighbor_store_type query(query_iterator queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    typename query_kernel_type::option option{.k          = k,
-                                              .epsilon    = epsilon,
-                                              .mu         = 0,
+    typename query_kernel_type::option option{.k = k,
+                                              .epsilon = epsilon,
+                                              .mu = 0,
                                               .batch_size = 1 << 26,
-                                              .rnd_seed   = m_rnd_seed,
-                                              .verbose    = m_verbose};
+                                              .rnd_seed = m_rnd_seed,
+                                              .verbose = m_verbose};
 
     query_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
                              m_distance_func, m_knn_index, m_comm);
 
-    query_store_type    queries(queries_begin, queries_end);
+    query_store_type queries(queries_begin, queries_end);
     neighbor_store_type query_result;
     kernel.query_batch(queries, query_result);
 
@@ -321,19 +320,21 @@ class dnnd {
 
     std::vector<std::vector<point_type>> neighbor_features_store;
     neighbor_features_store.reserve(query_result.size());
+    std::set<id_type> neighbor_ids;
     for (const auto& neighbors : query_result) {
-      std::vector<id_type> neighbor_ids;
-      neighbor_ids.reserve(neighbors.size());
       for (const auto& neighbor : neighbors) {
-        neighbor_ids.push_back(neighbor.id);
+        neighbor_ids.insert(neighbor.id);
       }
-      auto neighbor_features =
-          get_points(neighbor_ids.begin(), neighbor_ids.end());
+    }
 
+    auto neighbor_features =
+        get_points(neighbor_ids.begin(), neighbor_ids.end());
+
+    for (const auto& neighbors : query_result) {
       std::vector<point_type> neighbor_features_vec;
-      neighbor_features_vec.reserve(neighbor_ids.size());
-      for (const auto& id : neighbor_ids) {
-        neighbor_features_vec.push_back(neighbor_features.at(id));
+      neighbor_features_vec.reserve(neighbors.size());
+      for (const auto& neighbor : neighbors) {
+        neighbor_features_vec.push_back(neighbor_features.at(neighbor.id));
       }
       neighbor_features_store.push_back(std::move(neighbor_features_vec));
     }
@@ -349,12 +350,13 @@ class dnnd {
   /// source_id neighbor_id_1 neighbor_id_2 ...
   /// 0.0 distance_1 distance_2 ...
   /// ```
-  /// Each item is separated by a tab. The first line is the source id and
-  /// neighbor ids. The second line is the dummy value and distances to each
-  /// neighbor. The dummy value is just a placeholder so that each neighbor id
-  /// and distance pair is stored in the same column.
+  /// Each item is separated by a tab. The first line is the source id followed
+  /// by neighbor ids. The second line is the distances to each neighbor. The
+  /// first distance value is a dummy value (0.0), which is just a placeholder
+  /// so that a neighbor id and the corresponding distance value is stored in
+  /// the same column.
   void dump_graph(const std::filesystem::path& path,
-                  const bool                   dump_distance = false) const {
+                  const bool dump_distance = false) const {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
     m_knn_index.dump(file_name.str(), dump_distance);
@@ -431,9 +433,7 @@ class dnnd {
 
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
-  std::size_t num_points() const {
-    return ygm::sum(m_pstore.size(), m_comm);
-  }
+  std::size_t num_points() const { return ygm::sum(m_pstore.size(), m_comm); }
 
   /// \brief Get the number of neighbors of the given point.
   /// If the point is not stored locally, the function returns 0.
@@ -526,8 +526,7 @@ class dnnd {
 
       std::vector<point_type> neighbor_features;
       for (const auto& neighbor : neighbors) {
-        neighbor_features.push_back(
-            std::move(neighbor_features_table.at(neighbor.id)));
+        neighbor_features.push_back(neighbor_features_table.at(neighbor.id));
       }
 
       result[id] =
@@ -562,13 +561,13 @@ class dnnd {
     m_comm.async(dst, receiver, m_this, id, point);
   }
 
-  distance_function_type  m_distance_func;
-  ygm::comm&              m_comm;
-  uint64_t                m_rnd_seed;
-  point_store_type        m_pstore;
-  knn_index_type          m_knn_index{};
-  std::size_t             m_index_k{0};
-  bool                    m_verbose;
+  distance_function_type m_distance_func;
+  ygm::comm& m_comm;
+  uint64_t m_rnd_seed;
+  point_store_type m_pstore;
+  knn_index_type m_knn_index{};
+  std::size_t m_index_k{0};
+  bool m_verbose;
   ygm::ygm_ptr<self_type> m_this{this};
 };
 

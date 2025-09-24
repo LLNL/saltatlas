@@ -209,7 +209,7 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
                              ygm::comm &comm, const int root_rank = 0) {
   using nb_tbl_t = neighbors_tbl<id_t, dist_t>;
 
-  const std::size_t num_queries = ygm::sum(local_results.size(), comm);
+  const std::size_t      num_queries = ygm::sum(local_results.size(), comm);
   ygm::ygm_ptr<nb_tbl_t> ptr_root_results(&root_results);
   comm.cf_barrier();
 
@@ -224,6 +224,77 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
                                      local_results.end());
           },
           ptr_root_results, local_results);
+    }
+    comm.barrier();
+  }
+}
+
+/// \brief Gather a collection of queries on the specified rank.
+/// \tparam point_t Point type.
+/// \param local_queries Queries from the local rank.
+/// \param root_queries Location to gather queries on the root rank.
+/// \param comm YGM communicator.
+/// \param root_rank ID of root rank
+/// \return Returns gathered query points on the root rank.
+/// Results are sorted in ascending order of MPI ranks.
+/// The original order within a rank remains unchanged.
+template <typename point_t>
+inline void gather_queries(const std::vector<point_t> &local_queries,
+                           std::vector<point_t> &root_queries, ygm::comm &comm,
+                           const int root_rank = 0) {
+  using query_vec_t = std::vector<point_t>;
+
+  const std::size_t         num_queries = ygm::sum(local_queries.size(), comm);
+  ygm::ygm_ptr<query_vec_t> ptr_root_queries(&root_queries);
+  comm.cf_barrier();
+
+  for (int r = 0; r < comm.size(); ++r) {
+    if (r == comm.rank()) {
+      comm.async(
+          root_rank,
+          [](ygm::ygm_ptr<query_vec_t> ptr_root_queries,
+             const query_vec_t        &local_queries) {
+            ptr_root_queries->insert(ptr_root_queries->end(),
+                                     local_queries.begin(),
+                                     local_queries.end());
+          },
+          ptr_root_queries, local_queries);
+    }
+    comm.barrier();
+  }
+}
+
+/// \brief Gather a collection of neighbor features on the specified rank.
+/// \tparam point_t Point type.
+/// \param local_ngbr_features Queries from the local rank.
+/// \param root_ngbr_features Location to gather queries on the root rank.
+/// \param comm YGM communicator.
+/// \param root_rank ID of root rank
+/// \return Returns gathered neighbor features on the root rank.
+/// Results are sorted in ascending order of MPI ranks.
+/// The original order within a rank remains unchanged.
+template <typename point_t>
+inline void gather_neighbor_features(
+    const std::vector<std::vector<point_t>> &local_ngbr_features,
+    std::vector<std::vector<point_t>> &root_ngbr_features, ygm::comm &comm,
+    const int root_rank = 0) {
+  using ngbr_feats_t = std::vector<std::vector<point_t>>;
+
+  const std::size_t num_queries = ygm::sum(local_ngbr_features.size(), comm);
+  ygm::ygm_ptr<ngbr_feats_t> ptr_root_ngbr_features(&root_ngbr_features);
+  comm.cf_barrier();
+
+  for (int r = 0; r < comm.size(); ++r) {
+    if (r == comm.rank()) {
+      comm.async(
+          root_rank,
+          [](ygm::ygm_ptr<ngbr_feats_t> ptr_root_ngbr_features,
+             const ngbr_feats_t        &local_ngbr_features) {
+            ptr_root_ngbr_features->insert(ptr_root_ngbr_features->end(),
+                                           local_ngbr_features.begin(),
+                                           local_ngbr_features.end());
+          },
+          ptr_root_ngbr_features, local_ngbr_features);
     }
     comm.barrier();
   }
@@ -264,6 +335,47 @@ inline void dump_neighbors(const neighbors_tbl<id_t, dist_t> &table,
   }
 }
 
+/// \brief Dumps neighbors and their features to a file.
+/// Each line contains a query point followed by pairs of neighbor features and
+/// distances.
+/// \tparam id_t ID type.
+/// \tparam dist_t Distance type.
+/// \tparam point_t Point type.
+/// \param queries Search query points.
+/// \param query_results Neighbor indices and distances.
+/// \param ngbr_features Features for neighbors returned from search.
+/// \param dump_file_path Path of output file.
+template <typename id_t, typename dist_t, typename point_t>
+void dump_neighbors_with_features(
+    const std::vector<point_t>              &queries,
+    const neighbors_tbl<id_t, dist_t>       &query_results,
+    const std::vector<std::vector<point_t>> &ngbr_features,
+    const std::filesystem::path             &dump_file_path) {
+  YGM_ASSERT_RELEASE(queries.size() == query_results.size());
+  YGM_ASSERT_RELEASE(queries.size() == ngbr_features.size());
+
+  std::ofstream ofs(dump_file_path);
+  if (!ofs.is_open()) {
+    std::cerr << "Failed to create search table file(s)" << std::endl;
+    return;
+  }
+
+  for (size_t i = 0; i < queries.size(); ++i) {
+    ofs << queries[i];
+
+    std::cout << query_results[i].size() << "\t" << ngbr_features[i].size()
+              << "\t" << ngbr_features.size() << std::endl;
+    YGM_ASSERT_RELEASE(query_results[i].size() == ngbr_features[i].size());
+    for (size_t j = 0; j < query_results[j].size(); ++j) {
+      // TODO: this will work for strings, but not vectors or other unprintable
+      // data
+      ofs << "\t" << ngbr_features[i][j] << "\t"
+          << query_results[i][j].distance;
+    }
+    ofs << "\n";
+  }
+}
+
 /// \brief Gather and dump neighbors to a file in the root rank.
 template <typename id_t, typename dist_t>
 inline void gather_and_dump_neighbors(
@@ -275,6 +387,32 @@ inline void gather_and_dump_neighbors(
 
   if (comm.rank() == root) {
     saltatlas::utility::dump_neighbors(root_table, dump_file_path);
+  }
+  comm.cf_barrier();
+}
+
+/// \brief Gather and dump neighbors with their features to a file in the root
+/// rank.
+template <typename point_t, typename id_t, typename dist_t>
+inline void gather_and_dump_neighbors_with_features(
+    const std::vector<point_t>              &queries,
+    const neighbors_tbl<id_t, dist_t>       &table,
+    const std::vector<std::vector<point_t>> &ngbr_vecs,
+    const std::filesystem::path &dump_file_path, ygm::comm &comm,
+    const int root = 0) {
+  neighbors_tbl<id_t, dist_t> root_table;
+  saltatlas::utility::gather_neighbors(table, root_table, comm, root);
+
+  std::vector<point_t> root_queries;
+  saltatlas::utility::gather_queries(queries, root_queries, comm, root);
+
+  std::vector<std::vector<point_t>> root_ngbr_vecs;
+  saltatlas::utility::gather_neighbor_features(ngbr_vecs, root_ngbr_vecs, comm,
+                                               root);
+
+  if (comm.rank() == root) {
+    saltatlas::utility::dump_neighbors_with_features(
+        root_queries, root_table, root_ngbr_vecs, dump_file_path);
   }
   comm.cf_barrier();
 }

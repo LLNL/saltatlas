@@ -292,7 +292,7 @@ class dknn_batch_query_kernel {
         return;  // Too far neighbor.
       }
 
-      if (heap.push_unique(nid, d)) {
+      if (heap.try_add(nid, d)) {
         max_distance =
             heap.size() < heap.k()
                 ? std::numeric_limits<distance_type>::max()
