@@ -60,7 +60,7 @@ To avoid copying and make it easier to write distance functions with more intere
 std::string, etc.) that don't necessarily have fixed sizes, we provide a wrapper that handles the casting of datatypes in
 distance functions, so a user can write a simpler function that takes two std::vector's. When used in this way, an
 std::vector gets added to hnswlib by performing a memcpy on the vector (copying a pointer, not the actual data). This
-data is already stored in our distribu****ted data structure, so we end up with
+data is already stored in our distributed data structure, so we end up with
 a single copy instead of two.
 
 In dknn_example.cpp, the first example uses this wrapper around a distance function working on std::vector's. The second
