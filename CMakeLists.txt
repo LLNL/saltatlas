@@ -50,6 +50,18 @@ set(HNSWLIB_FETCH_GIT
 set(HNSWLIB_GIT_BRANCH
         "feature/cmake_facelift"
         CACHE STRING "Name of GIT branch for hnswlib")
+set(YGM_FETCH_GIT
+        "https://github.com/llnl/ygm.git"
+        CACHE STRING "GIT to fetch ygm")
+set(YGM_GIT_BRANCH
+        "master"
+        CACHE STRING "Name of GIT branch for ygm")
+set(METALL_FETCH_GIT
+        "https://github.com/llnl/metall.git"
+        CACHE STRING "GIT to fetch Metall")
+set(METALL_GIT_BRANCH
+        "master"
+        CACHE STRING "Name of GIT branch for Metall")
 # Link Boost UUID with libatomic fails on LC machines
 option(BOOST_UUID_LINK_LIBATOMIC "Link Boost UUID with libatomic" OFF)
 
@@ -151,24 +163,13 @@ if (SALTATLAS_USE_HNSWLIB)
 endif ()
 
 #
-# Cereal
-#
-set(JUST_INSTALL_CEREAL TRUE)
-FetchContent_Declare(
-        cereal
-        GIT_REPOSITORY https://github.com/USCiLab/cereal.git
-        GIT_TAG v1.3.2
-)
-FetchContent_MakeAvailable(cereal)
-
-#
 # YGM
 #
 set(JUST_INSTALL_YGM TRUE)
 FetchContent_Declare(
         ygm
-        GIT_REPOSITORY https://github.com/LLNL/ygm.git
-        GIT_TAG master
+        GIT_REPOSITORY ${YGM_FETCH_GIT}
+        GIT_TAG ${YGM_GIT_BRANCH}
 )
 FetchContent_MakeAvailable(ygm)
 
@@ -200,8 +201,8 @@ if (SALTATLAS_USE_METALL)
     set(JUST_INSTALL_METALL_HEADER ON)
     FetchContent_Declare(
             Metall
-            GIT_REPOSITORY https://github.com/LLNL/metall.git
-            GIT_TAG master
+            GIT_REPOSITORY ${METALL_FETCH_GIT}
+            GIT_TAG ${METALL_GIT_BRANCH}
     )
     FetchContent_MakeAvailable(Metall)
 
