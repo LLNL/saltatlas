@@ -9,47 +9,33 @@
 #include <cstdlib>
 #include <memory>
 
-#if __has_include(<metall/container/unordered_map.hpp>) \
-  && __has_include(<metall/container/queue.hpp>)
-#ifndef SALTATLAS_DNND_USE_METALL_CONTAINER
-#define SALTATLAS_DNND_USE_METALL_CONTAINER 1
-#endif
-#endif
-
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-#include <metall/container/priority_queue.hpp>
-#include <metall/container/unordered_map.hpp>
-#else
 #include <queue>
-#include <unordered_map>
-#endif
 
-#if __has_include(<boost/unordered/unordered_flat_map.hpp>) \
-&& __has_include(<boost/unordered/unordered_node_map.hpp>) \
-&& defined(BOOST_VERSION) && BOOST_VERSION >= 108200
-#ifndef SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
-#define SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER 1
-#endif
+#include <boost/container/vector.hpp>
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
-#include <boost/unordered/unordered_node_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
 #endif
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 
+#if SALTATLAS_DNND_KNN_HEAP_USE_COMPACT_MAP
+#include <saltatlas/dnnd/detail/utilities/compact_unordered_map.hpp>
+#endif
+
 namespace saltatlas::dndetail {
 
-namespace {
-namespace container =
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-    metall::container;
-#else
-    std;
+#if SALTATLAS_DNND_KNN_HEAP_USE_COMPACT_MAP
+#error "Compact map is not supported for now."
 #endif
-}  // namespace
 
-// TODO: make a version that deos not take value?
+/// \brief Data structure to store up to k nearest neighbors without duplicate
+/// neighbor IDs. Each neighbor can have an associated value in addition to
+/// distance.
 template <typename Id, typename Distance, typename Value = std::byte,
           typename Alloc = std::allocator<std::byte>>
 class unique_knn_heap {
@@ -58,28 +44,17 @@ class unique_knn_heap {
   using distance_type  = Distance;
   using value_type     = Value;
   using allocator_type = Alloc;
-  using nenghbor_type  = detail::neighbor<id_type, distance_type>;
+  using neighbor_type  = detail::neighbor<id_type, distance_type>;
 
  private:
-  using heap_type = container::priority_queue<
-      nenghbor_type,
-      container::vector<nenghbor_type,
-                        other_allocator<allocator_type, nenghbor_type>>>;
+  using heap_type = std::priority_queue<
+      neighbor_type,
+      boost::container::vector<neighbor_type,
+                               other_allocator<allocator_type, neighbor_type>>>;
 
-#if SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
-  // Safeguard for not using offset-pointers with boost open address
-  // TODO: check pointer type rather than allocator
-  static_assert(
-      std::is_same_v<allocator_type, std::allocator<std::byte>>,
-      "Boost open address containers may not work with custom allocators");
   using map_type = boost::unordered_flat_map<
       id_type, value_type, std::hash<id_type>, std::equal_to<>,
       other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
-#else
-  using map_type = container::unordered_map<
-      id_type, value_type, std::hash<id_type>, std::equal_to<>,
-      other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
-#endif
 
  public:
   explicit unique_knn_heap(const std::size_t k,
@@ -88,14 +63,14 @@ class unique_knn_heap {
     m_map.reserve(k);
   }
 
-  /// \brief Push a neighbor if it is closer than the current neighbors and is
-  /// not one of the current neighbors.
+  /// \brief Push a neighbor if it is closer than the current farthest neighbor
+  /// and is not one of the current neighbors.
   /// \param id Neighbor ID.
   /// \param d Distance.
   /// \param v Value associated with the neighbor.
   /// \return True if the neighbor has been pushed; otherwise, false.
-  bool push_unique(const id_type& id, const distance_type& d,
-                   value_type v = value_type{}) {
+  bool try_add(const id_type& id, const distance_type& d,
+               value_type v = value_type{}) {
     if (m_map.count(id) > 0) return false;
 
     if (m_knn_heap.size() < m_k) {
@@ -112,9 +87,9 @@ class unique_knn_heap {
     return false;
   }
 
-  const nenghbor_type& top() { return m_knn_heap.top(); }
+  const neighbor_type& top() { return m_knn_heap.top(); }
 
-  const nenghbor_type& top() const { return m_knn_heap.top(); }
+  const neighbor_type& top() const { return m_knn_heap.top(); }
 
   void pop() {
     assert(m_map.count(m_knn_heap.top().id) > 0);
@@ -139,6 +114,19 @@ class unique_knn_heap {
   bool empty() const { return m_knn_heap.empty(); }
 
   std::size_t k() const { return m_k; }
+
+  /// \brief Return neighbors.
+  std::vector<neighbor_type> extract_neighbors() const {
+    std::vector<neighbor_type> neighbors;
+    neighbors.reserve(m_knn_heap.size());
+    auto tmp = m_knn_heap;
+    while (!tmp.empty()) {
+      neighbors.emplace_back(tmp.top());
+      tmp.pop();
+    }
+    std::reverse(neighbors.begin(), neighbors.end());
+    return neighbors;
+  }
 
  private:
   void priv_push_nocheck(const id_type& id, const distance_type& d,

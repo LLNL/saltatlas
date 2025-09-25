@@ -2,9 +2,7 @@
 // saltatlas Project Developers. See the top-level COPYRIGHT file for details.
 //
 // SPDX-License-Identifier: MIT
-
 #pragma once
-
 
 #include <cstdint>
 #include <string>
