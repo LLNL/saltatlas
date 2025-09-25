@@ -14,34 +14,18 @@
 #include <string_view>
 #include <utility>
 
-#if __has_include(<metall/container/unordered_map.hpp>) \
-  && __has_include(<metall/container/vector.hpp>)
-#ifndef SALTATLAS_DNND_USE_METALL_CONTAINER
-#define SALTATLAS_DNND_USE_METALL_CONTAINER 1
-#endif
-#endif
-
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-#include <metall/container/unordered_map.hpp>
-#include <metall/container/vector.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+#include <boost/unordered/unordered_flat_map.hpp>
 #else
-#include <unordered_map>
-#include <vector>
+#error "Boost 1.87.00 or higher is required."
 #endif
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
 
 namespace saltatlas::dndetail {
-
-namespace {
-namespace container =
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-    metall::container;
-#else
-    std;
-#endif
-}  // namespace
 
 // Forward declaration
 template <typename IdType = uint64_t, typename DistanceType = double,
@@ -57,11 +41,11 @@ class nn_index {
   using allocator_type = Allocator;
 
   using neighbor_list_type =
-      container::vector<neighbor_type,
-                        other_allocator<allocator_type, neighbor_type>>;
+      boost::container::vector<neighbor_type,
+                               other_allocator<allocator_type, neighbor_type>>;
 
  private:
-  using point_table_type = container::unordered_map<
+  using point_table_type = boost::unordered::unordered_flat_map<
       id_type, neighbor_list_type, std::hash<id_type>, std::equal_to<>,
       other_scoped_allocator<allocator_type,
                              std::pair<const id_type, neighbor_list_type>>>;

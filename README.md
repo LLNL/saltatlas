@@ -32,6 +32,8 @@ There are two CMake options to change the behavior:
 For both cases, Boost must be a version that supports CMake.
 Using two options at the same time will result in an error.
 
+DNND and NEO-DNND require Boost 1.87 or higher.
+
 ## Running examples
 
 ### Running example

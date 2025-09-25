@@ -7,9 +7,6 @@
 
 // #define PROFILE_FV
 
-#include <boost/container/flat_set.hpp>
-#include <boost/unordered/unordered_flat_map.hpp>
-#include <boost/unordered/unordered_node_map.hpp>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -24,6 +21,15 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_node_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
+#endif
+#include <boost/container/flat_set.hpp>
 
 #include "detail/dataset_reader.hpp"
 #include "detail/pfv_replica_store.hpp"

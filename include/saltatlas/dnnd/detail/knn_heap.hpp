@@ -9,23 +9,15 @@
 #include <cstdlib>
 #include <memory>
 
-#if __has_include(<metall/container/unordered_map.hpp>) \
-  && __has_include(<metall/container/queue.hpp>)
-#ifndef SALTATLAS_DNND_USE_METALL_CONTAINER
-#define SALTATLAS_DNND_USE_METALL_CONTAINER 1
-#endif
-#endif
-
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-#include <metall/container/priority_queue.hpp>
-#include <metall/container/unordered_map.hpp>
-#else
 #include <queue>
-#include <unordered_map>
-#endif
 
+#include <boost/container/vector.hpp>
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
-#include <boost/unordered/unordered_node_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
+#endif
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
@@ -36,15 +28,6 @@
 #endif
 
 namespace saltatlas::dndetail {
-
-namespace {
-namespace container =
-#if SALTATLAS_DNND_USE_METALL_CONTAINER
-    metall::container;
-#else
-    std;
-#endif
-}  // namespace
 
 #if SALTATLAS_DNND_KNN_HEAP_USE_COMPACT_MAP
 #error "Compact map is not supported for now."
@@ -64,10 +47,10 @@ class unique_knn_heap {
   using neighbor_type  = detail::neighbor<id_type, distance_type>;
 
  private:
-  using heap_type = container::priority_queue<
+  using heap_type = std::priority_queue<
       neighbor_type,
-      container::vector<neighbor_type,
-                        other_allocator<allocator_type, neighbor_type>>>;
+      boost::container::vector<neighbor_type,
+                               other_allocator<allocator_type, neighbor_type>>>;
 
   using map_type = boost::unordered_flat_map<
       id_type, value_type, std::hash<id_type>, std::equal_to<>,

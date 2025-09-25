@@ -9,8 +9,13 @@
 #include <cstdint>
 #include <memory>
 
+#include <boost/version.hpp>
 #include <metall/metall.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
+#endif
 
 #include "saltatlas/dnnd/detail/utilities/allocator.hpp"
 
