@@ -6,7 +6,7 @@
 /// \brief A simple example of building k-NN index (KNN graph) in Metall
 /// datastore. Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_advanced_index_build -p /path/to/points -f l2
+///     mpirun -n 2 ./example/dnnd_adv_index_build -p /path/to/points -f l2
 
 #include <filesystem>
 #include <iostream>
@@ -15,7 +15,7 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/dnnd_advanced.hpp>
+#include <saltatlas/dnnd/dnnd_adv.hpp>
 
 // Point ID type
 using id_t   = uint32_t;
@@ -75,8 +75,9 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 }
 
 template <typename cout_type>
-void show_help(cout_type &cout) {
-  cout << "Usage: ./dnnd_advance_show_neighbors [options]\n"
+void show_help(const std::string &exe_name, cout_type &cout) {
+  cout << "Usage: " << exe_name
+       << " [options]\n"
           "Options:\n"
           "  -d <string>       The Metall datastore path\n"
           "  -f <string>       The distance function\n"
@@ -93,11 +94,11 @@ int main(int argc, char **argv) {
   bool     help{false};
   if (!parse_options(argc, argv, opt, help)) {
     comm.cerr0() << "Invalid option" << std::endl;
-    show_help(comm.cerr0());
+    show_help(argv[0], comm.cerr0());
     return EXIT_FAILURE;
   }
   if (help) {
-    show_help(comm.cout0());
+    show_help(argv[0], comm.cout0());
     return 0;
   }
 
@@ -108,8 +109,8 @@ int main(int argc, char **argv) {
       saltatlas::distance::distance_function<point_type, dist_t>(
           opt.distance_name);
   {
-    saltatlas::dnnd<id_t, point_type, dist_t> g(saltatlas::open_read_only,
-                                                opt.datastore_path, comm);
+    saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
+                                                    opt.datastore_path, comm);
     const auto                                index_ids = g.get_index_ids();
 
     // Run queries
