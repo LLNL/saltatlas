@@ -253,7 +253,8 @@ int main(int argc, char* argv[]) {
       comm.cout0() << "Read dataset" << std::endl;
       comm.cout0() << "========================================" << std::endl;
       recorder.start("read_dataset");
-      dnnd.load_points(opt.dataset_path, opt.dataset_format,
+      std::vector<std::filesystem::path> paths{opt.dataset_path};
+      dnnd.load_points(paths.begin(), paths.end(), opt.dataset_format,
                        !opt.donot_share_pstore_regionally);
       recorder.stop();
 

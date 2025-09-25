@@ -41,7 +41,9 @@ int main(int argc, char* argv[]) {
       neo_dnnd_t dnnd(l2_func, comm);
 
       comm.cout0() << "Load points from a file" << std::endl;
-      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+      std::vector<std::filesystem::path> paths{
+          "./examples/datasets/point_5-4.txt"};
+      dnnd.load_points(paths.begin(), paths.end(), "wsv");
 
       comm.cout0() << "Build a KNNG" << std::endl;
       const int k    = 4;

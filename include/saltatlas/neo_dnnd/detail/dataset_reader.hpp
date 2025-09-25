@@ -43,16 +43,19 @@ class dataset_reader {
   template <typename partitioner_type>
   static std::pair<std::vector<id_type>,
                    std::vector<std::vector<feature_elem_type>>>
-  read(const std::filesystem::path& path, const std::string_view format,
-       const partitioner_type& partitioner, mpi::communicator& comm) {
+  read(const std::vector<std::filesystem::path>& paths,
+       const std::string_view format, const partitioner_type& partitioner,
+       mpi::communicator& comm) {
     if (format == "wsv") {
-      return priv_read_wsv(priv_get_file_list(path), partitioner, comm);
+      return priv_read_wsv(priv_get_file_list(paths), partitioner, comm);
     } else if (format == "wsv-id") {
-      return priv_read_wsv_with_id(priv_get_file_list(path), partitioner, comm);
+      return priv_read_wsv_with_id(priv_get_file_list(paths), partitioner,
+                                   comm);
     } else if (format == "bin") {
-      return priv_read_bin(priv_get_file_list(path), partitioner, comm);
+      return priv_read_bin(priv_get_file_list(paths), partitioner, comm);
     } else if (format == "bin-id") {
-      return priv_read_bin_with_id(priv_get_file_list(path), partitioner, comm);
+      return priv_read_bin_with_id(priv_get_file_list(paths), partitioner,
+                                   comm);
     } else {
       comm.cerr0() << "Unknown dataset format: " << format << std::endl;
       comm.abort();
@@ -61,6 +64,16 @@ class dataset_reader {
   }
 
  private:
+  static std::vector<std::filesystem::path> priv_get_file_list(
+      const std::vector<std::filesystem::path>& paths) {
+    std::vector<std::filesystem::path> file_list;
+    for (const auto& path : paths) {
+      const auto fl = priv_get_file_list(path);
+      file_list.insert(file_list.end(), fl.begin(), fl.end());
+    }
+    return file_list;
+  }
+
   static std::vector<std::filesystem::path> priv_get_file_list(
       const std::filesystem::path& path) {
     std::vector<std::filesystem::path> file_list;
