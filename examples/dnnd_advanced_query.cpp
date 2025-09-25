@@ -81,8 +81,7 @@ void show_help(const std::string &exe_name, cout_type &cout) {
           "Options:\n"
           "  -d <string>       The Metall datastore path\n"
           "  -f <string>       The distance function\n"
-          "  -p <string>       Comma separated list of query source point IDs "
-          "(e.g., 0,2,5)\n"
+          "  -q <string>       Path to a query file\n"
           "  -n <int>          The number of neighbor points to search\n"
           "  -h                Show this help message\n";
 }
