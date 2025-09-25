@@ -40,7 +40,9 @@ int main(int argc, char* argv[]) {
       neo_dnnd_t dnnd(
           distance::distance_function<point_type, distance_type>("l2"), comm);
 
-      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+      std::vector<std::filesystem::path> paths{
+          "./examples/datasets/point_5-4.txt"};
+      dnnd.load_points(paths.begin(), paths.end(), "wsv");
       initial_knng = dnnd.build(2);
     }
     comm.barrier();
@@ -49,7 +51,9 @@ int main(int argc, char* argv[]) {
       neo_dnnd_t dnnd(
           distance::distance_function<point_type, distance_type>("cosine"),
           comm, true);
-      dnnd.load_points("./examples/datasets/point_5-4.txt", "wsv");
+      std::vector<std::filesystem::path> paths{
+          "./examples/datasets/point_5-4.txt"};
+      dnnd.load_points(paths.begin(), paths.end(), "wsv");
       auto knng = dnnd.build(4, 0.5, 0.001, 0.0, 1 << 25, 123, initial_knng);
 
       std::error_code ec;

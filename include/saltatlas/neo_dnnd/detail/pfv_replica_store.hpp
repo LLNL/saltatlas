@@ -5,15 +5,21 @@
 
 #pragma once
 
-#include <boost/unordered/unordered_flat_map.hpp>
 #include <filesystem>
 #include <memory>
 #include <metall/metall.hpp>
 #include <vector>
 
-#include "../mpi.hpp"
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+#include <boost/unordered/unordered_flat_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
+#endif
+
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/neo_dnnd/detail/utilities/shm_manager.hpp"
+#include "saltatlas/neo_dnnd/mpi.hpp"
 
 namespace saltatlas::dndetail {
 

@@ -35,14 +35,12 @@
 #include <unordered_map>
 #include <vector>
 
-#if __has_include(<boost/unordered/unordered_flat_map.hpp>) \
-&& __has_include(<boost/unordered/unordered_node_map.hpp>) \
-&& defined(BOOST_VERSION) && BOOST_VERSION >= 108200
-#ifndef SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER
-#define SALTATLAS_DNND_USE_BOOST_OPEN_ADDRESS_CONTAINER 1
-#endif
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_node_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
 #endif
 
 #include <ygm/comm.hpp>

@@ -7,9 +7,6 @@
 
 // #define PROFILE_FV
 
-#include <boost/container/flat_set.hpp>
-#include <boost/unordered/unordered_flat_map.hpp>
-#include <boost/unordered/unordered_node_map.hpp>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -24,6 +21,15 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_node_map.hpp>
+#else
+#error "Boost 1.87.00 or higher is required."
+#endif
+#include <boost/container/flat_set.hpp>
 
 #include "detail/dataset_reader.hpp"
 #include "detail/pfv_replica_store.hpp"
@@ -167,13 +173,18 @@ class neo_dnnd {
 
   /// \brief Load points from a dataset file.
   /// All ranks must call this function.
-  /// \param dataset_path Path to a directory or files.
+  /// \tparam paths_iterator Iterator type for file paths, e.g.,
+  /// std::vector<std::filesystem::path>::iterator.
+  /// \param paths_begin Iterator to the beginning of file paths.
+  /// \param paths_end Iterator to the end of file paths.
+  /// Each rank must have access to all files.
   /// \param dataset_format Dataset format. Supported formats are "wsv
   /// (whitespace separated values)", "wsv-id (whitespace separated values with
   /// IDs in the first column)", "bin (binary)", and "bin-id (binary with IDs)".
   /// \param read_nlocal_pstores_directly If true, each rank reads point stores
   /// on the same node directly.
-  void load_points(const std::filesystem::path& dataset_path,
+  template <typename paths_iterator>
+  void load_points(paths_iterator paths_begin, paths_iterator paths_end,
                    const std::string_view&      dataset_format,
                    const bool read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
@@ -183,6 +194,7 @@ class neo_dnnd {
     auto partitioner = [this](const id_type id) {
       return saltatlas::partition(id, m_comm.size());
     };
+    std::vector<std::filesystem::path> dataset_path(paths_begin, paths_end);
     const auto [ids, fvs] =
         saltatlas::dndetail::dataset_reader<id_type, fe_type>::read(
             dataset_path, dataset_format, partitioner, m_comm);

@@ -9,14 +9,9 @@
 #include <memory>
 #include <type_traits>
 
-#if __has_include(<metall/container/unordered_map.hpp>)
-#ifndef SALTATLAS_USE_METALL_CONTAINER
-#define SALTATLAS_USE_METALL_CONTAINER 1
-#endif
-#endif
-
-#if SALTATLAS_USE_METALL_CONTAINER
-#include <metall/container/unordered_map.hpp>
+#include <boost/version.hpp>
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+#include <boost/unordered/unordered_node_map.hpp>
 #else
 #include <unordered_map>
 #endif
@@ -24,15 +19,6 @@
 #include "saltatlas/dnnd/detail/utilities/allocator.hpp"
 
 namespace saltatlas {
-
-namespace {
-namespace container =
-#if SALTATLAS_USE_METALL_CONTAINER
-    metall::container;
-#else
-    std;
-#endif
-}  // namespace
 
 /// \brief A container to store points.
 /// The container is designed to store points with unique IDs.
@@ -54,10 +40,17 @@ class point_store {
   using allocator_type = Allocator;
 
  private:
-  using point_table_type = container::unordered_map<
-      id_type, point_type, hasher, equal_to,
-      dndetail::other_scoped_allocator<allocator_type,
-                                       std::pair<const id_type, point_type>>>;
+  template <typename K, typename V, typename H, typename E, typename A>
+  using unordered_map =
+#if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
+      boost::unordered::unordered_node_map<K, V, H, E, A>;
+#else
+      std::unordered_map<K, V, H, E, A>;
+#endif
+  using point_table_type =
+      unordered_map<id_type, point_type, hasher, equal_to,
+                    dndetail::other_scoped_allocator<
+                        allocator_type, std::pair<const id_type, point_type>>>;
 
  public:
   using iterator       = typename point_table_type::iterator;
