@@ -30,14 +30,14 @@
 #include <ygm/detail/collective.hpp>
 
 #include "saltatlas/common/data_reader.hpp"
+#include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/common/point_store.hpp"
-#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/detail/dnnd_kernel.hpp"
 #include "saltatlas/dnnd/detail/nn_index.hpp"
 #include "saltatlas/dnnd/detail/nn_index_optimizer.hpp"
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
-#include "saltatlas/dnnd/detail/utilities/hash.hpp"
+#include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
 
 namespace saltatlas {
@@ -137,7 +137,7 @@ class dnnd_adv {
 
   /// \brief Return the owner rank of the given point ID.
   static constexpr int get_owner(const id_type& id, const int mpi_size) {
-    return dndetail::murmurhash::hash<5981>{}(id) % mpi_size;
+    return hash<5981>{}(id) % mpi_size;
   }
 
   /// \brief Constructor.

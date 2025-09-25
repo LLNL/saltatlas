@@ -6,14 +6,14 @@
 /// \brief A simple example of using DNND's advanced API
 /// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_advanced
+///     mpirun -n 2 ./example/dnnd_adv
 
 #include <iostream>
 #include <vector>
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/dnnd_advanced.hpp>
+#include <saltatlas/dnnd/dnnd_adv.hpp>
 
 // Point ID type
 using id_t   = uint32_t;

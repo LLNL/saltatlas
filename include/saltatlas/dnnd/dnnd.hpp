@@ -15,12 +15,24 @@
 #endif  // SALTATLAS_DNND_INCLUDED_HPP
 
 #include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <iostream>
+#include <iterator>
 #include <memory>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <ygm/comm.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
@@ -360,10 +372,11 @@ class dnnd {
   /// source_id neighbor_id_1 neighbor_id_2 ...
   /// 0.0 distance_1 distance_2 ...
   /// ```
-  /// Each item is separated by a tab. The first line is the source id and
-  /// neighbor ids. The second line is the dummy value and distances to each
-  /// neighbor. The dummy value is just a placeholder so that each neighbor id
-  /// and distance pair is stored in the same column.
+  /// Each item is separated by a tab. The first line is the source id followed
+  /// by neighbor ids. The second line is the distances to each neighbor. The
+  /// first distance value is a dummy value (0.0), which is just a placeholder
+  /// so that a neighbor id and the corresponding distance value is stored in
+  /// the same column.
   void dump_graph(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
     std::stringstream file_name;
