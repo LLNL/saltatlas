@@ -25,7 +25,7 @@ namespace saltatlas {
 /// represented by a feature vector. Every point has the same dimension.
 template <typename _id_type, typename _value_type,
           typename _allocator_type = std::allocator<_value_type>>
-class point_store {
+class dense_point_store {
  public:
   using id_type        = _id_type;
   using value_type     = _value_type;
@@ -48,11 +48,11 @@ class point_store {
   class const_iterator;
 
   /// \brief Constructor.
-  explicit point_store(const allocator_type &allocator = allocator_type{})
+  explicit dense_point_store(const allocator_type &allocator = allocator_type{})
       : m_id_map(allocator), m_allocator(allocator) {}
 
   /// \brief Destructor.
-  ~point_store() {
+  ~dense_point_store() {
     if (m_data) {
       m_allocator.deallocate(m_data, m_num_points * m_num_dims);
       m_data = nullptr;
@@ -60,10 +60,10 @@ class point_store {
   }
 
   // Copy constructor
-  point_store(const point_store &other) = delete;
+  dense_point_store(const dense_point_store &other) = delete;
 
   // Move constructor
-  point_store(point_store &&other) noexcept
+  dense_point_store(dense_point_store &&other) noexcept
       : m_num_points(other.m_num_points),
         m_num_dims(other.m_num_dims),
         m_data(other.m_data),
@@ -75,10 +75,10 @@ class point_store {
   }
 
   // Copy assignment
-  point_store &operator=(const point_store &other) = delete;
+  dense_point_store &operator=(const dense_point_store &other) = delete;
 
   // Move assignment
-  point_store &operator=(point_store &&other) noexcept {
+  dense_point_store &operator=(dense_point_store &&other) noexcept {
     if (this != &other) {
       if (m_data) {
         m_allocator.deallocate(m_data, m_num_points * m_num_dims);
@@ -173,7 +173,8 @@ class point_store {
 };
 
 template <typename _id_type, typename _value_type, typename _allocator_type>
-class point_store<_id_type, _value_type, _allocator_type>::const_iterator {
+class dense_point_store<_id_type, _value_type,
+                        _allocator_type>::const_iterator {
  private:
   using id_table_iterator = typename id_table_t::const_iterator;
 
@@ -218,7 +219,8 @@ class point_store<_id_type, _value_type, _allocator_type>::const_iterator {
 };
 
 template <typename _id_type, typename _value_type, typename _allocator_type>
-class point_store<_id_type, _value_type, _allocator_type>::const_id_iterator {
+class dense_point_store<_id_type, _value_type,
+                        _allocator_type>::const_id_iterator {
  private:
   using internal_iterator = typename id_table_t::const_iterator;
 
@@ -259,4 +261,4 @@ class point_store<_id_type, _value_type, _allocator_type>::const_id_iterator {
   internal_iterator m_it;
 };
 
-}  // namespace saltatlas::neo_dnnd
+}  // namespace saltatlas
