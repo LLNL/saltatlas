@@ -141,7 +141,8 @@ class dnnd_adv {
   }
 
   static bool copy(const std::filesystem::path& src_path,
-                   const std::filesystem::path& dst_path, ygm::comm& comm) {
+                   const std::filesystem::path& dst_path, ygm::comm& comm,
+                   const bool verbose = false) {
     const auto ret = metall::utility::metall_mpi_adaptor::copy(
         src_path, dst_path, comm.get_mpi_comm(), true);
     comm.barrier();
@@ -152,8 +153,10 @@ class dnnd_adv {
       }
       return false;
     }
-    comm.cout0() << "Copied PM datastore from " << src_path << " to "
-                 << dst_path << std::endl;
+    if (verbose) {
+      comm.cout0() << "Copied PM datastore from " << src_path << " to "
+                   << dst_path << std::endl;
+    }
     return true;
   }
 
@@ -936,8 +939,10 @@ class dnnd_adv {
                      << dest_datastore_path << std::endl;
       return false;
     }
-    m_comm.cout0() << "A snapshot is created at " << dest_datastore_path
-                   << std::endl;
+    if (m_verbose) {
+      m_comm.cout0() << "A snapshot is created at " << dest_datastore_path
+                     << std::endl;
+    }
     return true;
   }
 
