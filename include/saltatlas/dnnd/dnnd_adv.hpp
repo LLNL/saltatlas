@@ -140,6 +140,23 @@ class dnnd_adv {
     return hash<5981>{}(id) % mpi_size;
   }
 
+  static bool copy(const std::filesystem::path& src_path,
+                   const std::filesystem::path& dst_path, ygm::comm& comm) {
+    const auto ret = metall::utility::metall_mpi_adaptor::copy(
+        src_path, dst_path, comm.get_mpi_comm(), true);
+    comm.barrier();
+    if (!ret) {
+      if (comm.rank0()) {
+        std::cerr << "Failed to copy Metall datastore from " << src_path
+                  << " to " << dst_path << std::endl;
+      }
+      return false;
+    }
+    comm.cout0() << "Copied PM datastore from " << src_path << " to "
+                 << dst_path << std::endl;
+    return true;
+  }
+
   /// \brief Constructor.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
@@ -897,6 +914,31 @@ class dnnd_adv {
     // Stable vector (or similar container) must be used to avoid dangling
     // reference when m_knn_index_list's size is changed.
     return m_knn_index_list->at(index_id);
+  }
+
+  /// \brief Create a snapshot of the current persistent datastore.
+  /// \param dest_datastore_path Destination path of the snapshot.
+  /// \return True if the snapshot is successfully created; false otherwise.
+  /// \Note This function cannot be called when Metall is not used.
+  /// This function cannot be called concurrently with other write functions,
+  /// such as add_points() and load_points().
+  bool snapshot(const std::filesystem::path& dest_datastore_path) {
+    if (!m_metall) {
+      m_comm.cerr0() << "Error: copy_pm_datastore() cannot be called when "
+                        "Metall is not used."
+                     << std::endl;
+      return false;
+    }
+
+    const auto ret = m_metall->snapshot(dest_datastore_path, true);
+    if (!ret) {
+      m_comm.cerr0() << "Error: Failed to create a snapshot to "
+                     << dest_datastore_path << std::endl;
+      return false;
+    }
+    m_comm.cout0() << "A snapshot is created at " << dest_datastore_path
+                   << std::endl;
+    return true;
   }
 
  private:

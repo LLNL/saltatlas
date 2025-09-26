@@ -88,6 +88,11 @@ int main(int argc, char** argv) {
     g.load_points(paths.begin(), paths.end(), "wsv");
     const auto index_id = g.build(custom_distance, 2);
     comm.cout0() << "Created KNNG " << index_id << std::endl;
+
+    // Create a snapshot
+    std::filesystem::remove_all("/tmp/dnnd-knng-snapshot", ec);
+    g.snapshot("/tmp/dnnd-knng-snapshot");
+    comm.cout0() << "Created a snapshot" << std::endl;
   }
 
   {
@@ -99,6 +104,12 @@ int main(int argc, char** argv) {
     auto index_id = g.build(custom_distance, 4);
     comm.cout0() << "Created KNNG " << index_id << std::endl;
   }
+
+  // Copy an existing Metall datastore to a new path
+  std::filesystem::remove_all("/tmp/dnnd-knng-copy", ec);
+  comm.cf_barrier();
+  saltatlas::dnnd_adv<id_t, point_type, dist_t>::copy(
+      datastorepath, "/tmp/dnnd-knng-copy", comm);
 
   {
     saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
