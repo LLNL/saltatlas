@@ -148,9 +148,9 @@ class dnnd_adv {
                     const uint64_t rnd_seed = std::random_device{}(),
                     const bool     verbose  = false)
       : m_comm(comm), m_rnd_seed(rnd_seed), m_verbose(verbose) {
-    m_pstore         = new point_store_type();
-    m_knn_index_list = new knn_index_container();
-    m_index_k_list   = new size_container();
+    m_pstore         = std::make_unique<point_store_type>();
+    m_knn_index_list = std::make_unique<knn_index_container>();
+    m_index_k_list   = std::make_unique<size_container>();
   }
 
   dnnd_adv(create_only_t, const std::filesystem::path& datastore_path,
@@ -161,12 +161,12 @@ class dnnd_adv {
         metall::create_only, datastore_path.string(), m_comm.get_mpi_comm(),
         true);
     auto& localm = m_metall->get_local_manager();
-    m_pstore     = localm.construct<point_store_type>(metall::unique_instance)(
-        localm.get_allocator<>());
-    m_knn_index_list = localm.construct<knn_index_container>(
-        metall::unique_instance)(localm.get_allocator<>());
-    m_index_k_list = localm.construct<size_container>(metall::unique_instance)(
-        localm.get_allocator<>());
+    m_pstore.reset(localm.construct<point_store_type>(metall::unique_instance)(
+        localm.get_allocator<>()));
+    m_knn_index_list.reset(localm.construct<knn_index_container>(
+        metall::unique_instance)(localm.get_allocator<>()));
+    m_index_k_list.reset(localm.construct<size_container>(
+        metall::unique_instance)(localm.get_allocator<>()));
     m_comm.cf_barrier();
   }
 
@@ -177,12 +177,14 @@ class dnnd_adv {
     m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
         metall::open_only, datastore_path.string(), m_comm.get_mpi_comm());
     auto& localm = m_metall->get_local_manager();
-    m_pstore     = localm.find<point_store_type>(metall::unique_instance).first;
+    m_pstore.reset(
+        localm.find<point_store_type>(metall::unique_instance).first);
     assert(m_pstore);
-    m_knn_index_list =
-        localm.find<knn_index_container>(metall::unique_instance).first;
+    m_knn_index_list.reset(
+        localm.find<knn_index_container>(metall::unique_instance).first);
     assert(m_knn_index_list);
-    m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
+    m_index_k_list.reset(
+        localm.find<size_container>(metall::unique_instance).first);
     assert(m_index_k_list);
     m_comm.cf_barrier();
   }
@@ -194,14 +196,25 @@ class dnnd_adv {
     m_metall = std::make_unique<metall::utility::metall_mpi_adaptor>(
         metall::open_read_only, datastore_path.string(), m_comm.get_mpi_comm());
     auto& localm = m_metall->get_local_manager();
-    m_pstore     = localm.find<point_store_type>(metall::unique_instance).first;
+    m_pstore.reset(
+        localm.find<point_store_type>(metall::unique_instance).first);
     assert(m_pstore);
-    m_knn_index_list =
-        localm.find<knn_index_container>(metall::unique_instance).first;
+    m_knn_index_list.reset(
+        localm.find<knn_index_container>(metall::unique_instance).first);
     assert(m_knn_index_list);
-    m_index_k_list = localm.find<size_container>(metall::unique_instance).first;
+    m_index_k_list.reset(
+        localm.find<size_container>(metall::unique_instance).first);
     assert(m_index_k_list);
     m_comm.cf_barrier();
+  }
+
+  ~dnnd_adv() noexcept {
+    if (m_metall) {
+      // To keep the objects in the Metall datastore, do not destroy them.
+      m_pstore.release();
+      m_knn_index_list.release();
+      m_index_k_list.release();
+    }
   }
 
   /// \brief Add points to the internal point store.
@@ -750,9 +763,7 @@ class dnnd_adv {
 
   /// \brief Get the number of points.
   /// This function performs an all-reduce operation, which is not cheap.
-  std::size_t num_points() const {
-    return ygm::sum(m_pstore->size(), m_comm);
-  }
+  std::size_t num_points() const { return ygm::sum(m_pstore->size(), m_comm); }
 
   /// \brief API for using 'for_each' with local points.
   iterator_proxy_type local_points() const {
@@ -924,10 +935,10 @@ class dnnd_adv {
   uint64_t                                             m_rnd_seed;
   bool                                                 m_verbose;
   std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
-  point_store_type*                                    m_pstore{nullptr};
-  knn_index_container*    m_knn_index_list{nullptr};
-  size_container*         m_index_k_list{nullptr};
-  ygm::ygm_ptr<self_type> m_this{this};
+  std::unique_ptr<point_store_type>                    m_pstore{nullptr};
+  std::unique_ptr<knn_index_container> m_knn_index_list{nullptr};
+  std::unique_ptr<size_container>      m_index_k_list{nullptr};
+  ygm::ygm_ptr<self_type>              m_this{this};
 };
 
 }  // namespace saltatlas
