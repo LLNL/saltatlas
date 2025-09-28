@@ -167,7 +167,8 @@ class dataset_reader {
     comm.cout0() << "#of points: " << comm.all_reduce_sum(num_points)
                  << std::endl;
 
-    return priv_distribute_points(read_ids, read_features, num_dims, comm);
+    return priv_distribute_points(std::move(read_ids), std::move(read_features),
+                                  num_dims, comm);
   }
 
   template <typename partitioner_type>
@@ -223,7 +224,8 @@ class dataset_reader {
     comm.cout0() << "#of points: " << comm.all_reduce_sum(num_points)
                  << std::endl;
 
-    return priv_distribute_points(read_ids, read_features, num_dims, comm);
+    return priv_distribute_points(std::move(read_ids), std::move(read_features),
+                                  num_dims, comm);
   }
 
   template <typename partitioner_type>
@@ -250,7 +252,7 @@ class dataset_reader {
       if (ifs) {
         // std::cout << "Opened " << paths[i] << std::endl;
       } else {
-        std::cerr << "Failed to open " << paths[i] << std::endl;
+        comm.cerr() << "Failed to open " << paths[i] << std::endl;
         comm.abort();
       }
 
@@ -262,8 +264,8 @@ class dataset_reader {
           dims = feature.size();
         } else {
           if (dims != feature.size()) {
-            std::cerr << "Inconsistent number of dimensions: " << dims << " vs "
-                      << feature.size() << std::endl;
+            comm.cerr() << "Inconsistent number of dimensions: " << dims
+                        << " vs " << feature.size() << std::endl;
             comm.abort();
           }
         }
@@ -278,7 +280,8 @@ class dataset_reader {
 
     comm.bcast(dims, 0);
 
-    return priv_distribute_points(read_ids, read_features, dims, comm);
+    return priv_distribute_points(std::move(read_ids), std::move(read_features),
+                                  dims, comm);
   }
 
   template <typename partitioner_type>
@@ -299,7 +302,7 @@ class dataset_reader {
       if (ifs) {
         // std::cout << "Opened " << paths[i] << std::endl;
       } else {
-        std::cerr << "Failed to open " << paths[i] << std::endl;
+        comm.cerr() << "Failed to open " << paths[i] << std::endl;
         comm.abort();
       }
 
@@ -308,9 +311,11 @@ class dataset_reader {
         std::stringstream ss(line);
         id_type           pid;
         ss >> pid;
-        if (id_set.find(pid) != id_set.end()) {
-          std::cerr << "Duplicate ID: " << pid << std::endl;
+        if (id_set.count(pid) > 0) {
+          comm.cerr() << "Duplicate ID: " << pid << std::endl;
           comm.abort();
+        } else {
+          id_set.insert(pid);
         }
         line         = ss.str().substr(ss.tellg());  // Remove the ID part.
         auto feature = detail::str_split<feature_elem_type>(line);
@@ -318,8 +323,8 @@ class dataset_reader {
           dims = feature.size();
         } else {
           if (dims != feature.size()) {
-            std::cerr << "Inconsistent number of dimensions: " << dims << " vs "
-                      << feature.size() << std::endl;
+            comm.cerr() << "Inconsistent number of dimensions: " << dims
+                        << " vs " << feature.size() << std::endl;
             comm.abort();
           }
         }
@@ -329,11 +334,14 @@ class dataset_reader {
                                     feature.end());
       }
     }
+    id_set.clear();
+    id_set.rehash(0);
     comm.barrier();
 
     comm.bcast(dims, 0);
 
-    return priv_distribute_points(read_ids, read_features, dims, comm);
+    return priv_distribute_points(std::move(read_ids), std::move(read_features),
+                                  dims, comm);
   }
 
   static std::vector<std::size_t> priv_count_lines_in_files(
@@ -350,7 +358,7 @@ class dataset_reader {
       if (ifs) {
         // std::cout << "Opened " << paths[i] << std::endl;
       } else {
-        std::cerr << "Failed to open " << paths[i] << std::endl;
+        comm.cerr() << "Failed to open " << paths[i] << std::endl;
         comm.abort();
       }
 
@@ -389,8 +397,8 @@ class dataset_reader {
   static std::pair<std::vector<id_type>,
                    std::vector<std::vector<feature_elem_type>>>
   priv_distribute_points(
-      const std::vector<std::vector<id_type>>&           read_ids,
-      const std::vector<std::vector<feature_elem_type>>& read_features,
+      std::vector<std::vector<id_type>>&&           read_ids,
+      std::vector<std::vector<feature_elem_type>>&& read_features,
       const std::size_t dims, mpi::communicator& comm) {
     assert(read_ids.size() == std::size_t(comm.size()));
     assert(read_features.size() == std::size_t(comm.size()));
@@ -414,10 +422,11 @@ class dataset_reader {
         comm.size(), comm.rank(),
         [&](const int pair_rank) {
           std::vector<id_type> ids_recv_buf;
-          comm.sendrecv_arb_size(pair_rank, read_ids[pair_rank], ids_recv_buf);
+          comm.sendrecv_arb_size(pair_rank, std::move(read_ids[pair_rank]),
+                                 ids_recv_buf);
 
           std::vector<feature_elem_type> features_recv_buf;
-          comm.sendrecv_arb_size(pair_rank, read_features[pair_rank],
+          comm.sendrecv_arb_size(pair_rank, std::move(read_features[pair_rank]),
                                  features_recv_buf);
 
           const auto num_recv_points = ids_recv_buf.size();
