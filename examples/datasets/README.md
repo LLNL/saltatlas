@@ -63,14 +63,16 @@ the [Fashion-MNIST dataset](https://github.com/zalandoresearch/fashion-mnist).
     - Contains 200 data points from the Fashion-MNIST dataset.
     - WSV format.
 
-- [fashion-mnist_200_ground-truth_knng_k20.txt](./fashion-mnist_200_ground-truth_knng_k20.txt):
+- [fashion-mnist_200_ground-truth_knng_k10.txt](./fashion-mnist_200_ground-truth_knng_k20.txt):
     - Contains the ground truth k-nearest neighbors (k-NN) graph for the 200
       data points.
-    - Each line corresponds to a data point and lists its 20 nearest neighbors
-      along with their distances.
     - L2 (Euclidean) distance metric was used.
     - The format is as follows:
-        - The first half of each line contains the IDs of the 20 nearest
+        - The first half of each line contains the IDs of the 10 nearest
           neighbors.
         - The second half contains the corresponding distances to those
           neighbors.
+        - Line 0 corresponds to the data point with ID 0, line 1 to ID 1, and so
+          on.
+        - Line 201 contains the distance values of the 10 nearest neighbors for
+          the data point with ID 0, line 202 for ID 1, and so on.
