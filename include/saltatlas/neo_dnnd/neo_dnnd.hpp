@@ -39,9 +39,9 @@
 #include "saltatlas/dnnd/detail/utilities/omp.hpp"
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
 #include "saltatlas/dnnd/distance.hpp"
+#include "saltatlas/neo_dnnd/dense_point_store.hpp"
 #include "saltatlas/neo_dnnd/detail/utilities/counter_db.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
-#include "saltatlas/neo_dnnd/point_store.hpp"
 #include "saltatlas/neo_dnnd/time_recorder.hpp"
 
 #define FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
@@ -67,8 +67,8 @@ class neo_dnnd {
   using fe_type       = _fe_type;
   using distance_type = _distance_type;
   using point_store =
-      saltatlas::point_store<id_type, fe_type,
-                             metall::manager::allocator_type<std::byte>>;
+      saltatlas::dense_point_store<id_type, fe_type,
+                                   metall::manager::allocator_type<std::byte>>;
   using point_type = std::span<fe_type>;
   using distance_function =
       distance::distance_function_type<point_type, distance_type>;
