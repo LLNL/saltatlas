@@ -668,7 +668,7 @@ class neo_dnnd {
     std::vector<id_type>              ids;
     std::vector<std::vector<fe_type>> fvs;
     ids.reserve(n_local_points);
-    fvs.resize(n_local_points);
+    fvs.reserve(n_local_points);
 
     auto iitr = ids_begin;
     auto pitr = points_begin;
