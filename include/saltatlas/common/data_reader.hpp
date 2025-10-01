@@ -16,10 +16,11 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/common/detail/neighbor.hpp>
-#include <saltatlas/common/detail/utilities/general.hpp>
-#include <saltatlas/common/detail/utilities/string_cast.hpp>
-#include <saltatlas/common/detail/utilities/ygm.hpp>
+#include "saltatlas/common/detail/neighbor.hpp"
+#include "saltatlas/common/detail/utilities/general.hpp"
+#include "saltatlas/common/detail/utilities/hash.hpp"
+#include "saltatlas/common/detail/utilities/string_cast.hpp"
+#include "saltatlas/common/detail/utilities/ygm.hpp"
 #include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::detail {
@@ -39,41 +40,50 @@ void read_points_helper(
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
-  // Counts #of points each process to read.
-  std::size_t count_points = 0;
-  const auto  range =
-      partial_range(sorted_file_names.size(), comm.rank(), comm.size());
-  for (std::size_t i = range.first; i < range.second; ++i) {
+  const auto worker = [num_ranks = comm.size()](const std::size_t i) {
+    return hash<>{}(i) % num_ranks;
+  };
+
+  // Counts #of points each file contains
+  std::vector<std::size_t> file_num_points(sorted_file_names.size(), 0);
+  for (std::size_t i = 0; i < sorted_file_names.size(); ++i) {
+    if (worker(i) != comm.rank()) continue;
     const auto   &file_name = sorted_file_names[i];
     std::ifstream ifs(file_name);
     if (!ifs.is_open()) {
-      std::cerr << "Failed to open " << file_name << std::endl;
+      comm.cerr() << "Failed to open " << file_name << std::endl;
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
     std::string buf;
+    std::size_t count_points = 0;
     while (std::getline(ifs, buf)) {
       ++count_points;
     }
+    file_num_points[i] = count_points;
   }
   comm.cf_barrier();
 
-  std::size_t id_offset = 0;
-  {
-    ygm::ygm_ptr<std::size_t> ptr_id_offset(&id_offset);
-    comm.cf_barrier();
-    for (int r = comm.rank() + 1; r < comm.size(); ++r) {
-      auto adder = [](auto, const std::size_t n,
-                      const ygm::ygm_ptr<std::size_t> &ptr_offset) {
-        *ptr_offset += n;
-      };
-      comm.async(r, adder, count_points, ptr_id_offset);
-    }
-    comm.barrier();
+  // Broadcasts #of points in each file
+  for (std::size_t i = 0; i < sorted_file_names.size(); ++i) {
+    file_num_points[i] = comm.mpi_bcast(file_num_points[i], worker(i));
+  }
+  comm.cf_barrier();
+
+  // Calculates ID offset for each file
+  std::vector<std::size_t> id_offsets(sorted_file_names.size(), 0);
+  for (std::size_t i = 1; i < sorted_file_names.size(); ++i) {
+    id_offsets[i] = id_offsets[i - 1] + file_num_points[i - 1];
   }
 
-  if (comm.rank() == comm.size() - 1 &&
-      id_offset > std::numeric_limits<id_t>::max()) {
-    comm.cerr() << "Too many points in the file(s)" << std::endl;
+  // Sanity check
+  const std::size_t total_num_points =
+      id_offsets.back() + file_num_points.back();
+  if (verbose) {
+    comm.cout0() << "#of total points: " << total_num_points << std::endl;
+  }
+  if (std::numeric_limits<id_t>::max() <= total_num_points) {
+    comm.cerr0() << "Too small ID type: " << typeid(id_t).name() << " to hold "
+                 << total_num_points << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
 
@@ -82,8 +92,9 @@ void read_points_helper(
   comm.cf_barrier();
 
   // Reads points
-  count_points = 0;
-  for (std::size_t i = range.first; i < range.second; ++i) {
+  std::size_t count_points = 0;
+  for (std::size_t i = 0; i < sorted_file_names.size(); ++i) {
+    if (worker(i) != comm.rank()) continue;
     const auto &file_name = sorted_file_names[i];
     if (verbose) std::cout << "Open " << file_name << std::endl;
     std::ifstream ifs(file_name);
@@ -94,9 +105,8 @@ void read_points_helper(
 
     // Parse a vector and send it to the destination.
     std::string line_buf;
+    id_t        id = id_offsets[i];
     while (std::getline(ifs, line_buf)) {
-      const auto id = count_points + id_offset;
-
       point_t    point;
       const auto ret = parser(line_buf, point);
       if (!ret || point.empty()) {
@@ -115,9 +125,14 @@ void read_points_helper(
           id, point, ptr_point_store);
 
       ++count_points;
+      ++id;
     }
   }
   comm.barrier();
+  if (comm.all_reduce_sum(count_points) != total_num_points) {
+    comm.cerr0() << "Some points are missing" << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
 }
 
 /// \brief Read points (feature vectors) using multiple processes.
@@ -130,11 +145,15 @@ void read_points_with_id_helper(
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
-  const auto range = partial_range(file_names.size(), comm.rank(), comm.size());
+  const auto assigned = [&comm](const std::size_t i) -> bool {
+    return (hash<>{}(i) % comm.size()) == comm.rank();
+  };
   static auto &ref_point_store = local_point_store;
   comm.cf_barrier();
 
-  for (std::size_t file_no = range.first; file_no < range.second; ++file_no) {
+  for (std::size_t file_no = 0; file_no < file_names.size(); ++file_no) {
+    if (!assigned(file_no)) continue;
+
     const auto &file_name = file_names[file_no];
     if (verbose) std::cout << "Open " << file_name << std::endl;
     std::ifstream ifs(file_name);
