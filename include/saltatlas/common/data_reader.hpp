@@ -231,17 +231,24 @@ inline void read_points_with_id(
     ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, id_type &id,
                          point_t &point) {
-    std::string buf;
+    std::string       buf;
+    std::stringstream ss(input);
+
+    // Extract ID (first token)
+    ss >> buf;
+    id = str_cast<id_type>(buf);
+
+    // Extract point (remaining tokens)
+    std::string point_str;
     bool        first = true;
-    point.clear();
-    for (std::stringstream ss(input); ss >> buf;) {
-      if (first) {
-        id = str_cast<id_type>(buf);
-      } else {
-        point.push_back(str_cast<typename point_t::value_type>(buf));
-      }
+    while (ss >> buf) {
+      if (!first) point_str += ' ';
       first = false;
+      point_str += buf;
     }
+    const auto tokens = str_split<typename point_t::value_type>(point_str);
+    point.clear();
+    point.insert(point.begin(), tokens.begin(), tokens.end());
     return true;
   };
 
