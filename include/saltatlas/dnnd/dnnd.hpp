@@ -212,6 +212,8 @@ class dnnd {
   /// 'csv-id' (CSV with IDs in the first column), 'wsv' (whitespace-separated
   /// values), and 'wsv-id' (whitespace-separated values with IDs in the first
   /// column).
+  /// \note This function can be used with a point type that uses vector-like
+  /// container, e.g., saltatlas::feature_vector.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
                    const std::string_view file_format) {
@@ -233,6 +235,8 @@ class dnnd {
   /// \param paths_end Iterator to the end of file paths.
   /// \param line_parser A function that parses a line and returns a pair of
   /// point ID and point data.
+  /// \note This function can be used with a point type that uses vector-like
+  /// container, e.g., saltatlas::feature_vector.
   template <typename paths_iterator>
   void load_points(
       paths_iterator paths_begin, paths_iterator paths_end,

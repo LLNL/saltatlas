@@ -39,7 +39,7 @@
 #include "saltatlas/dnnd/detail/utilities/omp.hpp"
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
 #include "saltatlas/dnnd/distance.hpp"
-#include "saltatlas/neo_dnnd/dense_point_store.hpp"
+#include "saltatlas/neo_dnnd/compact_point_store.hpp"
 #include "saltatlas/neo_dnnd/detail/utilities/counter_db.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
 #include "saltatlas/neo_dnnd/time_recorder.hpp"
@@ -67,7 +67,7 @@ class neo_dnnd {
   using fe_type       = _fe_type;
   using distance_type = _distance_type;
   using point_store =
-      saltatlas::dense_point_store<id_type, fe_type,
+      saltatlas::compact_point_store<id_type, fe_type,
                                    metall::manager::allocator_type<std::byte>>;
   using point_type = std::span<fe_type>;
   using distance_function =
@@ -185,7 +185,7 @@ class neo_dnnd {
   /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view&      dataset_format,
+                   const std::string_view& dataset_format,
                    const bool read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
@@ -208,6 +208,8 @@ class neo_dnnd {
 
   /// \brief Add points to the internal point store.
   /// All ranks must call this function although some ranks add no points.
+  /// This function can not be called multiple times, i.e., all points must be
+  /// added at once.
   /// \tparam id_iterator Iterator type for point IDs.
   /// \tparam point_iterator Iterator type for points.
   /// A single point type must support range-based for loop and its value type

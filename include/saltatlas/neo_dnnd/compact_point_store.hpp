@@ -25,7 +25,7 @@ namespace saltatlas {
 /// represented by a feature vector. Every point has the same dimension.
 template <typename _id_type, typename _value_type,
           typename _allocator_type = std::allocator<_value_type>>
-class dense_point_store {
+class compact_point_store {
  public:
   using id_type        = _id_type;
   using value_type     = _value_type;
@@ -48,11 +48,12 @@ class dense_point_store {
   class const_iterator;
 
   /// \brief Constructor.
-  explicit dense_point_store(const allocator_type &allocator = allocator_type{})
+  explicit compact_point_store(
+      const allocator_type &allocator = allocator_type{})
       : m_id_map(allocator), m_allocator(allocator) {}
 
   /// \brief Destructor.
-  ~dense_point_store() {
+  ~compact_point_store() {
     if (m_data) {
       m_allocator.deallocate(m_data, m_num_points * m_num_dims);
       m_data = nullptr;
@@ -60,10 +61,10 @@ class dense_point_store {
   }
 
   // Copy constructor
-  dense_point_store(const dense_point_store &other) = delete;
+  compact_point_store(const compact_point_store &other) = delete;
 
   // Move constructor
-  dense_point_store(dense_point_store &&other) noexcept
+  compact_point_store(compact_point_store &&other) noexcept
       : m_num_points(other.m_num_points),
         m_num_dims(other.m_num_dims),
         m_data(other.m_data),
@@ -75,10 +76,10 @@ class dense_point_store {
   }
 
   // Copy assignment
-  dense_point_store &operator=(const dense_point_store &other) = delete;
+  compact_point_store &operator=(const compact_point_store &other) = delete;
 
   // Move assignment
-  dense_point_store &operator=(dense_point_store &&other) noexcept {
+  compact_point_store &operator=(compact_point_store &&other) noexcept {
     if (this != &other) {
       if (m_data) {
         m_allocator.deallocate(m_data, m_num_points * m_num_dims);
@@ -165,16 +166,16 @@ class dense_point_store {
   const_id_iterator ids_end() { return const_id_iterator(m_id_map.cend()); }
 
  private:
-  std::size_t                                      m_num_points{0};
-  std::size_t                                      m_num_dims{0};
-  pointer                                          m_data{nullptr};
-  id_table_t                                       m_id_map;
+  std::size_t                                           m_num_points{0};
+  std::size_t                                           m_num_dims{0};
+  pointer                                               m_data{nullptr};
+  id_table_t                                            m_id_map;
   dndetail::other_allocator<allocator_type, value_type> m_allocator;
 };
 
 template <typename _id_type, typename _value_type, typename _allocator_type>
-class dense_point_store<_id_type, _value_type,
-                        _allocator_type>::const_iterator {
+class compact_point_store<_id_type, _value_type,
+                          _allocator_type>::const_iterator {
  private:
   using id_table_iterator = typename id_table_t::const_iterator;
 
@@ -219,8 +220,8 @@ class dense_point_store<_id_type, _value_type,
 };
 
 template <typename _id_type, typename _value_type, typename _allocator_type>
-class dense_point_store<_id_type, _value_type,
-                        _allocator_type>::const_id_iterator {
+class compact_point_store<_id_type, _value_type,
+                          _allocator_type>::const_id_iterator {
  private:
   using internal_iterator = typename id_table_t::const_iterator;
 
