@@ -34,7 +34,7 @@ namespace saltatlas::detail {
 /// >= 1.
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc, typename parser_func>
-void read_points_helper(
+inline void read_points_helper(
     const std::vector<std::filesystem::path>       &sorted_file_names,
     parser_func                                     parser,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
@@ -52,7 +52,7 @@ void read_points_helper(
     std::ifstream ifs(file_name);
     if (!ifs.is_open()) {
       comm.cerr() << "Failed to open " << file_name << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
     }
     std::string buf;
     std::size_t count_points = 0;
@@ -84,7 +84,7 @@ void read_points_helper(
   if (std::numeric_limits<id_t>::max() <= total_num_points) {
     comm.cerr0() << "Too small ID type: " << typeid(id_t).name() << " to hold "
                  << total_num_points << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
   }
 
   ygm::ygm_ptr<point_store<id_t, point_t, H, E, pstore_alloc>> ptr_point_store(
@@ -140,7 +140,7 @@ void read_points_helper(
 /// and each column is separated by 'delimiter'.
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc, typename parser_func>
-void read_points_with_id_helper(
+inline void read_points_with_id_helper(
     const std::vector<std::filesystem::path> &file_names, parser_func parser,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
@@ -191,7 +191,7 @@ void read_points_with_id_helper(
 /// and each column is separated by 'delimiter'.
 template <typename id_t, typename point_t, typename H, typename E,
           typename pstore_alloc>
-void read_points_with_id(
+inline void read_points_with_id(
     const std::vector<std::filesystem::path> &file_names, const char delimiter,
     point_store<id_t, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_t &id)>       &point_partitioner,
@@ -224,7 +224,7 @@ void read_points_with_id(
 /// function only once at a time.
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
-void read_points_with_id(
+inline void read_points_with_id(
     const std::vector<std::filesystem::path>          &file_names,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_type &id)>       &point_partitioner,
@@ -254,7 +254,7 @@ void read_points_with_id(
 /// 'delimiter'.
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
-void read_points(
+inline void read_points(
     const std::vector<std::filesystem::path> &file_names, const char delimiter,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_type &id)>       &point_partitioner,
@@ -275,7 +275,7 @@ void read_points(
 /// whitespace.
 template <typename id_type, typename point_t, typename H, typename E,
           typename pstore_alloc>
-void read_points(
+inline void read_points(
     const std::vector<std::filesystem::path>          &file_names,
     point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
     const std::function<int(const id_type &id)>       &point_partitioner,
@@ -303,16 +303,17 @@ inline void read_points(
     const std::function<int(const id_type &id)> &point_partitioner,
     point_store<id_type, point_t, H, E, PA>     &local_point_store,
     ygm::comm                                   &comm) {
-  if (format == "wsv") {
+  if (format == "wsv" || format == "tsv") {
     if (verbose)
-      comm.cout0() << "Read WSV format (whitespace separated, no ID) files"
+      comm.cout0() << "Read WSV/TSV (whitespace separated, no ID) format files"
                    << std::endl;
     detail::read_points(point_file_names, local_point_store, point_partitioner,
                         comm, verbose);
-  } else if (format == "wsv-id") {
+  } else if (format == "wsv-id" || format == "tsv-id") {
     if (verbose)
-      comm.cout0() << "Read WSV-ID (whitespace separated with ID) format files"
-                   << std::endl;
+      comm.cout0()
+          << "Read WSV-ID/TSV-ID (whitespace separated with ID) format files"
+          << std::endl;
     detail::read_points_with_id(point_file_names, local_point_store,
                                 point_partitioner, comm, verbose);
   } else if (format == "csv") {
@@ -368,12 +369,12 @@ using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
 /// \param file_path Path to a neighbor file.
 /// \param store Neighbor table instance.
 template <typename id_type, typename distance_type>
-inline void read_neighbors(const std::filesystem::path           &file_path,
+inline bool read_neighbors(const std::filesystem::path           &file_path,
                            neighbors_tbl<id_type, distance_type> &store) {
   std::ifstream ifs(file_path);
   if (!ifs.is_open()) {
     std::cerr << "Failed to open: " << file_path << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return false;
   }
 
   std::size_t num_entries = 0;
@@ -384,7 +385,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     }
     if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
       std::cerr << "Failed reading data from " << file_path << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
     ifs.clear();
     ifs.seekg(0);
@@ -392,7 +393,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     if (cnt_lines % 2 != 0) {
       std::cerr << "#of lines in the file is not an even number: " << file_path
                 << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
     num_entries = cnt_lines / 2;
   }
@@ -405,7 +406,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     std::getline(ifs, buf);
     if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
       std::cerr << "Failed reading data from " << file_path << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
     ifs.clear();
     ifs.seekg(0);
@@ -422,14 +423,14 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     }
     if (neighbors.size() != num_neighbors_per_entry) {
       std::cerr << "#of neighbors per line are not the same" << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
     store.push_back(std::move(neighbors));
     if (store.size() == num_entries) break;
   }
   if (store.size() != num_entries || ifs.bad() || ifs.fail()) {
     std::cerr << "Failed reading data from " << file_path << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return false;
   }
 
   // Reads distances.
@@ -438,7 +439,7 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
     const auto distances = detail::str_split<distance_type>(buf);
     if (distances.size() != num_neighbors_per_entry) {
       std::cerr << "#of neighbors per line are not the same" << std::endl;
-      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return false;
     }
 
     std::size_t k = 0;
@@ -450,8 +451,9 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
   }
   if (line_no != num_entries || (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
     std::cerr << "Failed reading data from " << file_path << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return false;
   }
+  return true;
 }
 
 /// \brief Reads a neighbor file and distributes them.
@@ -461,7 +463,9 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
                            ygm::comm                             &comm) {
   neighbors_tbl<id_type, distance_type> global_store;
   if (comm.rank0()) {
-    read_neighbors(file_path, global_store);
+    if (!read_neighbors(file_path, global_store)) {
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    }
   }
   detail::distribute_elements_by_block(global_store, store, comm);
 }
@@ -473,27 +477,28 @@ inline void read_neighbors(const std::filesystem::path           &file_path,
 /// \param query_file_path Path to a query file.
 /// \param queries Buffer to store read queries.
 template <typename point_t>
-inline void read_query(const std::filesystem::path &query_file_path,
+inline bool read_query(const std::filesystem::path &query_file_path,
                        std::function<point_t(const std::string &)> parser,
                        std::vector<point_t>                       &queries) {
-  if (query_file_path.empty()) return;
+  if (query_file_path.empty()) return true;
 
   std::ifstream ifs(query_file_path);
   if (!ifs.is_open()) {
     std::cerr << "Failed to open " << query_file_path << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    return false;
   }
 
   for (std::string line; std::getline(ifs, line);) {
     queries.push_back(parser(line));
   }
+  return true;
 }
 
 /// \brief read_query function for reading feature vectors.
 template <typename point_t>
-inline void read_query(const std::filesystem::path &query_file_path,
+inline bool read_query(const std::filesystem::path &query_file_path,
                        std::vector<point_t>        &queries) {
-  read_query<point_t>(
+  return read_query<point_t>(
       query_file_path,
       [](const std::string &line) {
         auto data = detail::str_split<typename point_t::value_type>(line);
@@ -512,7 +517,9 @@ inline void read_query(const std::filesystem::path &query_file_path,
                        std::vector<point_t> &queries, ygm::comm &comm) {
   std::vector<point_t> global_store;
   if (comm.rank0()) {
-    read_query(query_file_path, global_store);
+    if (!read_query(query_file_path, global_store)) {
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    }
   }
   detail::distribute_elements_by_block(global_store, queries, comm);
 }
