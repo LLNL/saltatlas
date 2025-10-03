@@ -31,8 +31,8 @@
 #endif
 #include <boost/container/flat_set.hpp>
 
-#include "detail/dataset_reader.hpp"
 #include "detail/pfv_replica_store.hpp"
+#include "detail/point_reader.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/dnnd/detail/knn_heap.hpp"
@@ -66,9 +66,8 @@ class neo_dnnd {
   using id_type       = _id_type;
   using fe_type       = _fe_type;
   using distance_type = _distance_type;
-  using point_store =
-      saltatlas::compact_point_store<id_type, fe_type,
-                                   metall::manager::allocator_type<std::byte>>;
+  using point_store   = saltatlas::compact_point_store<
+        id_type, fe_type, metall::manager::allocator_type<std::byte>>;
   using point_type = std::span<fe_type>;
   using distance_function =
       distance::distance_function_type<point_type, distance_type>;
@@ -196,7 +195,7 @@ class neo_dnnd {
     };
     std::vector<std::filesystem::path> dataset_path(paths_begin, paths_end);
     const auto [ids, fvs] =
-        saltatlas::dndetail::dataset_reader<id_type, fe_type>::read(
+        saltatlas::dndetail::point_reader<id_type, fe_type>::read(
             dataset_path, dataset_format, partitioner, m_comm);
 
     m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());

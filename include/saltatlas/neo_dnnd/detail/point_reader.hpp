@@ -30,13 +30,13 @@ namespace mpi = saltatlas::mpi;
 }
 
 template <typename _id_type, typename _feature_elem_type>
-class dataset_reader {
+class point_reader {
  public:
   using id_type           = _id_type;
   using feature_elem_type = _feature_elem_type;
 
-  dataset_reader()  = default;
-  ~dataset_reader() = default;
+  point_reader()  = default;
+  ~point_reader() = default;
 
   /// When reading files w/o ID, file paths are sorted by lexicographical order.
   /// IDs are assigned after the sorting.
@@ -64,6 +64,10 @@ class dataset_reader {
   }
 
  private:
+  static int priv_worker(const std::size_t i, const int num_ranks) {
+    return hash<>{}(i) % num_ranks;
+  }
+
   static std::vector<std::filesystem::path> priv_get_file_list(
       const std::vector<std::filesystem::path>& paths) {
     std::vector<std::filesystem::path> file_list;
@@ -114,6 +118,7 @@ class dataset_reader {
         ifs.read(reinterpret_cast<char*>(&num_points), sizeof(uint64_t));
         offsets.at(fi) = num_points;
       }
+      std::partial_sum(offsets.begin(), offsets.end() - 1, offsets.begin() + 1);
     }
     for (std::size_t i = 0; i < paths.size(); ++i) {
       comm.bcast(offsets[i], 0);
@@ -125,7 +130,7 @@ class dataset_reader {
     uint64_t num_points = 0;
     uint64_t num_dims   = 0;
     for (int fi = 0; fi < paths.size(); ++fi) {
-      if (fi % comm.size() != comm.rank()) {
+      if (priv_worker(fi, comm.size()) != comm.rank()) {
         continue;
       }
 
@@ -181,7 +186,7 @@ class dataset_reader {
     uint64_t num_points = 0;
     uint64_t num_dims   = 0;
     for (int fi = 0; fi < paths.size(); ++fi) {
-      if (fi % comm.size() != comm.rank()) {
+      if (priv_worker(fi, comm.size()) != comm.rank()) {
         continue;
       }
 
@@ -245,7 +250,7 @@ class dataset_reader {
     std::vector<std::vector<feature_elem_type>> read_features(comm.size());
     std::size_t                                 dims = 0;
     for (int i = 0; i < int(paths.size()); ++i) {
-      if (i % int(comm.size()) != comm.rank()) {
+      if (priv_worker(i, comm.size()) != comm.rank()) {
         continue;
       }
       std::ifstream ifs(paths[i]);
@@ -278,7 +283,7 @@ class dataset_reader {
     }
     comm.barrier();
 
-    comm.bcast(dims, 0);
+    comm.bcast(dims, priv_worker(0, comm.size()));
 
     return priv_distribute_points(std::move(read_ids), std::move(read_features),
                                   dims, comm);
@@ -295,7 +300,7 @@ class dataset_reader {
 
     comm.cout0() << "Reading points with ID..." << std::endl;
     for (int i = 0; i < int(paths.size()); ++i) {
-      if (i % comm.size() != comm.rank()) {
+      if (priv_worker(i, comm.size()) != comm.rank()) {
         continue;
       }
       std::ifstream ifs(paths[i]);
@@ -351,7 +356,7 @@ class dataset_reader {
 
     std::vector<std::size_t> num_lines(paths.size());
     for (int i = 0; i < int(paths.size()); ++i) {
-      if (i % comm.size() != comm.rank()) {
+      if (priv_worker(i, comm.size()) != comm.rank()) {
         continue;
       }
       std::ifstream ifs(paths[i]);
@@ -371,7 +376,7 @@ class dataset_reader {
 
     // broadcast the number of lines in each file.
     for (std::size_t i = 0; i < paths.size(); ++i) {
-      comm.bcast(num_lines[i], i % comm.size());
+      comm.bcast(num_lines[i], priv_worker(i, comm.size()));
     }
 
     const auto total_num_lines =
