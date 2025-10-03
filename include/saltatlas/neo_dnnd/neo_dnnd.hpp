@@ -185,7 +185,7 @@ class neo_dnnd {
   /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view&      dataset_format,
+                   const std::string_view& dataset_format,
                    const bool read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
@@ -425,7 +425,7 @@ class neo_dnnd {
   void dump_graph(const knng_type& knng, const std::filesystem::path& base_path,
                   bool dump_distance = false) {
     std::filesystem::path knng_out_path =
-        base_path.string() + "-" + std::to_string(m_comm.rank()) + ".txt";
+        base_path.string() + "-" + std::to_string(m_comm.rank());
 
     std::ofstream ofs(knng_out_path);
     if (!ofs.is_open()) {
