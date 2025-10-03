@@ -1,0 +1,1 @@
+add_saltatlas_test(test_data_reader)

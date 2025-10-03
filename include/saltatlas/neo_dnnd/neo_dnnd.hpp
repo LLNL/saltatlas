@@ -31,15 +31,15 @@
 #endif
 #include <boost/container/flat_set.hpp>
 
-#include "detail/dataset_reader.hpp"
 #include "detail/pfv_replica_store.hpp"
+#include "detail/point_reader.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/dnnd/detail/knn_heap.hpp"
 #include "saltatlas/dnnd/detail/utilities/omp.hpp"
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
 #include "saltatlas/dnnd/distance.hpp"
-#include "saltatlas/neo_dnnd/dense_point_store.hpp"
+#include "saltatlas/neo_dnnd/compact_point_store.hpp"
 #include "saltatlas/neo_dnnd/detail/utilities/counter_db.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
 #include "saltatlas/neo_dnnd/time_recorder.hpp"
@@ -66,9 +66,8 @@ class neo_dnnd {
   using id_type       = _id_type;
   using fe_type       = _fe_type;
   using distance_type = _distance_type;
-  using point_store =
-      saltatlas::dense_point_store<id_type, fe_type,
-                                   metall::manager::allocator_type<std::byte>>;
+  using point_store   = saltatlas::compact_point_store<
+        id_type, fe_type, metall::manager::allocator_type<std::byte>>;
   using point_type = std::span<fe_type>;
   using distance_function =
       distance::distance_function_type<point_type, distance_type>;
@@ -185,7 +184,7 @@ class neo_dnnd {
   /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view&      dataset_format,
+                   const std::string_view& dataset_format,
                    const bool read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
@@ -196,7 +195,7 @@ class neo_dnnd {
     };
     std::vector<std::filesystem::path> dataset_path(paths_begin, paths_end);
     const auto [ids, fvs] =
-        saltatlas::dndetail::dataset_reader<id_type, fe_type>::read(
+        saltatlas::dndetail::point_reader<id_type, fe_type>::read(
             dataset_path, dataset_format, partitioner, m_comm);
 
     m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());
@@ -208,6 +207,8 @@ class neo_dnnd {
 
   /// \brief Add points to the internal point store.
   /// All ranks must call this function although some ranks add no points.
+  /// This function can not be called multiple times, i.e., all points must be
+  /// added at once.
   /// \tparam id_iterator Iterator type for point IDs.
   /// \tparam point_iterator Iterator type for points.
   /// A single point type must support range-based for loop and its value type
