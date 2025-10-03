@@ -50,6 +50,7 @@ struct options {
   std::string knng_dump_dir;
   bool        optimize                      = false;
   double      pruning_factor                = -1;
+  int         num_threads                   = 2;
   std::size_t batch_size                    = 1ULL << 25;
   double      popular_fv_ratio              = 0.0f;
   bool        donot_remove_dup_fvs          = false;
@@ -70,6 +71,7 @@ struct options {
     os << "  Dump distance: " << dump_distance << std::endl;
     os << "  Optimize: " << optimize << std::endl;
     os << "  Optimization pruning factor: " << pruning_factor << std::endl;
+    os << "  #of threads: " << num_threads << std::endl;
     os << "  Batch size: " << batch_size << std::endl;
     os << "  Ratio of FVs to replicate: " << popular_fv_ratio << std::endl;
     os << "  Do not remove duplicate feature vectors: " << donot_remove_dup_fvs
@@ -102,6 +104,7 @@ void usage(ost& os) {
         "Default: 0.8."
      << "\n -d [double, optional] delta (terminal condition) parameter in "
         "NN-Descent. Default: 0.001."
+     << "\n -t [int, optional] Number of threads per MPI rank. Default: 2."
      << "\n -b [int, optional] KNNG building batch size. Default: 2^25."
      << "\n -L [optional] Do not share point store in local node."
      << "\n -A [optional] Do not remove duplicate feature vectors."
@@ -117,7 +120,7 @@ void usage(ost& os) {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:r:d:b:G:AP:LSOm:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:r:d:t:b:G:AP:LSOm:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.dataset_path = optarg;
@@ -136,6 +139,9 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'd':
         opt.delta = std::stod(optarg);
+        break;
+      case 't':
+        opt.num_threads = std::stoi(optarg);
         break;
       case 'b':
         opt.batch_size = std::stoi(optarg);
@@ -227,9 +233,9 @@ int main(int argc, char* argv[]) {
       goto EXIT_NORMAL;
     }
     opt.show(comm.cout0());
+    utility::omp::set_num_threads(opt.num_threads);
     if (opt.verbose) {
       {
-        utility::omp::set_num_threads(2);
         OMP_DIRECTIVE(parallel) {
           const auto num_threads = utility::omp::get_num_threads();
           OMP_DIRECTIVE(single) {
