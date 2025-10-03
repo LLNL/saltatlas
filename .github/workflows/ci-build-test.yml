@@ -19,8 +19,8 @@ jobs:
       - name: Test
         run: |
           cd build
+          mpirun -np 1 ./test/common/test_data_reader 
           mpirun -np 2 ./test/common/test_data_reader 
-          mpirun -np 4 ./test/common/test_data_reader 
 
   build-just-install:
     runs-on: ubuntu-latest
