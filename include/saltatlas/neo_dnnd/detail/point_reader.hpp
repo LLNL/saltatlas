@@ -20,8 +20,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../mpi.hpp"
+#include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/common/detail/utilities/string_cast.hpp"
+#include "saltatlas/neo_dnnd/mpi.hpp"
 
 namespace saltatlas::dndetail {
 
