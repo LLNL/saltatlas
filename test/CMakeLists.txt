@@ -13,4 +13,5 @@ function ( add_saltatlas_test test_name )
   target_link_libraries(${test_exe} saltatlas)
 endfunction()
 
+add_subdirectory(common)
 add_subdirectory(neo_dnnd)

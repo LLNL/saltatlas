@@ -24,9 +24,9 @@ endif ()
 # saltatlas configuration
 # ---------------------------------------------------------------------------- #
 project(
-        saltatlas
-        VERSION 0.1
-        LANGUAGES C CXX
+    saltatlas
+    VERSION 0.1
+    LANGUAGES C CXX
 )
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -45,25 +45,26 @@ option(SALTATLAS_DETERMINISM "Avoid shuffling for deterministic output" OFF)
 set(BOOST_SOURCE_DIR CACHE STRING "Path to Boost libraries directory already uncompressed. Must be a version that supports CMake.")
 set(BOOST_FETCH_URL CACHE STRING "URL or file path to an archived Boost source. Must be a version that supports CMake.")
 set(HNSWLIB_FETCH_GIT
-        "https://github.com/bwpriest/hnswlib.git"
-        CACHE STRING "GIT to fetch hnswlib")
+    "https://github.com/bwpriest/hnswlib.git"
+    CACHE STRING "GIT to fetch hnswlib")
 set(HNSWLIB_GIT_BRANCH
-        "feature/cmake_facelift"
-        CACHE STRING "Name of GIT branch for hnswlib")
+    "feature/cmake_facelift"
+    CACHE STRING "Name of GIT branch for hnswlib")
 set(YGM_FETCH_GIT
-        "https://github.com/llnl/ygm.git"
-        CACHE STRING "GIT to fetch ygm")
+    "https://github.com/llnl/ygm.git"
+    CACHE STRING "GIT to fetch ygm")
 set(YGM_GIT_BRANCH
-        "master"
-        CACHE STRING "Name of GIT branch for ygm")
+    "master"
+    CACHE STRING "Name of GIT branch for ygm")
 set(METALL_FETCH_GIT
-        "https://github.com/llnl/metall.git"
-        CACHE STRING "GIT to fetch Metall")
+    "https://github.com/llnl/metall.git"
+    CACHE STRING "GIT to fetch Metall")
 set(METALL_GIT_BRANCH
-        "master"
-        CACHE STRING "Name of GIT branch for Metall")
+    "master"
+    CACHE STRING "Name of GIT branch for Metall")
 # Link Boost UUID with libatomic fails on LC machines
 option(BOOST_UUID_LINK_LIBATOMIC "Link Boost UUID with libatomic" OFF)
+option(SALTATLAS_BUILD_TEST "Build the test" OFF)
 
 # Only do these if this is the main project, and not if it is included through
 # add_subdirectory
@@ -85,11 +86,11 @@ endif ()
 file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
 if (EXISTS "${LOC_PATH}")
     message(
-            FATAL_ERROR
-            "You cannot build in a source directory "
-            "(or any directory with a CMakeLists.txt file). "
-            "Please make a build subdirectory. "
-            "Feel free to remove CMakeCache.txt and CMakeFiles."
+        FATAL_ERROR
+        "You cannot build in a source directory "
+        "(or any directory with a CMakeLists.txt file). "
+        "Please make a build subdirectory. "
+        "Feel free to remove CMakeCache.txt and CMakeFiles."
     )
 endif ()
 
@@ -97,14 +98,14 @@ endif ()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.1")
         message(
-                WARNING
-                "Your GCC version may be too old. Please consider using GCC version 9.3.1 or higher."
+            WARNING
+            "Your GCC version may be too old. Please consider using GCC version 9.3.1 or higher."
         )
     endif ()
 else ()
     message(
-            WARNING
-            "You are not using GCC. This project has only been tested with GCC. Please consider using GCC version 9.3.1 or higher."
+        WARNING
+        "You are not using GCC. This project has only been tested with GCC. Please consider using GCC version 9.3.1 or higher."
     )
 endif ()
 
@@ -145,7 +146,7 @@ elseif (BOOST_FETCH_URL)
 else ()
     # Use default Boost version if not specified by the user
     fetch_boost(URL "https://github.com/boostorg/boost/releases/download/boost-1.88.0/boost-1.88.0-cmake.tar.gz"
-            COMPONENTS ${BOOST_COMPS})
+        COMPONENTS ${BOOST_COMPS})
 endif ()
 
 #
@@ -155,9 +156,9 @@ if (SALTATLAS_USE_HNSWLIB)
     # Do not compile any hnswlib tests
     set(JUST_INSTALL_HNSWLIB ON)
     FetchContent_Declare(
-            hnswlib
-            GIT_REPOSITORY ${HNSWLIB_FETCH_GIT}
-            GIT_TAG ${HNSWLIB_GIT_BRANCH}
+        hnswlib
+        GIT_REPOSITORY ${HNSWLIB_FETCH_GIT}
+        GIT_TAG ${HNSWLIB_GIT_BRANCH}
     )
     FetchContent_MakeAvailable(hnswlib)
 endif ()
@@ -167,9 +168,9 @@ endif ()
 #
 set(JUST_INSTALL_YGM TRUE)
 FetchContent_Declare(
-        ygm
-        GIT_REPOSITORY ${YGM_FETCH_GIT}
-        GIT_TAG ${YGM_GIT_BRANCH}
+    ygm
+    GIT_REPOSITORY ${YGM_FETCH_GIT}
+    GIT_TAG ${YGM_GIT_BRANCH}
 )
 FetchContent_MakeAvailable(ygm)
 
@@ -180,11 +181,11 @@ add_library(saltatlas INTERFACE)
 add_library(saltatlas::saltatlas ALIAS saltatlas)
 target_compile_features(saltatlas INTERFACE cxx_std_20)
 target_include_directories(
-        saltatlas INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+    saltatlas INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(
-        saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm ${BOOST_LIBS}
+    saltatlas INTERFACE ${SALTATLAS_CEREAL_TARGET} ygm::ygm ${BOOST_LIBS}
 )
 if (SALTATLAS_USE_HNSWLIB)
     target_link_libraries(saltatlas INTERFACE hnswlib::hnswlib)
@@ -200,9 +201,9 @@ endif ()
 if (SALTATLAS_USE_METALL)
     set(JUST_INSTALL_METALL_HEADER ON)
     FetchContent_Declare(
-            Metall
-            GIT_REPOSITORY ${METALL_FETCH_GIT}
-            GIT_TAG ${METALL_GIT_BRANCH}
+        Metall
+        GIT_REPOSITORY ${METALL_FETCH_GIT}
+        GIT_TAG ${METALL_GIT_BRANCH}
     )
     FetchContent_MakeAvailable(Metall)
 
@@ -217,5 +218,8 @@ endif ()
 if (SALTATLAS_MAIN_PROJECT)
     add_subdirectory(examples)
     add_subdirectory(tools)
-    add_subdirectory(test)
+    if (SALTATLAS_BUILD_TEST)
+        enable_testing()
+        add_subdirectory(test)
+    endif ()
 endif ()
