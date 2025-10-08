@@ -1,1 +1,2 @@
 add_saltatlas_test(test_data_reader)
+add_saltatlas_test(test_data_reader_kernel)
