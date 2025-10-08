@@ -36,7 +36,8 @@ namespace saltatlas::detail {
 template <typename feature_element_t>
 inline std::vector<feature_element_t> parse_feature_vector(
     const std::string &input) {
-  return str_split<feature_element_t>(input);
+  auto fv = str_split<feature_element_t>(input);
+  return fv;
 };
 
 /// \brief Parse a feature vector from a string.
@@ -54,6 +55,7 @@ inline std::vector<feature_element_t> parse_feature_vector(
 /// \brief Read points (feature vectors) using multiple processes.
 /// The input files contains ID at the first column,
 /// and each column is separated by whitespace.
+/// If the feature_element_t is char, spaces in the feature vector are removed.
 /// \warning
 /// This function uses static variables internally. Each process must call this
 /// function only once at a time.
@@ -71,6 +73,13 @@ parse_feature_vector_with_id(const std::string &input) {
   // Extract point (remaining tokens)
   std::string point_str = ss.str().substr(ss.tellg());
   auto        fv        = parse_feature_vector<feature_element_t>(point_str);
+  // Remove spaces if feature_element_t is char
+  if constexpr (std::is_same_v<feature_element_t, char>) {
+    fv.erase(std::remove_if(fv.begin(), fv.end(),
+                            [](const char c) { return c == ' '; }),
+             fv.end());
+  }
+
   return std::make_pair(std::move(id), std::move(fv));
 }
 

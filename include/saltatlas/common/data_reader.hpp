@@ -16,11 +16,11 @@
 
 #include <ygm/comm.hpp>
 
-#include "saltatlas/common/point_store.hpp"
 #include "saltatlas/common/detail/data_reader_kernel.hpp"
+#include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/common/detail/utilities/ygm.hpp"
-#include "saltatlas/common/detail/neighbor.hpp"
+#include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::detail {
 
@@ -228,6 +228,7 @@ inline void read_points_with_id(
     const auto [pid, elems] =
         parse_feature_vector_with_id<id_type, typename point_t::value_type>(
             input);
+    id = pid;
     point.clear();
     point.insert(point.begin(), elems.begin(), elems.end());
     return true;
@@ -340,10 +341,11 @@ inline void read_points(
 /// \brief Reads a neighbor file and distributes them.
 template <typename id_type, typename distance_type>
 inline void read_neighbors(
-    const std::filesystem::path                                     &file_path,
+    const std::filesystem::path &file_path,
     std::vector<std::vector<detail::neighbor<id_type, distance_type>>> &store,
-    ygm::comm                                                       &comm) {
-  std::vector<std::vector<detail::neighbor<id_type, distance_type>>> global_store;
+    ygm::comm                                                          &comm) {
+  std::vector<std::vector<detail::neighbor<id_type, distance_type>>>
+      global_store;
   if (comm.rank0()) {
     if (!detail::read_neighbors_kernel(file_path, global_store)) {
       MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
