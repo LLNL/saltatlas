@@ -87,4 +87,4 @@ if (SALTATLAS_USE_METALL)
 endif ()
 
 add_subdirectory(datasets)
-add_subdirectory(knng_shm_query)
+#add_subdirectory(knng_shm_query)
