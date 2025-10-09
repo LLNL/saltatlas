@@ -18,6 +18,7 @@
 
 namespace saltatlas::dndetail {
 
+// Wrapper function to use the common read-points function
 template <typename id_type, typename fe_type>
 static std::pair<std::vector<id_type>, std::vector<std::vector<fe_type>>>
 read_points(const std::vector<std::filesystem::path>&    paths,
@@ -32,11 +33,13 @@ read_points(const std::vector<std::filesystem::path>&    paths,
   }
 
   std::vector<id_type>              ids;
-  std::vector<std::vector<fe_type>> features;
-  for (auto& [id, feature] : pstore) {
+  std::vector<std::vector<fe_type>> fvs;
+  ids.reserve(pstore.size());
+  fvs.reserve(pstore.size());
+  for (auto& [id, fv] : pstore) {
     ids.push_back(id);
-    features.push_back(std::move(feature));
+    fvs.push_back(std::move(fv));
   }
-  return std::make_pair(std::move(ids), std::move(features));
+  return std::make_pair(std::move(ids), std::move(fvs));
 }
 }  // namespace saltatlas::dndetail
