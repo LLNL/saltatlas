@@ -61,6 +61,12 @@ class dnnd {
  private:
   using self_type = dnnd<Id, Point, Distance>;
 
+  constexpr static unsigned int k_pstore_hash_seed            = 0xA1B2C3D4;
+  constexpr static unsigned int k_point_partitioner_hash_seed = 0x1A2B3C4D;
+  static_assert(k_pstore_hash_seed != k_point_partitioner_hash_seed,
+                "k_pstore_hash_seed and k_point_partitioner_hash_seed must be "
+                "different.");
+
  public:
   /// \brief Point ID type.
   using id_type = Id;
@@ -72,8 +78,8 @@ class dnnd {
  private:
   /// \brief Point store type.
   using point_store_type =
-      point_store<id_type, point_type, std::hash<id_type>, std::equal_to<>,
-                  std::allocator<std::byte>>;
+      point_store<id_type, point_type, hash<k_pstore_hash_seed>,
+                  std::equal_to<>, std::allocator<std::byte>>;
   /// \brief k-NN index type.
   using knn_index_type = dndetail::nn_index<id_type, distance_type>;
 
@@ -568,8 +574,9 @@ class dnnd {
   /// \return A point partitioner instance.
   point_partitioner priv_get_point_partitioner() const {
     const int size = m_comm.size();
-    // TODO: hash id?
-    return [size](const id_type& id) { return id % size; };
+    return [size](const id_type& id) {
+      return hash<k_point_partitioner_hash_seed>{}(id) % size;
+    };
   };
 
   /// \brief Add a single point. Only to be used by add_points.
