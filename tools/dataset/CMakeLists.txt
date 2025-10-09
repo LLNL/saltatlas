@@ -1,0 +1,6 @@
+configure_file(convert_ann_bench_dataset.py convert_ann_bench_dataset.py COPYONLY)
+configure_file(convert_big_ann_bench_dataset.py convert_big_ann_bench_dataset.py COPYONLY)
+
+add_executable(convert_wsv_to_wsv_id convert_wsv_to_wsv_id.cpp)
+target_link_libraries(convert_wsv_to_wsv_id PUBLIC saltatlas)
+setup_omp_target(convert_wsv_to_wsv_id)
