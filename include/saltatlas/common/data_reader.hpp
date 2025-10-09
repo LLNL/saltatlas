@@ -294,7 +294,7 @@ template <typename id_type, typename point_t, typename H, typename E,
           typename PA>
 inline void read_points(
     const std::vector<std::filesystem::path> &point_file_names,
-    const std::filesystem::path &format, const bool verbose,
+    const std::string &format, const bool verbose,
     const std::function<int(const id_type &id)> &point_partitioner,
     point_store<id_type, point_t, H, E, PA>     &local_point_store,
     ygm::comm                                   &comm) {

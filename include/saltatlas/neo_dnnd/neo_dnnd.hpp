@@ -184,19 +184,18 @@ class neo_dnnd {
   /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view& dataset_format,
-                   const bool read_nlocal_pstores_directly = true) {
+                   const std::string& dataset_format,
+                   const bool         read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
                           << m_read_nlocal_pstores_directly << std::endl;
 
-    auto partitioner = [this](const id_type id) {
-      return saltatlas::partition(id, m_comm.size());
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
+    auto partitioner = [this](const id_type id) -> int {
+      return priv_owner(id);
     };
-    std::vector<std::filesystem::path> dataset_path(paths_begin, paths_end);
-    const auto [ids, fvs] =
-        saltatlas::dndetail::point_reader<id_type, fe_type>::read(
-            dataset_path, dataset_format, partitioner, m_comm);
+    const auto [ids, fvs] = dndetail::read_points<id_type, fe_type>(
+        point_file_paths, dataset_format, partitioner, m_verbose, m_comm);
 
     m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());
     m_fv_send_batch_size =

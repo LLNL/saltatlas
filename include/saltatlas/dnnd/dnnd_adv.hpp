@@ -275,7 +275,7 @@ class dnnd_adv {
   /// column).
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view file_format) {
+                   const std::string& file_format) {
     static_assert(
         std::is_same_v<
             typename std::iterator_traits<paths_iterator>::value_type,

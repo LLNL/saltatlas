@@ -28,6 +28,8 @@ namespace saltatlas {
 /// \tparam Hasher Hash function for ID.
 /// \tparam EqualTo Equal function for ID.
 /// \tparam Allocator Allocator type.
+/// \warning Using the same hash function as the point partitioner may degrade
+/// performance.
 template <typename ID, typename PointType, typename Hasher = std::hash<ID>,
           typename EqualTo   = std::equal_to<ID>,
           typename Allocator = std::allocator<std::byte>>

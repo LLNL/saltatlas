@@ -185,7 +185,10 @@ void MurmurHash3_x64_128(const void *key, const int len, const uint32_t seed,
 
 namespace saltatlas {
 
-template <unsigned int seed = 123>
+/// \brief STL-compatible hash function using MurmurHash3_x64_128.
+/// \tparam seed Seed value for the hash function. The default value is just a
+/// random number.
+template <unsigned int seed = 0x25D1ECA>
 struct hash {
   template <typename T>
   inline std::size_t operator()(const T &key) const noexcept {
