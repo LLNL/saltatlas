@@ -6,7 +6,9 @@
 #pragma once
 
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <utility>
 
 #if __has_include(<metall/detail/utilities.hpp>)

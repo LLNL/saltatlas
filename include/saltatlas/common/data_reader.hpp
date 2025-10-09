@@ -117,9 +117,12 @@ inline void read_points_helper(
       comm.async(
           point_partitioner(id),
           [](auto, const id_t id, const auto &point, auto ptr_point_store) {
+            if (ptr_point_store->contains(id)) {
+              std::cerr << "Duplicate ID " << id << std::endl;
+              MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+            }
             auto &p = (*ptr_point_store)[id];
-            p.clear();
-            p.insert(p.begin(), point.begin(), point.end());
+            p       = point;
           },
           id, point, ptr_point_store);
 
@@ -148,6 +151,7 @@ inline void read_points_with_id_helper(
     return (hash<>{}(i) % comm.size()) == comm.rank();
   };
   static auto &ref_point_store = local_point_store;
+  ref_point_store              = local_point_store;
   comm.cf_barrier();
 
   for (std::size_t file_no = 0; file_no < file_names.size(); ++file_no) {

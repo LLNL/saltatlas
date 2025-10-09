@@ -23,6 +23,7 @@
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/common/detail/utilities/string_cast.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
+#include "saltatlas/neo_dnnd/compact_point_store.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -430,10 +431,14 @@ class point_reader {
           std::vector<id_type> ids_recv_buf;
           comm.sendrecv_arb_size(pair_rank, std::move(read_ids[pair_rank]),
                                  ids_recv_buf);
+          read_ids[pair_rank].clear();
+          read_ids[pair_rank].shrink_to_fit();
 
           std::vector<feature_elem_type> features_recv_buf;
           comm.sendrecv_arb_size(pair_rank, std::move(read_features[pair_rank]),
                                  features_recv_buf);
+          read_features[pair_rank].clear();
+          read_features[pair_rank].shrink_to_fit();
 
           const auto num_recv_points = ids_recv_buf.size();
           for (std::size_t i = 0; i < num_recv_points; ++i) {

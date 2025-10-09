@@ -896,7 +896,7 @@ class neo_dnnd {
 
         assert(priv_owner(sid) == m_comm.rank());
         const auto dist = m_distance_func(
-            std::span(point_store[sid], num_dims()),
+            std::span(const_cast<fe_type*>(point_store[sid]), num_dims()),
             std::span(&feature_recv_buf[buf_i * num_dims()], num_dims()));
         assert(m_graph.count(sid) > 0);
         m_graph.at(sid).try_add(nid, dist, true);  // push as a new neighbor
@@ -1447,7 +1447,7 @@ class neo_dnnd {
       const auto fv_idx      = (indices.size() > 0) ? indices[i] : i;
       const auto sent_fv_pos = fv_idx * num_dims();
       const auto dist        = m_distance_func(
-          std::span(point_store[pid], num_dims()),
+          std::span(const_cast<fe_type*>(point_store[pid]), num_dims()),
           std::span(const_cast<fe_type*>(&features.at(sent_fv_pos)),
                            num_dims()));
       out_distances[i] = dist;
