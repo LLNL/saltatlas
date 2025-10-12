@@ -12,8 +12,11 @@
 #include <unordered_set>
 #include <vector>
 
+#if __has_include(<ygm/comm.hpp>) && __has_include(<ygm/detail/collective.hpp>)
+#define SALTATLAS_UTILITY_INCLUDED_YGM
 #include <ygm/comm.hpp>
 #include <ygm/detail/collective.hpp>
+#endif
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
@@ -193,6 +196,8 @@ inline std::vector<double> get_recall_scores_with_distance_ties(
   return scores;
 }
 
+#ifdef SALTATLAS_UTILITY_INCLUDED_YGM
+
 /// \brief Gather neighbors to the specified rank.
 /// \tparam id_t ID type.
 /// \tparam dist_t Distance type.
@@ -299,6 +304,7 @@ inline void gather_neighbor_features(
     comm.barrier();
   }
 }
+#endif  // SALTATLAS_UTILITY_INCLUDED_YGM
 
 /// \brief Dumps neighbors to a file.
 /// There are two blocks in the dumped file.
@@ -376,6 +382,7 @@ void dump_neighbors_with_features(
   }
 }
 
+#ifdef SALTATLAS_UTILITY_INCLUDED_YGM
 /// \brief Gather and dump neighbors to a file in the root rank.
 template <typename id_t, typename dist_t>
 inline void gather_and_dump_neighbors(
@@ -416,4 +423,6 @@ inline void gather_and_dump_neighbors_with_features(
   }
   comm.cf_barrier();
 }
+#endif  // SALTATLAS_UTILITY_INCLUDED_YGM
+
 }  // namespace saltatlas::utility
