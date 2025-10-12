@@ -19,6 +19,7 @@ jobs:
       - name: Test
         run: |
           cd build
+          ./test/common/test_data_reader_kernel
           mpirun -np 1 ./test/common/test_data_reader 
           mpirun -np 2 ./test/common/test_data_reader 
 

@@ -184,19 +184,18 @@ class neo_dnnd {
   /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string_view& dataset_format,
-                   const bool read_nlocal_pstores_directly = true) {
+                   const std::string& dataset_format,
+                   const bool         read_nlocal_pstores_directly = true) {
     m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
     priv_cout0(m_verbose) << "Read node local pstores directly: "
                           << m_read_nlocal_pstores_directly << std::endl;
 
-    auto partitioner = [this](const id_type id) {
-      return saltatlas::partition(id, m_comm.size());
+    std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
+    auto partitioner = [this](const id_type id) -> int {
+      return priv_owner(id);
     };
-    std::vector<std::filesystem::path> dataset_path(paths_begin, paths_end);
-    const auto [ids, fvs] =
-        saltatlas::dndetail::point_reader<id_type, fe_type>::read(
-            dataset_path, dataset_format, partitioner, m_comm);
+    const auto [ids, fvs] = dndetail::read_points<id_type, fe_type>(
+        point_file_paths, dataset_format, partitioner, m_verbose, m_comm);
 
     m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());
     m_fv_send_batch_size =
@@ -896,7 +895,7 @@ class neo_dnnd {
 
         assert(priv_owner(sid) == m_comm.rank());
         const auto dist = m_distance_func(
-            std::span(point_store[sid], num_dims()),
+            std::span(const_cast<fe_type*>(point_store[sid]), num_dims()),
             std::span(&feature_recv_buf[buf_i * num_dims()], num_dims()));
         assert(m_graph.count(sid) > 0);
         m_graph.at(sid).try_add(nid, dist, true);  // push as a new neighbor
@@ -1447,7 +1446,7 @@ class neo_dnnd {
       const auto fv_idx      = (indices.size() > 0) ? indices[i] : i;
       const auto sent_fv_pos = fv_idx * num_dims();
       const auto dist        = m_distance_func(
-          std::span(point_store[pid], num_dims()),
+          std::span(const_cast<fe_type*>(point_store[pid]), num_dims()),
           std::span(const_cast<fe_type*>(&features.at(sent_fv_pos)),
                            num_dims()));
       out_distances[i] = dist;

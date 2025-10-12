@@ -111,7 +111,7 @@ class dhnsw {
 
   template <typename PathIterator>
   void load_points(PathIterator paths_begin, PathIterator paths_end,
-                   const std::string_view file_format) {
+                   const std::string &file_format) {
     static_assert(
         std::is_same_v<typename std::iterator_traits<PathIterator>::value_type,
                        std::filesystem::path>,

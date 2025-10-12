@@ -70,6 +70,7 @@ inline std::vector<T> str_split(const std::string &input) {
   std::vector<T> result;
   std::string    token;
   for (std::stringstream ss(input); ss >> token;) {
+    if (token.empty()) continue;
     result.push_back(str_cast<T>(token));
   }
   return result;
@@ -97,6 +98,7 @@ inline std::vector<T> str_split(const std::string &input,
   std::string        token;
   std::istringstream token_stream(input);
   while (std::getline(token_stream, token, delimiter)) {
+    if (token.empty()) continue;
     result.push_back(str_cast<T>(token));
   }
   return result;

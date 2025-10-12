@@ -24,8 +24,8 @@ function(add_saltatlas_dnnd_example_feature_type example_name type_name)
     add_executable(${example_exe} ${example_source})
     target_link_libraries(${example_exe} PUBLIC saltatlas Boost::unordered Boost::container)
     target_compile_definitions(
-            ${example_exe}
-            PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}"
+        ${example_exe}
+        PRIVATE "SALTATLAS_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}"
     )
 endfunction()
 
@@ -58,7 +58,7 @@ function(add_saltatlas_neo_dnnd_example_feature_type example_name type_name)
         message(WARNING "OpenMP not found, ${example_exe} will not be built with OpenMP support")
     endif ()
     target_compile_definitions(${example_exe}
-            PRIVATE "SALTATLAS_NEO_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}")
+        PRIVATE "SALTATLAS_NEO_DNND_EXAMPLE_FEATURE_ELEMENT_TYPE=${type_name}")
 endfunction()
 
 add_saltatlas_example(dnnd_simple)
@@ -87,3 +87,4 @@ if (SALTATLAS_USE_METALL)
 endif ()
 
 add_subdirectory(datasets)
+#add_subdirectory(knng_shm_query)

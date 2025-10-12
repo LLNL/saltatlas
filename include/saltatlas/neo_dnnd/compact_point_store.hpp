@@ -98,6 +98,28 @@ class compact_point_store {
     return *this;
   }
 
+  bool init(std::size_t num_points, std::size_t num_dims) {
+    m_num_points = num_points;
+    m_num_dims   = num_dims;
+
+    m_id_map.clear();
+    m_id_map.reserve(m_num_points);
+
+    if (m_data) {
+      std::cerr << "Data is already allocated." << std::endl;
+      return false;
+    }
+
+    m_data = m_allocator.allocate(m_num_points * m_num_dims);
+    return !!m_data;
+  }
+
+  inline bool contains(id_type id) const { return m_id_map.count(id) > 0; }
+
+  inline std::size_t size() const { return num_points(); }
+
+  inline bool empty() const { return size() == 0; }
+
   inline value_type *operator[](id_type id) {
     if (m_id_map.count(id) == 0) {
       const id_type internal_id = m_id_map.size();
@@ -109,7 +131,7 @@ class compact_point_store {
     return data() + internal_id * m_num_dims;
   }
 
-  inline value_type *operator[](id_type id) const {
+  inline const value_type *operator[](id_type id) const {
 #ifndef NDEBUG
     if (m_id_map.count(id) == 0) {
       std::cerr << "ID " << id << " not found." << std::endl;
@@ -122,30 +144,15 @@ class compact_point_store {
     return data() + internal_id * m_num_dims;
   }
 
-  bool contains(id_type id) const { return m_id_map.count(id) > 0; }
+  const value_type *at(id_type id) const { return (*this)[id]; }
 
-  inline value_type *data() const { return metall::to_raw_pointer(m_data); }
+  inline value_type *data() { return metall::to_raw_pointer(m_data); }
+
+  inline const value_type *data() const { return metall::to_raw_pointer(m_data); }
 
   inline std::size_t num_points() const { return m_id_map.size(); }
 
-  inline std::size_t size() const { return num_points(); }
-
   inline std::size_t dim() const { return m_num_dims; }
-
-  bool init(std::size_t num_points, std::size_t num_dims) {
-    m_num_points = num_points;
-    m_num_dims   = num_dims;
-
-    m_id_map.reserve(m_num_points);
-
-    if (m_data) {
-      std::cerr << "Data is already allocated." << std::endl;
-      return false;
-    }
-
-    m_data = m_allocator.allocate(m_num_points * m_num_dims);
-    return !!m_data;
-  }
 
   const_iterator begin() const {
     return const_iterator(m_id_map.cbegin(), data());

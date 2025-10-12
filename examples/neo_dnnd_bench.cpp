@@ -6,8 +6,12 @@
 // Must run srun with '-mblock' option, which is the default one.
 // Do not use '--mpibind=off' option.
 
+// Disable Metall's internal optimizations to reduce the memory consumption
 #define METALL_DISABLE_CONCURRENCY
+#define METALL_DISABLE_OBJECT_CACHE
 
+// Reduce Metall's VM reservation size
+// (DRAM size) / (#of MPI ranks per node) would be a reasonable value.
 #ifdef __APPLE__
 #define METALL_DEFAULT_CAPACITY (1ULL << 30ULL)
 #else

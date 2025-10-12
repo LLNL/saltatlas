@@ -16,10 +16,9 @@
 
 #include <ygm/comm.hpp>
 
+#include "saltatlas/common/detail/data_reader_kernel.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
-#include "saltatlas/common/detail/utilities/general.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
-#include "saltatlas/common/detail/utilities/string_cast.hpp"
 #include "saltatlas/common/detail/utilities/ygm.hpp"
 #include "saltatlas/common/point_store.hpp"
 
@@ -118,9 +117,12 @@ inline void read_points_helper(
       comm.async(
           point_partitioner(id),
           [](auto, const id_t id, const auto &point, auto ptr_point_store) {
+            if (ptr_point_store->contains(id)) {
+              std::cerr << "Duplicate ID " << id << std::endl;
+              MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+            }
             auto &p = (*ptr_point_store)[id];
-            p.clear();
-            p.insert(p.begin(), point.begin(), point.end());
+            p       = point;
           },
           id, point, ptr_point_store);
 
@@ -149,6 +151,7 @@ inline void read_points_with_id_helper(
     return (hash<>{}(i) % comm.size()) == comm.rank();
   };
   static auto &ref_point_store = local_point_store;
+  ref_point_store              = local_point_store;
   comm.cf_barrier();
 
   for (std::size_t file_no = 0; file_no < file_names.size(); ++file_no) {
@@ -198,17 +201,12 @@ inline void read_points_with_id(
     ygm::comm &comm, const bool verbose) {
   const auto parser = [delimiter](const std::string &input, id_t &id,
                                   point_t &point) {
-    std::string buf;
-    bool        first = true;
+    const auto [pid, elems] =
+        parse_feature_vector_with_id<id_t, typename point_t::value_type>(
+            input, delimiter);
+    id = pid;
     point.clear();
-    for (std::stringstream ss(input); std::getline(ss, buf, delimiter);) {
-      if (first) {
-        id = str_cast<id_t>(buf);
-      } else {
-        point.push_back(str_cast<typename point_t::value_type>(buf));
-      }
-      first = false;
-    }
+    point.insert(point.begin(), elems.begin(), elems.end());
     return true;
   };
 
@@ -231,24 +229,12 @@ inline void read_points_with_id(
     ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, id_type &id,
                          point_t &point) {
-    std::string       buf;
-    std::stringstream ss(input);
-
-    // Extract ID (first token)
-    ss >> buf;
-    id = str_cast<id_type>(buf);
-
-    // Extract point (remaining tokens)
-    std::string point_str;
-    bool        first = true;
-    while (ss >> buf) {
-      if (!first) point_str += ' ';
-      first = false;
-      point_str += buf;
-    }
-    const auto tokens = str_split<typename point_t::value_type>(point_str);
+    const auto [pid, elems] =
+        parse_feature_vector_with_id<id_type, typename point_t::value_type>(
+            input);
+    id = pid;
     point.clear();
-    point.insert(point.begin(), tokens.begin(), tokens.end());
+    point.insert(point.begin(), elems.begin(), elems.end());
     return true;
   };
 
@@ -267,9 +253,10 @@ inline void read_points(
     const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto parser = [delimiter](const std::string &input, point_t &point) {
-    const auto buf = str_split<typename point_t::value_type>(input, delimiter);
+    const auto elems =
+        parse_feature_vector<typename point_t::value_type>(input, delimiter);
     point.clear();
-    point.insert(point.begin(), buf.begin(), buf.end());
+    point.insert(point.begin(), elems.begin(), elems.end());
     return true;
   };
 
@@ -288,9 +275,10 @@ inline void read_points(
     const std::function<int(const id_type &id)>       &point_partitioner,
     ygm::comm &comm, const bool verbose) {
   const auto parser = [](const std::string &input, point_t &point) {
-    const auto buf = str_split<typename point_t::value_type>(input);
+    const auto elems =
+        parse_feature_vector<typename point_t::value_type>(input);
     point.clear();
-    point.insert(point.begin(), buf.begin(), buf.end());
+    point.insert(point.begin(), elems.begin(), elems.end());
     return true;
   };
 
@@ -306,7 +294,7 @@ template <typename id_type, typename point_t, typename H, typename E,
           typename PA>
 inline void read_points(
     const std::vector<std::filesystem::path> &point_file_names,
-    const std::filesystem::path &format, const bool verbose,
+    const std::string &format, const bool verbose,
     const std::function<int(const id_type &id)> &point_partitioner,
     point_store<id_type, point_t, H, E, PA>     &local_point_store,
     ygm::comm                                   &comm) {
@@ -354,177 +342,33 @@ inline void read_points(
   }
 }
 
-namespace {
-using saltatlas::detail::neighbor;
-
-template <typename id_t, typename dist_t>
-using neighbors_tbl = std::vector<std::vector<neighbor<id_t, dist_t>>>;
-}  // namespace
-
-/// \brief Read neighbors from a file.
-/// A neighbor file is a text file and consists of two blocks:
-/// ID block and distance block.
-/// In ID block, each line is a list of IDs of neighbors of a point.
-/// In distance block, each line is a list of distances of neighbors of a point.
-/// i-th point's neighbors are stored in i-th line and distances are stored in
-/// (i+N)-th line in the file, where N is the number of points in the file.
-/// The number of lines in ID block and distance block must be the same.
-/// The number of IDs in each line must be the same.
-/// The number of distances in each line must be the same.
-/// \tparam id_type ID type.
-/// \tparam distance_type Distance type.
-/// \param file_path Path to a neighbor file.
-/// \param store Neighbor table instance.
-template <typename id_type, typename distance_type>
-inline bool read_neighbors(const std::filesystem::path           &file_path,
-                           neighbors_tbl<id_type, distance_type> &store) {
-  std::ifstream ifs(file_path);
-  if (!ifs.is_open()) {
-    std::cerr << "Failed to open: " << file_path << std::endl;
-    return false;
-  }
-
-  std::size_t num_entries = 0;
-  {
-    std::size_t cnt_lines = 0;
-    for (std::string buf; std::getline(ifs, buf);) {
-      ++cnt_lines;
-    }
-    if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
-      std::cerr << "Failed reading data from " << file_path << std::endl;
-      return false;
-    }
-    ifs.clear();
-    ifs.seekg(0);
-
-    if (cnt_lines % 2 != 0) {
-      std::cerr << "#of lines in the file is not an even number: " << file_path
-                << std::endl;
-      return false;
-    }
-    num_entries = cnt_lines / 2;
-  }
-  store.reserve(num_entries);
-
-  // Count #of neighbors per entry (line) by reading the first line.
-  std::size_t num_neighbors_per_entry = 0;
-  {
-    std::string buf;
-    std::getline(ifs, buf);
-    if (!ifs.eof() && (ifs.bad() || ifs.fail())) {
-      std::cerr << "Failed reading data from " << file_path << std::endl;
-      return false;
-    }
-    ifs.clear();
-    ifs.seekg(0);
-
-    num_neighbors_per_entry = detail::str_split<id_type>(buf).size();
-  }
-
-  // Reads neighbor IDs.
-  for (std::string buf; std::getline(ifs, buf);) {
-    const auto ids = detail::str_split<id_type>(buf);
-    std::vector<detail::neighbor<id_type, distance_type>> neighbors;
-    for (const auto id : ids) {
-      neighbors.emplace_back(id, distance_type{});
-    }
-    if (neighbors.size() != num_neighbors_per_entry) {
-      std::cerr << "#of neighbors per line are not the same" << std::endl;
-      return false;
-    }
-    store.push_back(std::move(neighbors));
-    if (store.size() == num_entries) break;
-  }
-  if (store.size() != num_entries || ifs.bad() || ifs.fail()) {
-    std::cerr << "Failed reading data from " << file_path << std::endl;
-    return false;
-  }
-
-  // Reads distances.
-  std::size_t line_no = 0;
-  for (std::string buf; std::getline(ifs, buf);) {
-    const auto distances = detail::str_split<distance_type>(buf);
-    if (distances.size() != num_neighbors_per_entry) {
-      std::cerr << "#of neighbors per line are not the same" << std::endl;
-      return false;
-    }
-
-    std::size_t k = 0;
-    for (const auto d : distances) {
-      store[line_no][k++].distance = d;
-    }
-
-    ++line_no;
-  }
-  if (line_no != num_entries || (!ifs.eof() && (ifs.bad() || ifs.fail()))) {
-    std::cerr << "Failed reading data from " << file_path << std::endl;
-    return false;
-  }
-  return true;
-}
-
 /// \brief Reads a neighbor file and distributes them.
 template <typename id_type, typename distance_type>
-inline void read_neighbors(const std::filesystem::path           &file_path,
-                           neighbors_tbl<id_type, distance_type> &store,
-                           ygm::comm                             &comm) {
-  neighbors_tbl<id_type, distance_type> global_store;
+inline void read_neighbors(
+    const std::filesystem::path &file_path,
+    std::vector<std::vector<detail::neighbor<id_type, distance_type>>> &store,
+    ygm::comm                                                          &comm) {
+  std::vector<std::vector<detail::neighbor<id_type, distance_type>>>
+      global_store;
   if (comm.rank0()) {
-    if (!read_neighbors(file_path, global_store)) {
+    if (!detail::read_neighbors_kernel(file_path, global_store)) {
       MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
     }
   }
   detail::distribute_elements_by_block(global_store, store, comm);
 }
 
-/// \brief Reads a file that contain queries.
-/// Each line is the feature vector of a query point.
-/// Can read the white space separated format (without ID).
-/// \tparam point_t Point type.
-/// \param query_file_path Path to a query file.
-/// \param queries Buffer to store read queries.
-template <typename point_t>
-inline bool read_query(const std::filesystem::path &query_file_path,
-                       std::function<point_t(const std::string &)> parser,
-                       std::vector<point_t>                       &queries) {
-  if (query_file_path.empty()) return true;
-
-  std::ifstream ifs(query_file_path);
-  if (!ifs.is_open()) {
-    std::cerr << "Failed to open " << query_file_path << std::endl;
-    return false;
-  }
-
-  for (std::string line; std::getline(ifs, line);) {
-    queries.push_back(parser(line));
-  }
-  return true;
-}
-
-/// \brief read_query function for reading feature vectors.
-template <typename point_t>
-inline bool read_query(const std::filesystem::path &query_file_path,
-                       std::vector<point_t>        &queries) {
-  return read_query<point_t>(
-      query_file_path,
-      [](const std::string &line) {
-        auto data = detail::str_split<typename point_t::value_type>(line);
-        return point_t(data.begin(), data.end());
-      },
-      queries);
-}
-
 /// \brief
-/// \tparam point_t
+/// \tparam point_type
 /// \param query_file_path
 /// \param queries
 /// \param comm
-template <typename point_t>
+template <typename point_type>
 inline void read_query(const std::filesystem::path &query_file_path,
-                       std::vector<point_t> &queries, ygm::comm &comm) {
-  std::vector<point_t> global_store;
+                       std::vector<point_type> &queries, ygm::comm &comm) {
+  std::vector<point_type> global_store;
   if (comm.rank0()) {
-    if (!read_query(query_file_path, global_store)) {
+    if (!detail::read_query_kernel(query_file_path, global_store)) {
       MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
     }
   }

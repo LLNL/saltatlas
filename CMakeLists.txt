@@ -124,6 +124,13 @@ endfunction()
 # OpenMP
 #
 find_package(OpenMP)
+function(setup_omp_target target_name)
+    if (NOT OpenMP_CXX_FOUND)
+        message(WARNING "OpenMP CXX not found!")
+    else ()
+        target_link_libraries(${target_name} PRIVATE OpenMP::OpenMP_CXX)
+    endif ()
+endfunction()
 
 #
 # Boost

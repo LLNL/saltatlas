@@ -15,8 +15,8 @@
 #include <string>
 #include <vector>
 
-#include <metall/detail/utilities.hpp>
-#include <metall/utility/open_mp.hpp>
+#include <saltatlas/common/detail/utilities/general.hpp>
+#include <saltatlas/dnnd/detail/utilities/omp.hpp>
 
 inline bool parse_options(int argc, char** argv,
                           std::vector<std::string>& inputs,
@@ -52,7 +52,7 @@ inline bool parse_options(int argc, char** argv,
 int main(int argc, char** argv) {
   std::vector<std::string> inputs;  // input wsv files (must be sorted).
   std::string              out_file_prefix;  // output file prefix.
-  std::size_t              num_splits;       // #of splits to generate per input file.
+  std::size_t num_splits;  // #of splits to generate per input file.
   parse_options(argc, argv, inputs, out_file_prefix, num_splits);
 
   std::vector<std::size_t> num_points(inputs.size(), 0);
@@ -105,8 +105,8 @@ int main(int argc, char** argv) {
         std::abort();
       }
 
-      const auto range = metall::mtlldetail::partial_range(
-          num_points[if_no], chunk_no, num_splits);
+      const auto range = saltatlas::detail::partial_range(num_points[if_no],
+                                                          chunk_no, num_splits);
       for (std::size_t i = 0; i < range.second - range.first; ++i) {
         std::string buf;
         if (!std::getline(ifs, buf)) {

@@ -123,6 +123,7 @@ void run_test(const std::string&          format,
     if (point.size() != ref_point.size()) {
       comm.cerr() << "Point dimension mismatch: " << point.size() << " vs "
                   << ref_point.size() << std::endl;
+      comm.cerr() << std::endl;
       MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
     }
     for (int i = 0; i < point.size(); ++i) {
