@@ -387,12 +387,19 @@ class dnnd {
   /// first distance value is a dummy value (0.0), which is just a placeholder
   /// so that a neighbor id and the corresponding distance value is stored in
   /// the same column.
-  void dump_graph(const std::filesystem::path& path,
+  void dump_index(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
     m_knn_index.dump(file_name.str(), dump_distance);
     m_comm.cf_barrier();
+  }
+
+  /// \brief Deprecated API. Use dump_index() instead.
+  /// This function will be removed in future releases.
+  void dump_graph(const std::filesystem::path& path,
+                  const bool                   dump_distance = false) const {
+    dump_index(path, dump_distance);
   }
 
   /// \brief Check if the local point store contains a point with the given ID.

@@ -693,12 +693,19 @@ class dnnd_adv {
   /// neighbor ids. The second line is the dummy value and distances to each
   /// neighbor. The dummy value is just a placeholder so that each neighbor id
   /// and distance pair is stored in the same column.
-  void dump_graph(const std::size_t index_id, const std::filesystem::path& path,
+  void dump_index(const std::size_t index_id, const std::filesystem::path& path,
                   const bool dump_distance = false) const {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
     const auto ret =
         m_knn_index_list->at(index_id).dump(file_name.str(), dump_distance);
+  }
+
+  /// \brief Deprecated API. Use dump_index() instead.
+  /// This function will be removed in future releases.
+  void dump_graph(const std::size_t index_id, const std::filesystem::path& path,
+                  const bool dump_distance = false) const {
+    dump_index(index_id, path, dump_distance);
   }
 
   /// \brief Check if the local point store contains a point with the given ID.
