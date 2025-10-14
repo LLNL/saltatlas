@@ -23,7 +23,10 @@
 #include <random>
 #include <string>
 
+#include "saltatlas/dnnd/detail/utilities/file.hpp"
+#include "saltatlas/neo_dnnd/mpi.hpp"
 #include "saltatlas/neo_dnnd/neo_dnnd.hpp"
+#include "saltatlas/neo_dnnd/time_recorder.hpp"
 
 #ifndef NDEBUG
 #include "saltatlas/common/detail/utilities/backtrace.hpp"
@@ -49,7 +52,7 @@ struct options {
   std::string dataset_format;
   std::string distance_function;
   int         k{0};
-  double      rho   = 0.8;
+  double      rho   = 0.5;
   double      delta = 0.001;
   std::string knng_dump_dir;
   bool        optimize                      = false;
@@ -263,7 +266,8 @@ int main(int argc, char* argv[]) {
       comm.cout0() << "Read dataset" << std::endl;
       comm.cout0() << "========================================" << std::endl;
       recorder.start("read_dataset");
-      std::vector<std::filesystem::path> paths{opt.dataset_path};
+      std::vector<std::filesystem::path> paths{
+          saltatlas::dndetail::find_file_paths(opt.dataset_path)};
       dnnd.load_points(paths.begin(), paths.end(), opt.dataset_format,
                        !opt.donot_share_pstore_regionally);
       recorder.stop();
