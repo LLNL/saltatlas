@@ -86,5 +86,38 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_neo_dnnd_example_feature_type(neo_dnnd_bench double)
 endif ()
 
+#
+# This function adds a shared-memory executable with the given feature element type.
+#
+function(add_fe_typed_shm_exe target_name type_name)
+    set(typed_target_name "${target_name}_${type_name}_features")
+
+    add_executable(${typed_target_name} "${target_name}.cpp")
+
+    target_include_directories(
+        ${typed_target_name}
+        PRIVATE ${CMAKE_SOURCE_DIR}/include
+    )
+
+    setup_omp_target(${typed_target_name})
+    target_link_libraries(${typed_target_name} PRIVATE ${BOOST_LIBS})
+
+    target_compile_definitions(
+        ${typed_target_name}
+        PRIVATE "SALTATLAS_FEATURE_ELEMENT_TYPE=${type_name}"
+    )
+    set(target_name
+        ${typed_target_name}
+        PARENT_SCOPE
+    )
+
+    setup_metall_target(${typed_target_name})
+endfunction()
+
+add_fe_typed_shm_exe(run_query_knng float)
+add_fe_typed_shm_exe(run_query_knng double)
+add_fe_typed_shm_exe(run_query_knng uint8_t)
+
+
 add_subdirectory(datasets)
 #add_subdirectory(knng_shm_query)

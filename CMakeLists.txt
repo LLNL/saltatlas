@@ -109,6 +109,9 @@ else ()
     )
 endif ()
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 include(FetchContent)
 
 #
@@ -213,10 +216,18 @@ if (SALTATLAS_USE_METALL)
         GIT_TAG ${METALL_GIT_BRANCH}
     )
     FetchContent_MakeAvailable(Metall)
-
     find_package(Threads REQUIRED)
-    target_link_libraries(saltatlas INTERFACE Threads::Threads Metall::Metall)
+
+    target_link_libraries(saltatlas INTERFACE Metall::Metall)
+    target_link_libraries(saltatlas INTERFACE Threads::Threads)
 endif ()
+
+function(setup_metall_target target_name)
+    if (SALTATLAS_USE_METALL)
+        target_link_libraries(${target_name} PRIVATE Metall::Metall)
+        target_link_libraries(${target_name} PRIVATE Threads::Threads)
+    endif ()
+endfunction()
 
 if (JUST_INSTALL_SALTATLAS)
     return()
