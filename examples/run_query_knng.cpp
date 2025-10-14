@@ -225,7 +225,7 @@ int main(int argc, char* argv[]) {
     opt.query_option.epsilon = epsilon;
     nn_query_kernel kernel(opt.query_option, points,
                            opt.distance_metric.c_str(), knng);
-    std::cout << "\nepsilon: " << epsilon << std::endl;
+    std::cout << "epsilon: " << epsilon << std::endl;
 
     std::vector<std::vector<nn_query_kernel::neighbor_type>> results;
     double                                                   query_sec = 0.0;
@@ -240,42 +240,41 @@ int main(int argc, char* argv[]) {
     std::cout << "Mean query latency (ms): "
               << query_sec * 1000.0 / queries.size() << std::endl;
 
-    if (opt.ground_truth_file_path.empty()) {
-      continue;
-    }
-
-    std::vector<std::vector<nn_query_kernel::neighbor_type>> ground_truth;
-    saltatlas::read_neighbors(opt.ground_truth_file_path, ground_truth);
-
-    std::cout << "\nRecall scores" << std::endl;
-    {
-      const auto scores = saltatlas::utility::get_recall_scores(
-          results, ground_truth, opt.query_option.k);
-      std::cout << "Exact recall scores (min mean max): "
-                << *std::min_element(scores.begin(), scores.end()) << "\t"
-                << std::accumulate(scores.begin(), scores.end(), 0.0) /
-                       scores.size()
-                << "\t" << *std::max_element(scores.begin(), scores.end())
-                << std::endl;
-    }
-    {
-      const auto scores =
-          saltatlas::utility::get_recall_scores_with_distance_ties(
-              results, ground_truth, opt.query_option.k);
-      std::cout << "Distance-tied recall scores (min mean max): "
-                << *std::min_element(scores.begin(), scores.end()) << "\t"
-                << std::accumulate(scores.begin(), scores.end(), 0.0) /
-                       scores.size()
-                << "\t" << *std::max_element(scores.begin(), scores.end())
-                << std::endl;
-    }
-
     if (!opt.query_result_file_path.empty()) {
       std::string path_str =
           opt.query_result_file_path.string() + ".e" + std::to_string(epsilon);
       std::cout << "Dump query result to " << path_str << std::endl;
       saltatlas::utility::dump_neighbors(results, path_str);
     }
+
+    if (!opt.ground_truth_file_path.empty()) {
+      std::vector<std::vector<nn_query_kernel::neighbor_type>> ground_truth;
+      saltatlas::read_neighbors(opt.ground_truth_file_path, ground_truth);
+
+      std::cout << "\nRecall scores" << std::endl;
+      {
+        const auto scores = saltatlas::utility::get_recall_scores(
+            results, ground_truth, opt.query_option.k);
+        std::cout << "Exact recall scores (min mean max): "
+                  << *std::min_element(scores.begin(), scores.end()) << "\t"
+                  << std::accumulate(scores.begin(), scores.end(), 0.0) /
+                         scores.size()
+                  << "\t" << *std::max_element(scores.begin(), scores.end())
+                  << std::endl;
+      }
+      {
+        const auto scores =
+            saltatlas::utility::get_recall_scores_with_distance_ties(
+                results, ground_truth, opt.query_option.k);
+        std::cout << "Distance-tied recall scores (min mean max): "
+                  << *std::min_element(scores.begin(), scores.end()) << "\t"
+                  << std::accumulate(scores.begin(), scores.end(), 0.0) /
+                         scores.size()
+                  << "\t" << *std::max_element(scores.begin(), scores.end())
+                  << std::endl;
+      }
+    }
+    std::cout << std::endl;
   }
   std::cout << "\nAll done." << std::endl;
 

@@ -94,11 +94,11 @@ class knn_parallel_query_kernel {
     if (num_threads > 0) {
       omp::set_num_threads(num_threads);
     }
-    OMP_DIRECTIVE(parallel) {
-      OMP_DIRECTIVE(single)
-      std::cout << "Will use " << omp::get_num_threads() << " threads"
-                << std::endl;
-    }
+    // OMP_DIRECTIVE(parallel) {
+    //   OMP_DIRECTIVE(single)
+    //   std::cout << "Will use " << omp::get_num_threads() << " threads"
+    //             << std::endl;
+    // }
   }
 
   std::vector<std::vector<neighbor_type>> query(
