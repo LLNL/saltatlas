@@ -114,9 +114,9 @@ function(add_fe_typed_shm_exe target_name type_name)
     setup_metall_target(${typed_target_name})
 endfunction()
 
-add_fe_typed_shm_exe(run_query float)
-add_fe_typed_shm_exe(run_query double)
-add_fe_typed_shm_exe(run_query uint8_t)
+add_fe_typed_shm_exe(run_query_knng float)
+add_fe_typed_shm_exe(run_query_knng double)
+add_fe_typed_shm_exe(run_query_knng uint8_t)
 
 
 add_subdirectory(datasets)

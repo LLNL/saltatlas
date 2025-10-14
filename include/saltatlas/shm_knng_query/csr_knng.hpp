@@ -58,10 +58,23 @@ class csr_knng {
   csr_knng(const csr_knng&)            = delete;
   csr_knng& operator=(const csr_knng&) = delete;
 
-  csr_knng(csr_knng&&)            = default;
-  csr_knng& operator=(csr_knng&&) = default;
+  csr_knng(csr_knng&& other) noexcept { swap(other); }
 
-  ~csr_knng() { priv_deallocate_arrays(); }
+  csr_knng& operator=(csr_knng&& other) noexcept {
+    swap(other);
+    return *this;
+  }
+
+  ~csr_knng() noexcept { priv_deallocate_arrays(); }
+
+  void swap(self_type& other) noexcept {
+    std::swap(m_allocator, other.m_allocator);
+    std::swap(m_buf, other.m_buf);
+    std::swap(m_offsets, other.m_offsets);
+    std::swap(m_neighbors, other.m_neighbors);
+    std::swap(m_num_points, other.m_num_points);
+    std::swap(m_num_total_neighbors, other.m_num_total_neighbors);
+  }
 
   offset_pointer offsets() { return m_offsets; }
 
@@ -112,7 +125,7 @@ class csr_knng {
     assert(!m_buf);
     const std::size_t bytes = (num_points + 1) * sizeof(offset_type) +
                               num_total_neighbors * sizeof(id_type);
-    std::cout << "Allocating " << bytes << " bytes..." << std::endl;
+    // std::cout << "Allocating " << bytes << " bytes..." << std::endl;
 
     m_buf       = byte_allocator_traits::allocate(m_allocator, bytes);
     m_offsets   = reinterpret_cast<offset_type*>(std::to_address(m_buf));
@@ -121,6 +134,11 @@ class csr_knng {
         std::ptrdiff_t((num_points + 1) * sizeof(offset_type)));
     m_num_points          = num_points;
     m_num_total_neighbors = num_total_neighbors;
+
+    OMP_DIRECTIVE (parallel for)
+    for (std::size_t i = 0; i < m_num_points + 1; ++i) {
+      m_offsets[i] = 0;
+    }
   }
 
   void priv_deallocate_arrays() {
@@ -136,13 +154,10 @@ class csr_knng {
     m_num_total_neighbors = 0;
   }
 
-  /// \warning This function assumes that the index file contains the point IDs
-  /// in the first column and distances are not included.
+  /// \warning This function assumes that the index file contains the point
+  /// IDs in the first column and distances are not included.
   void priv_load_index(
       const std::vector<std::filesystem::path>& index_file_paths) {
-    std::cout << "Loading k-NN index from " << index_file_paths.size()
-              << " files..." << std::endl;
-
     std::size_t num_points          = 0;
     std::size_t num_total_neighbors = 0;
 
@@ -167,14 +182,11 @@ class csr_knng {
       }
     }
 
-    std::cout << "#of points: " << num_points << std::endl;
-    std::cout << "#of total neighbors: " << num_total_neighbors << std::endl;
     priv_check_value_range<std::size_t>(
         num_total_neighbors, 0, std::numeric_limits<offset_type>::max());
 
     priv_allocate_arrays(num_points, num_total_neighbors);
 
-    std::cout << "Constructing offset array" << std::endl;
     OMP_DIRECTIVE (parallel for)
     for (std::size_t i = 0; i < index_file_paths.size(); ++i) {
       const auto&   index_file_path = index_file_paths[i];
@@ -198,16 +210,17 @@ class csr_knng {
         }
       }
     }
+
     std::partial_sum(m_offsets, m_offsets + num_points, m_offsets);
     assert(m_offsets[num_points - 1] == num_total_neighbors);
-    // shift everything to the right by 1
-    std::rotate(std::reverse_iterator(m_offsets + num_points + 1),
-                std::reverse_iterator(m_offsets + num_points + 1) + 1,
-                std::reverse_iterator(m_offsets - 1));
+
+    // shift everything to the right by 1 (safe, defined)
+    for (std::size_t i = num_points; i > 0; --i) {
+      m_offsets[i] = m_offsets[i - 1];
+    }
     m_offsets[0] = 0;
     assert(m_offsets[num_points] == num_total_neighbors);
 
-    std::cout << "Constructing neighbor array" << std::endl;
     OMP_DIRECTIVE (parallel for)
     for (std::size_t i = 0; i < index_file_paths.size(); ++i) {
       const auto&   index_file_path = index_file_paths[i];
@@ -231,14 +244,12 @@ class csr_knng {
     }
     // print_arrays();
 
-    // shift everything to the right by 1
-    std::rotate(std::reverse_iterator(m_offsets + num_points + 1),
-                std::reverse_iterator(m_offsets + num_points + 1) + 1,
-                std::reverse_iterator(m_offsets - 1));
+    // shift everything to the right by 1 (safe, defined)
+    for (std::size_t i = num_points; i > 0; --i) {
+      m_offsets[i] = m_offsets[i - 1];
+    }
     assert(m_offsets[num_points] == num_total_neighbors);
     m_offsets[0] = 0;
-
-    std::cout << "Finished constructing k-NN index" << std::endl;
 
     // print_arrays();
   }
@@ -258,6 +269,7 @@ class csr_knng {
     }
     std::cout << std::endl;
   }
+
   allocator_type m_allocator;
   byte_pointer   m_buf{nullptr};
   offset_pointer m_offsets{nullptr};
