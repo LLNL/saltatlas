@@ -324,7 +324,7 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
-                    const double rho = 0.8, const double delta = 0.001,
+                    const double rho = 0.5, const double delta = 0.001,
                     const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
@@ -338,7 +338,7 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
-                    const double rho = 0.8, const double delta = 0.001,
+                    const double rho = 0.5, const double delta = 0.001,
                     const std::size_t time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
@@ -367,7 +367,7 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
-                    const knn_index_type& initial_index, const double rho = 0.8,
+                    const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
                     const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
@@ -384,7 +384,7 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
-                    const knn_index_type& initial_index, const double rho = 0.8,
+                    const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
                     const std::size_t time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
@@ -415,7 +415,7 @@ class dnnd_adv {
   std::size_t build(
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001,
+      const double rho = 0.5, const double delta = 0.001,
       const bool recheck = false, const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
@@ -432,7 +432,7 @@ class dnnd_adv {
   std::size_t build(
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001,
+      const double rho = 0.5, const double delta = 0.001,
       const bool recheck = false, const std::size_t time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
@@ -455,7 +455,7 @@ class dnnd_adv {
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, const distance::id& distance_func_id,
-              const int k, const double rho = 0.8, const double delta = 0.001,
+              const int k, const double rho = 0.5, const double delta = 0.001,
               const std::size_t time_limit_sec = 0) {
     update(index_id,
            distance::distance_function<point_type, distance_type>(
@@ -466,7 +466,7 @@ class dnnd_adv {
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
-              const int k, const double rho = 0.8, const double delta = 0.001,
+              const int k, const double rho = 0.5, const double delta = 0.001,
               const std::size_t time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,

@@ -42,7 +42,7 @@ using dnnd_type =
 
 struct option_t {
   int                                index_k{0};
-  double                             r{0.8};
+  double                             r{0.5};
   double                             delta{0.001};
   std::string                        distance_name;
   std::vector<std::filesystem::path> point_file_names;
@@ -101,7 +101,8 @@ int main(int argc, char **argv) {
   {
     comm.cout0() << "\n<<kNNG Construction>>" << std::endl;
     ygm::utility::timer const_timer;
-    g.build(opt.index_k, opt.r, opt.delta, opt.batch_size, opt.time_limit_seconds);
+    g.build(opt.index_k, opt.r, opt.delta, opt.batch_size,
+            opt.time_limit_seconds);
     comm.cout0() << "\nkNNG construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
   }
@@ -268,7 +269,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -p <string> Point file format (required). wsv, wsv-id, csv, "
           "csv-id, str, and str-id are supported"
        << std::endl;
-  cout << "  -r <float>  NN-Descent r parameter (default: 0.8)" << std::endl;
+  cout << "  -r <float>  NN-Descent r parameter (default: 0.5)" << std::endl;
   cout << "  -d <float>  NN-Descent delta parameter (default: 0.001)"
        << std::endl;
   cout << "  -u          Make index undirected (default: false)" << std::endl;

@@ -48,7 +48,7 @@ dist_t char_histgram_distance(const point_type &p1, const point_type &p2) {
 struct option_t {
   // KNNG construction options
   int         index_k{0};
-  double      r{0.8};
+  double      r{0.5};
   double      delta{0.001};
   std::size_t batch_size{1ULL << 25};
 
@@ -243,7 +243,7 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -p <string> Point file format (required). wsv, wsv-id, csv, "
           "csv-id, str, and str-id are supported"
        << std::endl;
-  cout << "  -r <float>  NN-Descent r parameter (default: 0.8)" << std::endl;
+  cout << "  -r <float>  NN-Descent r parameter (default: 0.5)" << std::endl;
   cout << "  -d <float>  NN-Descent delta parameter (default: 0.001)"
        << std::endl;
   cout << "  -u          Make index undirected (default: false)" << std::endl;
