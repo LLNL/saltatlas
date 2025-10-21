@@ -77,6 +77,7 @@ class dnnd_kernel {
     int         k{4};
     double      r{1.0};
     double      delta{0.1};
+    std::size_t time_limit_sec{0};  // in seconds, 0 means no limit
     bool        exchange_reverse_neighbors{false};
     std::size_t mini_batch_size{std::numeric_limits<std::size_t>::max()};
     uint64_t    rnd_seed{1238};
@@ -240,7 +241,8 @@ class dnnd_kernel {
     m_num_distance_msgs            = 0;
     m_num_pruned_distance_msgs     = 0;
 #endif
-    std::size_t epoch_no = 0;
+    std::size_t epoch_no         = 0;
+    double      elapsed_time_sec = 0.0;
     while (true) {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Epoch\t" << epoch_no << "]" << std::endl;
@@ -261,9 +263,10 @@ class dnnd_kernel {
       priv_update_neighbors(old_table, new_table);
       m_comm.cf_barrier();
 
+      const auto epoch_time_sec = epoch_timer.elapsed();
+      elapsed_time_sec += epoch_time_sec;
       if (m_option.verbose) {
-        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_timer.elapsed()
-                       << std::endl;
+        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_time_sec << std::endl;
       }
       // Test the terminal condition
       const auto num_global_news = ygm::sum(m_cnt_new_neighbors, m_comm);
@@ -273,6 +276,14 @@ class dnnd_kernel {
       }
       if ((double)num_global_news <
           m_option.delta * (m_num_points + 1) * m_option.k) {
+        break;
+      }
+      if (m_option.time_limit_sec > 0 &&
+          elapsed_time_sec >= m_option.time_limit_sec) {
+        if (m_option.verbose) {
+          m_comm.cout0() << "Reached the time limit of "
+                         << m_option.time_limit_sec << " seconds." << std::endl;
+        }
         break;
       }
       ++epoch_no;

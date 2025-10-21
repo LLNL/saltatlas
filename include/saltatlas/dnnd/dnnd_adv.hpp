@@ -324,10 +324,11 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
-                    const double rho = 0.8, const double delta = 0.001) {
+                    const double rho = 0.8, const double delta = 0.001,
+                    const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, rho, delta);
+                 k, rho, delta, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -337,10 +338,12 @@ class dnnd_adv {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
-                    const double rho = 0.8, const double delta = 0.001) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+                    const double rho = 0.8, const double delta = 0.001,
+                    const std::size_t time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,
@@ -365,10 +368,11 @@ class dnnd_adv {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001, const bool recheck = false) {
+                    const double delta = 0.001, const bool recheck = false,
+                    const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta, recheck);
+                 k, initial_index, rho, delta, recheck, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -381,10 +385,12 @@ class dnnd_adv {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
                     const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001, const bool recheck = false) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+                    const double delta = 0.001, const bool recheck = false,
+                    const std::size_t time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,
@@ -410,10 +416,10 @@ class dnnd_adv {
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
       const double rho = 0.8, const double delta = 0.001,
-      const bool recheck = false) {
+      const bool recheck = false, const std::size_t time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta, recheck);
+                 k, initial_index, rho, delta, recheck, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -427,12 +433,13 @@ class dnnd_adv {
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
       const double rho = 0.8, const double delta = 0.001,
-      const bool recheck = false) {
+      const bool recheck = false, const std::size_t time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
+                                           .time_limit_sec  = time_limit_sec,
                                            .rnd_seed        = m_rnd_seed,
                                            .verbose         = m_verbose};
 
@@ -448,20 +455,23 @@ class dnnd_adv {
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, const distance::id& distance_func_id,
-              const int k, const double rho = 0.8, const double delta = 0.001) {
+              const int k, const double rho = 0.8, const double delta = 0.001,
+              const std::size_t time_limit_sec = 0) {
     update(index_id,
            distance::distance_function<point_type, distance_type>(
                distance_func_id),
-           k, rho, delta);
+           k, rho, delta, time_limit_sec);
   }
 
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
-              const int k, const double rho = 0.8, const double delta = 0.001) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+              const int k, const double rho = 0.8, const double delta = 0.001,
+              const std::size_t time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,

@@ -48,6 +48,7 @@ struct option_t {
   std::vector<std::filesystem::path> point_file_names;
   std::string                        point_file_format;
   std::size_t                        batch_size{1ULL << 25};
+  std::size_t                        time_limit_seconds{0};
   bool                               make_index_undirected{false};
   double                             pruning_degree_multiplier{0.0};
   std::filesystem::path              query_file_path;
@@ -100,7 +101,7 @@ int main(int argc, char **argv) {
   {
     comm.cout0() << "\n<<kNNG Construction>>" << std::endl;
     ygm::utility::timer const_timer;
-    g.build(opt.index_k, opt.r, opt.delta, opt.batch_size);
+    g.build(opt.index_k, opt.r, opt.delta, opt.batch_size, opt.time_limit_seconds);
     comm.cout0() << "\nkNNG construction took (s)\t" << const_timer.elapsed()
                  << std::endl;
   }
@@ -160,7 +161,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:f:p:um:e:q:n:g:o:b:G:Dvh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:f:p:um:e:q:n:g:o:b:T:G:Dvh")) != -1) {
     switch (n) {
       case 'k':
         opt.index_k = std::stoi(optarg);
@@ -212,6 +213,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 
       case 'b':
         opt.batch_size = std::stoul(optarg);
+        break;
+
+      case 'T':
+        opt.time_limit_seconds = std::stoul(optarg);
         break;
 
       case 'G':
@@ -276,6 +281,9 @@ void usage(std::string_view exe_name, cout_type &cout) {
   cout << "  -g <string> Ground truth file path" << std::endl;
   cout << "  -o <string> Query result file path" << std::endl;
   cout << "  -b <int>    Batch size (default: 1^25)" << std::endl;
+  cout << "  -T <int>    Timeout limit in seconds for kNNG construction "
+          "(default: 0, no limit)"
+       << std::endl;
   cout << "  -G <string> kNNG dump prefix" << std::endl;
   cout << "  -D          Dump index with distance" << std::endl;
   cout << "  -v          Verbose mode" << std::endl;
@@ -301,6 +309,7 @@ void show_options(const option_t &opt, cout_type &cout) {
   cout << "  query k: " << opt.query_k << std::endl;
   cout << "  epsilon: " << opt.epsilon << std::endl;
   cout << "  batch size: " << opt.batch_size << std::endl;
+  cout << "  timeout seconds: " << opt.time_limit_seconds << std::endl;
   cout << "  index dump prefix: " << opt.index_dump_prefix << std::endl;
   cout << "  dump index with distance: " << opt.dump_index_with_distance
        << std::endl;

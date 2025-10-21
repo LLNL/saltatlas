@@ -268,11 +268,16 @@ class dnnd {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param batch_size Batch size parameter.
+  /// \param time_limit_sec Timeout in seconds for the build process.
+  /// If 0 is given, there is no timeout.
   void build(const int k, const double rho = 0.8, const double delta = 0.001,
-             const std::size_t batch_size = 1 << 26) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+             const std::size_t batch_size     = 1 << 26,
+             const std::size_t time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = batch_size,
                                            .rnd_seed        = m_rnd_seed,
