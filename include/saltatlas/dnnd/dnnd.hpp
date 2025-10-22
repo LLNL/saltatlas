@@ -275,7 +275,7 @@ class dnnd {
   /// All ranks must use the same value. If 0 is given, there is no timeout.
   void build(const int k, const double rho = 0.5, const double delta = 0.001,
              const std::size_t batch_size     = 1 << 26,
-             const std::size_t time_limit_sec = 0) {
+             const double      time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
                                            .delta          = delta,

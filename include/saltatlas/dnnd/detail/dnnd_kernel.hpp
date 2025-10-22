@@ -75,9 +75,9 @@ class dnnd_kernel {
 
   struct option {
     int         k{4};
-    double      r{1.0};
-    double      delta{0.1};
-    std::size_t time_limit_sec{0};  // in seconds, 0 means no limit
+    double      r{0.5};
+    double      delta{0.001};
+    double      time_limit_sec{0};  // in seconds, 0 means no limit
     bool        exchange_reverse_neighbors{false};
     std::size_t mini_batch_size{std::numeric_limits<std::size_t>::max()};
     uint64_t    rnd_seed{1238};
@@ -234,7 +234,26 @@ class dnnd_kernel {
     priv_fill_knn_heap_with_random_value();
   }
 
+  void priv_check_construct_parameters() const {
+    if (m_option.r > 1.0 || m_option.r <= 0.0) {
+      m_comm.cerr0() << "Rho parameter (" << m_option.r
+                     << ") must be in the range (0.0, 1.0]." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    if (m_option.delta <= 0.0 || m_option.delta >= 1.0) {
+      m_comm.cerr0() << "Delta parameter (" << m_option.delta
+                     << ") must be in the range (0.0, 1.0)." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    if (m_option.k == 0 || m_option.k >= m_num_points) {
+      m_comm.cerr0() << "k parameter (" << m_option.k
+                     << ") must be in the range [1, #of points)." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+  }
+
   void priv_construct_kernel() {
+    priv_check_construct_parameters();
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
     m_num_neighbor_suggestion_msgs = 0;
     m_num_feature_msgs             = 0;
@@ -278,13 +297,14 @@ class dnnd_kernel {
           m_option.delta * (m_num_points + 1) * m_option.k) {
         break;
       }
-      if (m_option.time_limit_sec > 0 &&
-          elapsed_time_sec >= m_option.time_limit_sec) {
-        if (m_option.verbose) {
+
+      if (m_option.time_limit_sec > 0) {
+        const auto max_elapsed_time_sec = ygm::max(elapsed_time_sec, m_comm);
+        if (max_elapsed_time_sec >= m_option.time_limit_sec) {
           m_comm.cout0() << "Reached the time limit of "
                          << m_option.time_limit_sec << " seconds." << std::endl;
+          break;
         }
-        break;
       }
       ++epoch_no;
     }

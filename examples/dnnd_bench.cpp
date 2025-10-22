@@ -3,10 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Usage:
-//   cd saltatlas/build
-//   mpirun -n 2 ./examples/dnnd_example
-
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -48,7 +44,7 @@ struct option_t {
   std::vector<std::filesystem::path> point_file_names;
   std::string                        point_file_format;
   std::size_t                        batch_size{1ULL << 25};
-  std::size_t                        time_limit_seconds{0};
+  double                             time_limit_seconds{0};
   bool                               make_index_undirected{false};
   double                             pruning_degree_multiplier{0.0};
   std::filesystem::path              query_file_path;
@@ -217,7 +213,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
         break;
 
       case 'T':
-        opt.time_limit_seconds = std::stoul(optarg);
+        opt.time_limit_seconds = std::stod(optarg);
         break;
 
       case 'G':

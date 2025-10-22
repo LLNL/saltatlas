@@ -160,7 +160,8 @@ class dnnd_adv {
     return true;
   }
 
-  /// \brief Constructor.
+  /// \brief Constructor. This constructor allocates data structures on DRAM,
+  /// which are not persistent.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
   /// \param verbose If true, enable the verbose mode.
@@ -173,6 +174,12 @@ class dnnd_adv {
     m_index_k_list   = std::make_unique<size_container>();
   }
 
+  /// \brief Constructor. This constructor creates a persistent (Metall)
+  /// datastore to store data structures (e.g., point store and knng index).
+  /// \param datastore_path Filesystem path to the Metall datastore.
+  /// \param comm YGM comm instance.
+  /// \param rnd_seed Seed for random generators.
+  /// \param verbose If true, enable the verbose mode.
   dnnd_adv(create_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -190,6 +197,8 @@ class dnnd_adv {
     m_comm.cf_barrier();
   }
 
+  /// \brief Constructor. This constructor opens an existing persistent (Metall)
+  /// datastore.
   dnnd_adv(open_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -209,6 +218,8 @@ class dnnd_adv {
     m_comm.cf_barrier();
   }
 
+  /// \brief Constructor. This constructor opens an existing persistent (Metall)
+  /// datastore in read-only mode.
   dnnd_adv(open_read_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -325,7 +336,7 @@ class dnnd_adv {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const double rho = 0.5, const double delta = 0.001,
-                    const std::size_t time_limit_sec = 0) {
+                    const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  k, rho, delta, time_limit_sec);
@@ -339,7 +350,7 @@ class dnnd_adv {
   /// \param delta Delta parameter in NN-Descent.
   std::size_t build(distance_function_type dfunc, const int k,
                     const double rho = 0.5, const double delta = 0.001,
-                    const std::size_t time_limit_sec = 0) {
+                    const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
                                            .delta          = delta,
@@ -369,7 +380,7 @@ class dnnd_adv {
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
-                    const std::size_t time_limit_sec = 0) {
+                    const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  k, initial_index, rho, delta, recheck, time_limit_sec);
@@ -386,7 +397,7 @@ class dnnd_adv {
   std::size_t build(distance_function_type dfunc, const int k,
                     const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
-                    const std::size_t time_limit_sec = 0) {
+                    const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
                                            .delta          = delta,
@@ -416,7 +427,7 @@ class dnnd_adv {
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
       const double rho = 0.5, const double delta = 0.001,
-      const bool recheck = false, const std::size_t time_limit_sec = 0) {
+      const bool recheck = false, const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  k, initial_index, rho, delta, recheck, time_limit_sec);
@@ -433,7 +444,7 @@ class dnnd_adv {
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
       const double rho = 0.5, const double delta = 0.001,
-      const bool recheck = false, const std::size_t time_limit_sec = 0) {
+      const bool recheck = false, const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
@@ -456,7 +467,7 @@ class dnnd_adv {
   /// All ranks must call this function.
   void update(const std::size_t index_id, const distance::id& distance_func_id,
               const int k, const double rho = 0.5, const double delta = 0.001,
-              const std::size_t time_limit_sec = 0) {
+              const double time_limit_sec = 0) {
     update(index_id,
            distance::distance_function<point_type, distance_type>(
                distance_func_id),
@@ -467,7 +478,7 @@ class dnnd_adv {
   /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
               const int k, const double rho = 0.5, const double delta = 0.001,
-              const std::size_t time_limit_sec = 0) {
+              const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
                                            .delta          = delta,

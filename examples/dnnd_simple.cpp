@@ -6,7 +6,7 @@
 /// \brief A simple example of using the DNND's simple API.
 /// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_simple_example
+///     mpirun -n 2 ./example/dnnd_simple
 
 #include <iostream>
 #include <vector>
@@ -168,10 +168,11 @@ int main(int argc, char** argv) {
     for (const auto& [id, item] : neighbors_and_features) {
       comm.cout0() << "Source point ID: " << id << std::endl;
       const auto& neighbors = item.first;
-      const auto& features = item.second;
+      const auto& features  = item.second;
       for (int i = 0; i < neighbors.size(); ++i) {
-        comm.cout0() << neighbors[i] << ", feature = "
-                     << saltatlas::to_string(features[i]) << std::endl;
+        comm.cout0() << neighbors[i]
+                     << ", feature = " << saltatlas::to_string(features[i])
+                     << std::endl;
       }
       comm.cout0() << std::endl;
     }

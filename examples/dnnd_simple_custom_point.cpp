@@ -8,7 +8,7 @@
 /// It is recommended to see the examples/dnnd_simple_example.cpp beforehand.
 /// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_simple_custom_point_example
+///     mpirun -n 2 ./example/dnnd_simple_custom_point
 
 #include <iostream>
 #include <random>
