@@ -334,6 +334,10 @@ class dnnd_adv {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const double rho = 0.5, const double delta = 0.001,
                     const double time_limit_sec = 0) {
@@ -348,6 +352,10 @@ class dnnd_adv {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(distance_function_type dfunc, const int k,
                     const double rho = 0.5, const double delta = 0.001,
                     const double time_limit_sec = 0) {
@@ -377,6 +385,12 @@ class dnnd_adv {
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(const distance::id& distance_func_id, const int k,
                     const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
@@ -394,6 +408,12 @@ class dnnd_adv {
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(distance_function_type dfunc, const int k,
                     const knn_index_type& initial_index, const double rho = 0.5,
                     const double delta = 0.001, const bool recheck = false,
@@ -423,6 +443,12 @@ class dnnd_adv {
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
@@ -440,6 +466,12 @@ class dnnd_adv {
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,

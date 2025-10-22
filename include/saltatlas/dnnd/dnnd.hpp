@@ -269,10 +269,10 @@ class dnnd {
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   /// \param batch_size Batch size parameter.
-  /// \param time_limit_sec Timeout in seconds for the main neighbor check loop.
-  /// The elapsed time is checked after each neighbor check loop.
-  /// If the time limit is exceeded, the construction stops.
-  /// All ranks must use the same value. If 0 is given, there is no timeout.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   void build(const int k, const double rho = 0.5, const double delta = 0.001,
              const std::size_t batch_size     = 1 << 26,
              const double      time_limit_sec = 0) {
