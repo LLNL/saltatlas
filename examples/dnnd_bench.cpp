@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <saltatlas/dnnd/dnnd_simple.hpp>
+#include <saltatlas/dnnd/dnnd.hpp>
 #include "dnnd_example_common.hpp"
 
 #ifdef SALTATLAS_DNND_EXAMPLE_ID_TYPE
@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
 
   if (!opt.index_dump_prefix.empty()) {
     comm.cout0() << "\nDumping index to " << opt.index_dump_prefix << std::endl;
-    g.dump_graph(opt.index_dump_prefix, opt.dump_index_with_distance);
+    g.dump_index(opt.index_dump_prefix, opt.dump_index_with_distance);
     comm.cf_barrier();
     comm.cout0() << "Finished dumping." << std::endl;
   }

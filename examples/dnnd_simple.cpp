@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
   }
 
   // Dump a KNNG to files
-  g.dump_graph("./knng");
+  g.dump_index("./knng");
   comm.cout0() << "\nKNNG dumped to ./knng" << std::endl;
 
   return 0;
