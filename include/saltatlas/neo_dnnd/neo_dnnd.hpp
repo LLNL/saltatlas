@@ -25,6 +25,7 @@
 #include <boost/version.hpp>
 #if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_flat_set.hpp>
 #include <boost/unordered/unordered_node_map.hpp>
 #else
 #error "Boost 1.87.00 or higher is required."
@@ -46,8 +47,12 @@
 
 #define SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
 
+#ifndef SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#define SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS 1
+#endif
+
 #ifndef SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
-#define SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS 0
+#define SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS 1
 #endif
 
 namespace saltatlas {
@@ -82,8 +87,12 @@ class neo_dnnd {
  private:
   struct __attribute__((packed)) id_pair_type {
     id_pair_type() = default;
+
     id_pair_type(const id_type first, const id_type second)
         : first(first), second(second) {}
+
+    id_pair_type(const id_pair_type& other)
+        : first(other.first), second(other.second) {}
 
     bool operator==(const id_pair_type& other) const {
       return first == other.first && second == other.second;
@@ -106,10 +115,10 @@ class neo_dnnd {
 
   struct id_pair_hasher {
     std::size_t operator()(const id_pair_type& id_pair) const {
-      std::size_t buf;
+      std::size_t buf[2];
       detail::murmurhash3::MurmurHash3_x64_128(&id_pair, sizeof(id_pair), 12321,
-                                               &buf);
-      return buf;
+                                               buf);
+      return buf[0];
     }
   };
 
@@ -326,9 +335,7 @@ class neo_dnnd {
       ++m_super_step_no;
     }
     m_comm.cout0() << "Finished NN-Descent core loop" << std::endl;
-    priv_cout0(m_verbose) << "#of distance calculations:\t"
-                          << m_comm.all_reduce_sum(m_num_distance_calculations)
-                          << std::endl;
+    m_counter_db.add("DistCalcs", m_num_distance_calculations);
     m_comm.barrier();
 
     priv_cout0(m_verbose) << std::endl;
@@ -414,11 +421,6 @@ class neo_dnnd {
       }
     }
     m_comm.barrier();
-
-    // This value is expected to be 0.
-    priv_cout0(m_verbose) << "#of distance calculations:\t"
-                          << m_comm.all_reduce_sum(m_num_distance_calculations)
-                          << std::endl;
   }
 
   /// \brief Dump the kNNG to a text file. Each MPI rank dumps its own file.
@@ -470,12 +472,26 @@ class neo_dnnd {
     }
   }
 
-  void print_profile([[maybe_unused]] const bool final) const {
-    if (final || m_verbose) {
+  void print_profile([[maybe_unused]] const bool show_final_summary) const {
+    if (show_final_summary) {
+      m_comm.cout0() << "#of distance calculations:\t"
+                     << m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DistCalcs"))
+                     << std::endl;
+    }
+
+    if (show_final_summary || m_verbose) {
 #if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
       m_comm.cout0() << "#of skipped checks for existing neighbors:\t"
                      << (std::size_t)m_comm.all_reduce_sum(
                             m_counter_db.get_total("SkippedExistingNeighbors"))
+                     << std::endl;
+#endif
+
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+      m_comm.cout0() << "#of duplicate neighbor checks:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DuplicateNCKs"))
                      << std::endl;
 #endif
 
@@ -502,7 +518,7 @@ class neo_dnnd {
     }
 
 #ifdef PROFILE_FV
-    if (final) {
+    if (show_final_summary) {
       // make histogram
       std::size_t max_val = 0;
       for (const auto& item : m_fv_count) {
@@ -1107,8 +1123,13 @@ class neo_dnnd {
       return num_finished_ranks;
     };
 
-    // new-new neighbor checks
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+    boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
+    std::size_t num_duplicate_ncks = 0;
+#endif
+
     std::size_t cnt_checks = 0;
+    // new-new neighbor checks
     while (true) {
       if (!finished_all_local) {
         for (auto id_itr = point_store.ids_begin();
@@ -1127,6 +1148,14 @@ class neo_dnnd {
               // we can increase the chance that y's FV is in the popular FV
               // store, which avoids to send x's FV to y.
               if (x >= y) continue;
+
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+              if (unique_recv_ncks.emplace(x, y).second == false) {
+                // duplicate check
+                ++num_duplicate_ncks;
+                continue;
+              }
+#endif
 
               neighbor_intros[priv_owner(x)].emplace_back(x, y);
               ++cnt_checks;
@@ -1165,14 +1194,21 @@ class neo_dnnd {
                 continue;
               }
 
-              // FV senders should be smaller ID points to increase the chance
-              // of finding the target FVs in the popular FV store.
-              if (nid < oid) {
-                neighbor_intros[priv_owner(nid)].emplace_back(nid, oid);
-              } else {
-                neighbor_intros[priv_owner(oid)].emplace_back(oid, nid);
-              }
+              // The point that sends its FV is the one with the smaller ID.
+              // This increases the chance that the other point's FV is in the
+              // popular FV store.
+              const auto x = std::min(nid, oid);
+              const auto y = std::max(nid, oid);
 
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+              if (unique_recv_ncks.emplace(x, y).second == false) {
+                // duplicate check
+                ++num_duplicate_ncks;
+                continue;
+              }
+#endif
+
+              neighbor_intros[priv_owner(x)].emplace_back(x, y);
               ++cnt_checks;
               if (cnt_checks % batch_size == 0) {
                 launch_check_procedure();
@@ -1188,6 +1224,10 @@ class neo_dnnd {
     }
     priv_cout0(m_verbose) << "#of performed old-new checks: "
                           << m_comm.all_reduce_sum(cnt_checks) << std::endl;
+
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+    m_counter_db.add("DuplicateNCKs", num_duplicate_ncks);
+#endif
 
     return m_comm.all_reduce_sum(num_updates);
   }
@@ -1232,8 +1272,15 @@ class neo_dnnd {
   void priv_exchange_neighbor_intros(const matrix2d<id_pair_type>& nb_intros,
                                      matrix2d<id_pair_type>&       recv_nb_chks,
                                      matrix2d<id_pair_type>& recv_pfv_nb_chks) {
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+    // Keep track of all received neighbor checks to remove duplicates
+    boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
+    std::size_t num_duplicate_ncks = 0;
+#endif
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
     std::size_t num_existing_neighbor = 0;
-    std::size_t num_pfv_checks        = 0;
+#endif
+    std::size_t num_pfv_checks = 0;
     for (std::size_t ri = 0; ri < m_all_to_all_pairs.size(); ++ri) {
       const auto pair_rank = m_all_to_all_pairs[ri];
       // send requests to the pair rank
@@ -1258,6 +1305,15 @@ class neo_dnnd {
           continue;
         }
 #endif
+
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+        if (unique_recv_ncks.insert(recv_buf[i]).second == false) {
+          // duplicate neighbor check
+          ++num_duplicate_ncks;
+          continue;
+        }
+#endif
+
         if (nid < m_min_replicate_id) {
           // nid's FV is not in the popular FV store
           recv_nb_chks[priv_owner(nid)].emplace_back(sid, nid);
@@ -1269,8 +1325,15 @@ class neo_dnnd {
       }
       m_time_recorder->get().stop();
     }
-    m_counter_db.add("SkippedExistingNeighbors", num_existing_neighbor);
     m_counter_db.add("ReplicatedFVs", num_pfv_checks);
+
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+    m_counter_db.add("SkippedExistingNeighbors", num_existing_neighbor);
+#endif
+
+#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+    m_counter_db.add("DuplicateNCKs", num_duplicate_ncks);
+#endif
   }
 
   std::size_t priv_check_neighbors(
@@ -1290,7 +1353,7 @@ class neo_dnnd {
       auto       assigned_checks = std::move(neighbor_checks[pair_rank]);
 
       m_time_recorder->get().start("Replicated neighbor check");
-      num_updated += priv_check_neighbors_replicated(
+      num_updated += priv_check_pfv_neighbors(
           pair_rank, std::move(pfv_neighbor_checks[pair_rank]));
       m_time_recorder->get().stop();
 
@@ -1610,8 +1673,8 @@ class neo_dnnd {
     m_time_recorder->get().stop();
   }
 
-  std::size_t priv_check_neighbors_replicated(
-      const int pair_rank, std::vector<id_pair_type>&& checks) {
+  std::size_t priv_check_pfv_neighbors(const int                   pair_rank,
+                                       std::vector<id_pair_type>&& checks) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     if (!m_pfv_store) {

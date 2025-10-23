@@ -281,6 +281,11 @@ int main(int argc, char* argv[]) {
           dnnd.build(opt.k, opt.rho, opt.delta, !opt.donot_remove_dup_fvs,
                      opt.batch_size, opt.popular_fv_ratio);
       recorder.stop();
+      if (opt.verbose) {
+        comm.cout0() << std::endl;
+        comm.cout0() << "Profile" << std::endl;
+        dnnd.print_profile(true);
+      }
 
       if (opt.optimize) {
         comm.cout0() << "\n========================================"
@@ -293,7 +298,7 @@ int main(int argc, char* argv[]) {
       }
 
       comm.cout0() << "\n========================================" << std::endl;
-      comm.cout0() << "Performance Profile" << std::endl;
+      comm.cout0() << "Time breakdown" << std::endl;
       comm.cout0() << "========================================" << std::endl;
       if (opt.verbose) {
         comm.cout0() << "\nTime table (seconds):" << std::endl;
@@ -313,7 +318,6 @@ int main(int argc, char* argv[]) {
                        << max << ",\t" << std << std::endl;
         }
         comm.cout0() << std::endl;
-        dnnd.print_profile(true);
       } else {
         const auto& time_table = recorder.get_time_table();
         for (const auto& entry : time_table) {
