@@ -75,8 +75,9 @@ class dnnd_kernel {
 
   struct option {
     int         k{4};
-    double      r{1.0};
-    double      delta{0.1};
+    double      r{0.5};
+    double      delta{0.001};
+    double      time_limit_sec{0};  // in seconds, 0 means no limit
     bool        exchange_reverse_neighbors{false};
     std::size_t mini_batch_size{std::numeric_limits<std::size_t>::max()};
     uint64_t    rnd_seed{1238};
@@ -233,14 +234,34 @@ class dnnd_kernel {
     priv_fill_knn_heap_with_random_value();
   }
 
+  void priv_check_construct_parameters() const {
+    if (m_option.r > 1.0 || m_option.r <= 0.0) {
+      m_comm.cerr0() << "Rho parameter (" << m_option.r
+                     << ") must be in the range (0.0, 1.0]." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    if (m_option.delta <= 0.0 || m_option.delta >= 1.0) {
+      m_comm.cerr0() << "Delta parameter (" << m_option.delta
+                     << ") must be in the range (0.0, 1.0)." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    if (m_option.k == 0 || m_option.k >= m_num_points) {
+      m_comm.cerr0() << "k parameter (" << m_option.k
+                     << ") must be in the range [1, #of points)." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+  }
+
   void priv_construct_kernel() {
+    priv_check_construct_parameters();
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
     m_num_neighbor_suggestion_msgs = 0;
     m_num_feature_msgs             = 0;
     m_num_distance_msgs            = 0;
     m_num_pruned_distance_msgs     = 0;
 #endif
-    std::size_t epoch_no = 0;
+    std::size_t epoch_no         = 0;
+    double      elapsed_time_sec = 0.0;
     while (true) {
       if (m_option.verbose) {
         m_comm.cout0() << "\n[Epoch\t" << epoch_no << "]" << std::endl;
@@ -261,9 +282,10 @@ class dnnd_kernel {
       priv_update_neighbors(old_table, new_table);
       m_comm.cf_barrier();
 
+      const auto epoch_time_sec = epoch_timer.elapsed();
+      elapsed_time_sec += epoch_time_sec;
       if (m_option.verbose) {
-        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_timer.elapsed()
-                       << std::endl;
+        m_comm.cout0() << "\nEpoch took (s)\t" << epoch_time_sec << std::endl;
       }
       // Test the terminal condition
       const auto num_global_news = ygm::sum(m_cnt_new_neighbors, m_comm);
@@ -274,6 +296,15 @@ class dnnd_kernel {
       if ((double)num_global_news <
           m_option.delta * (m_num_points + 1) * m_option.k) {
         break;
+      }
+
+      if (m_option.time_limit_sec > 0) {
+        const auto max_elapsed_time_sec = ygm::max(elapsed_time_sec, m_comm);
+        if (max_elapsed_time_sec >= m_option.time_limit_sec) {
+          m_comm.cout0() << "Reached the time limit of "
+                         << m_option.time_limit_sec << " seconds." << std::endl;
+          break;
+        }
       }
       ++epoch_no;
     }

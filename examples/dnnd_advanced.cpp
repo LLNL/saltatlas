@@ -6,7 +6,7 @@
 /// \brief A simple example of using DNND's advanced API
 /// Usage:
 ///     cd build
-///     mpirun -n 2 ./example/dnnd_adv
+///     mpirun -n 2 ./example/dnnd_advanced
 
 #include <iostream>
 #include <vector>
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 
   {
     saltatlas::dnnd_adv<id_t, point_type, dist_t> g(comm);
-    std::vector<std::filesystem::path>        paths{
+    std::vector<std::filesystem::path>            paths{
         "../examples/datasets/point_5-4.txt"};
     g.load_points(paths.begin(), paths.end(), "wsv");
 
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
   {
     saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::create_only,
                                                     datastorepath, comm);
-    std::vector<std::filesystem::path>        paths{
+    std::vector<std::filesystem::path>            paths{
         "../examples/datasets/point_5-4.txt"};
     g.load_points(paths.begin(), paths.end(), "wsv");
     const auto index_id = g.build(custom_distance, 2);
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
   {
     saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
                                                     datastorepath, comm);
-    std::vector<point_type>                   queries;
+    std::vector<point_type>                       queries;
     if (comm.rank() == 0) {
       queries.push_back(point_type{61.58, 29.68, 20.43, 99.22, 21.81});
     }

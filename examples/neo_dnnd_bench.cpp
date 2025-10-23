@@ -108,7 +108,7 @@ void usage(ost& os) {
         "\n \tor 'levenshtein' (Levenshtein distance)."
      << "\n -k [int, required] k for KNNG building."
      << "\n -r [double, optional] rho (sampling) parameter in NN-Descent. "
-        "Default: 0.8."
+        "Default: 0.5."
      << "\n -d [double, optional] delta (terminal condition) parameter in "
         "NN-Descent. Default: 0.001."
      << "\n -t [int, optional] Number of threads per MPI rank. Default: 2."

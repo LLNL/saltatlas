@@ -160,7 +160,8 @@ class dnnd_adv {
     return true;
   }
 
-  /// \brief Constructor.
+  /// \brief Constructor. This constructor allocates data structures on DRAM,
+  /// which are not persistent.
   /// \param comm YGM comm instance.
   /// \param rnd_seed Seed for random generators.
   /// \param verbose If true, enable the verbose mode.
@@ -173,6 +174,12 @@ class dnnd_adv {
     m_index_k_list   = std::make_unique<size_container>();
   }
 
+  /// \brief Constructor. This constructor creates a persistent (Metall)
+  /// datastore to store data structures (e.g., point store and knng index).
+  /// \param datastore_path Filesystem path to the Metall datastore.
+  /// \param comm YGM comm instance.
+  /// \param rnd_seed Seed for random generators.
+  /// \param verbose If true, enable the verbose mode.
   dnnd_adv(create_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -190,6 +197,8 @@ class dnnd_adv {
     m_comm.cf_barrier();
   }
 
+  /// \brief Constructor. This constructor opens an existing persistent (Metall)
+  /// datastore.
   dnnd_adv(open_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -209,6 +218,8 @@ class dnnd_adv {
     m_comm.cf_barrier();
   }
 
+  /// \brief Constructor. This constructor opens an existing persistent (Metall)
+  /// datastore in read-only mode.
   dnnd_adv(open_read_only_t, const std::filesystem::path& datastore_path,
            ygm::comm& comm, const uint64_t rnd_seed = std::random_device{}(),
            const bool verbose = false)
@@ -323,11 +334,16 @@ class dnnd_adv {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(const distance::id& distance_func_id, const int k,
-                    const double rho = 0.8, const double delta = 0.001) {
+                    const double rho = 0.5, const double delta = 0.001,
+                    const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, rho, delta);
+                 k, rho, delta, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -336,11 +352,17 @@ class dnnd_adv {
   /// \param k Number of neighbors per point.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(distance_function_type dfunc, const int k,
-                    const double rho = 0.8, const double delta = 0.001) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+                    const double rho = 0.5, const double delta = 0.001,
+                    const double time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,
@@ -363,12 +385,19 @@ class dnnd_adv {
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(const distance::id& distance_func_id, const int k,
-                    const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001, const bool recheck = false) {
+                    const knn_index_type& initial_index, const double rho = 0.5,
+                    const double delta = 0.001, const bool recheck = false,
+                    const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta, recheck);
+                 k, initial_index, rho, delta, recheck, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -379,12 +408,20 @@ class dnnd_adv {
   /// can be used.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(distance_function_type dfunc, const int k,
-                    const knn_index_type& initial_index, const double rho = 0.8,
-                    const double delta = 0.001, const bool recheck = false) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+                    const knn_index_type& initial_index, const double rho = 0.5,
+                    const double delta = 0.001, const bool recheck = false,
+                    const double time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,
@@ -406,14 +443,20 @@ class dnnd_adv {
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(
       const distance::id& distance_func_id, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001,
-      const bool recheck = false) {
+      const double rho = 0.5, const double delta = 0.001,
+      const bool recheck = false, const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
-                 k, initial_index, rho, delta, recheck);
+                 k, initial_index, rho, delta, recheck, time_limit_sec);
   }
 
   /// \brief Build a KNNG.
@@ -423,16 +466,23 @@ class dnnd_adv {
   /// \param initial_index Initial index.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
+  /// \param recheck If true, redo the neighbor check for the initial index,
+  /// i.e., mark the initial neighbors as 'new' neighbors.
+  /// \param time_limit_sec Timeout in seconds for the main neighbor check
+  /// kernel. The elapsed time is checked after each neighbor check loop. If the
+  /// time limit is exceeded, the construction stops. All ranks must use the
+  /// same value. If 0 is given, there is no timeout.
   std::size_t build(
       distance_function_type dfunc, const int k,
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.8, const double delta = 0.001,
-      const bool recheck = false) {
+      const double rho = 0.5, const double delta = 0.001,
+      const bool recheck = false, const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k                          = k,
                                            .r                          = rho,
                                            .delta                      = delta,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
+                                           .time_limit_sec  = time_limit_sec,
                                            .rnd_seed        = m_rnd_seed,
                                            .verbose         = m_verbose};
 
@@ -448,20 +498,23 @@ class dnnd_adv {
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, const distance::id& distance_func_id,
-              const int k, const double rho = 0.8, const double delta = 0.001) {
+              const int k, const double rho = 0.5, const double delta = 0.001,
+              const double time_limit_sec = 0) {
     update(index_id,
            distance::distance_function<point_type, distance_type>(
                distance_func_id),
-           k, rho, delta);
+           k, rho, delta, time_limit_sec);
   }
 
   /// \brief Update the KNNG.
   /// All ranks must call this function.
   void update(const std::size_t index_id, distance_function_type dfunc,
-              const int k, const double rho = 0.8, const double delta = 0.001) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+              const int k, const double rho = 0.5, const double delta = 0.001,
+              const double time_limit_sec = 0) {
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
                                            .rnd_seed        = m_rnd_seed,
