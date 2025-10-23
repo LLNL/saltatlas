@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include "saltatlas/common/detail/data_reader_kernel.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
@@ -131,7 +132,7 @@ inline void read_points_helper(
     }
   }
   comm.barrier();
-  if (comm.all_reduce_sum(count_points) != total_num_points) {
+  if (ygm::sum(count_points, comm) != total_num_points) {
     comm.cerr0() << "Some points are missing" << std::endl;
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }

@@ -112,8 +112,8 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
       const auto n =
           std::accumulate(task_assignment_table.begin(),
                           task_assignment_table.end(), (std::size_t)0);
-      std::cout << "#of total task\t" << num_global_tasks << std::endl;
-      std::cout << "#of total assigned task\t" << n << std::endl;
+      std::cout << "#of total tasks\t" << num_global_tasks << std::endl;
+      std::cout << "#of total assigned tasks\t" << n << std::endl;
       std::cout << "#of unassigned tasks\t" << num_global_tasks - n
                 << std::endl;
       show_task_distribution(task_assignment_table);

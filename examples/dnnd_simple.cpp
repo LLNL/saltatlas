@@ -13,7 +13,7 @@
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/dnnd_simple.hpp>
+#include <saltatlas/dnnd/dnnd.hpp>
 
 // Point ID type
 using id_t   = uint32_t;
