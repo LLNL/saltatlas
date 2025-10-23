@@ -109,6 +109,7 @@ class dnnd_kernel {
     if (!priv_check_const_option()) {
       return;
     }
+    priv_reset_build_profile_counters();
     priv_init_knn_heap_with_random_values();
     priv_construct_kernel();
     priv_convert(knn_index);
@@ -132,6 +133,7 @@ class dnnd_kernel {
     if (!priv_check_const_option()) {
       return;
     }
+    priv_reset_build_profile_counters();
     priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
     priv_convert(knn_index);
@@ -153,6 +155,7 @@ class dnnd_kernel {
     if (!priv_check_const_option()) {
       return;
     }
+    priv_reset_build_profile_counters();
     priv_init_knn_heap_with_index(init_knn_index, recheck);
     priv_construct_kernel();
     priv_convert(knn_index);
@@ -163,6 +166,7 @@ class dnnd_kernel {
     if (m_option.verbose) {
       m_comm.cout0() << "Rerunning NN-Descent kernel" << std::endl;
     }
+    priv_reset_build_profile_counters();
     priv_init_knn_heap_with_index(knn_index, true);
     priv_construct_kernel();
     priv_convert(knn_index);
@@ -211,6 +215,26 @@ class dnnd_kernel {
     return true;
   }
 
+  void priv_reset_build_profile_counters() {
+    m_cnt_dist_cals = 0;
+#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
+    m_num_neighbor_suggestion_msgs = 0;
+    m_num_feature_msgs             = 0;
+    m_num_distance_msgs            = 0;
+    m_num_pruned_distance_msgs     = 0;
+#endif
+
+#if SALTATLAS_DNND_PROFILE_FEATURE_MSG
+    m_feature_msg_src_count.clear();
+#endif
+  }
+
+  inline distance_type priv_compute_distance(const point_type& point1,
+                                             const point_type& point2) {
+    ++m_cnt_dist_cals;
+    return m_distance_function(point1, point2);
+  }
+
   void priv_init_knn_heap_with_random_values() {
     if (m_option.verbose) {
       m_comm.cout0() << "\nInitializing the k-NN index with random neighbors."
@@ -254,12 +278,6 @@ class dnnd_kernel {
 
   void priv_construct_kernel() {
     priv_check_construct_parameters();
-#if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
-    m_num_neighbor_suggestion_msgs = 0;
-    m_num_feature_msgs             = 0;
-    m_num_distance_msgs            = 0;
-    m_num_pruned_distance_msgs     = 0;
-#endif
     std::size_t epoch_no         = 0;
     double      elapsed_time_sec = 0.0;
     while (true) {
@@ -310,6 +328,8 @@ class dnnd_kernel {
     }
     m_comm.cf_barrier();
     if (m_option.verbose) {
+      m_comm.cout0() << "\nTotal distance calculations\t"
+                     << ygm::sum(m_cnt_dist_cals, m_comm) << std::endl;
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
       m_comm.cout0() << "\nMessage Statistics" << std::endl;
       m_comm.cout0() << "#of sent neighbor suggestions\t"
@@ -464,7 +484,7 @@ class dnnd_kernel {
                     const id_type sid, const id_type nid,
                     const point_type& src_point) {
       const auto& nbr_point = local_this->m_point_store[nid];
-      const auto  d = local_this->m_distance_function(src_point, nbr_point);
+      const auto  d = local_this->priv_compute_distance(src_point, nbr_point);
       local_this->comm().async(local_this->m_point_partitioner(sid),
                                distance_calculator{}, local_this, sid, nid, d);
     }
@@ -495,7 +515,7 @@ class dnnd_kernel {
       std::advance(pitr, offset);
       const auto& nid       = pitr->first;
       const auto& nbr_point = pitr->second;
-      const auto  d = local_this->m_distance_function(src_point, nbr_point);
+      const auto  d = local_this->priv_compute_distance(src_point, nbr_point);
       local_this->comm().async(local_this->m_point_partitioner(sid),
                                random_neighbor_explorer{}, local_this, sid, nid,
                                d);
@@ -884,7 +904,7 @@ class dnnd_kernel {
       // Update u2's heap (nearest neighbors list) if 'u1' is closer than the
       // current neighbors.
       const auto& u2_point = local_this->m_point_store[u2];
-      const auto  d = local_this->m_distance_function(u1_point, u2_point);
+      const auto  d = local_this->priv_compute_distance(u1_point, u2_point);
       local_this->m_cnt_new_neighbors += nn_heap.try_add(u1, d, true);
 
       if (d < u1_max_distance) {
@@ -1062,6 +1082,9 @@ class dnnd_kernel {
   std::size_t                   m_num_points{0};  // Global number of points
   std::size_t                   m_mini_batch_no{0};
   std::size_t                   m_cnt_new_neighbors{0};
+
+  // For profiling
+  std::size_t m_cnt_dist_cals{0};
 #if SALTATLAS_DNND_SHOW_BASIC_MSG_STATISTICS
   std::size_t m_num_neighbor_suggestion_msgs{0};
   std::size_t m_num_feature_msgs{0};

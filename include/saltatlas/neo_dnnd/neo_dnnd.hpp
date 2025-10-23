@@ -260,6 +260,7 @@ class neo_dnnd {
       m_fvs_disp.resize(m_fv_send_batch_size);
       m_fvs_block_lengths.resize(m_fv_send_batch_size, 1);
       priv_commit_mpi_types();
+      priv_reset_profile_counters();
     }
     if (m_verbose) {
       priv_show_dram_usage();
@@ -345,6 +346,7 @@ class neo_dnnd {
   void optimize(const double m, knng_type& knng) {
     m_comm.cout0() << "Start optimization" << std::endl;
     priv_cout0(m_verbose) << "m: " << m << std::endl;
+    priv_reset_profile_counters();
 
     matrix2d<id_type>                       r_nids(m_comm.size());
     std::vector<std::vector<distance_type>> r_dits(m_comm.size());
@@ -451,7 +453,20 @@ class neo_dnnd {
     m_comm.barrier();
   }
 
+  /// Reset time recorder.
+  void reset_time_recorder() {
+    if (m_time_recorder) {
+      m_time_recorder->get().reset();
+    }
+  }
+
   void print_profile([[maybe_unused]] const bool final) const {
+    if (final) {
+      m_comm.cout0() << "#of distance calculations:\t"
+                     << m_comm.all_reduce_sum(m_num_distance_calculations)
+                     << std::endl;
+    }
+
     if (final || m_verbose) {
       m_comm.cout0() << "FV processing breakdown:" << std::endl;
       m_comm.cout0() << "  #of normally sent:\t"
@@ -641,6 +656,24 @@ class neo_dnnd {
       DNND2_CHECK_MPI(::MPI_Type_free(&m_feature_type));
       m_feature_type = MPI_DATATYPE_NULL;
     }
+  }
+
+  void priv_reset_profile_counters() {
+    m_num_distance_calculations = 0;
+    m_counter_db.clear();
+#ifdef PROFILE_FV
+    m_fv_count.clear();
+#endif
+    // No reset m_time_recorder here since it's could be owned externally
+  }
+
+  inline distance_type priv_get_distance(const fe_type* const p1,
+                                         const std::size_t    dim1,
+                                         const fe_type* const p2,
+                                         const std::size_t    dim2) {
+    ++m_num_distance_calculations;
+    return m_distance_func(std::span(const_cast<fe_type*>(p1), dim1),
+                           std::span(const_cast<fe_type*>(p2), dim2));
   }
 
   static std::string priv_get_pstore_name(const int rank) {
@@ -894,9 +927,9 @@ class neo_dnnd {
         const auto nid = elem.second;
 
         assert(priv_owner(sid) == m_comm.rank());
-        const auto dist = m_distance_func(
-            std::span(const_cast<fe_type*>(point_store[sid]), num_dims()),
-            std::span(&feature_recv_buf[buf_i * num_dims()], num_dims()));
+        const auto dist = priv_get_distance(
+            point_store[sid], num_dims(), &feature_recv_buf[buf_i * num_dims()],
+            num_dims());
         assert(m_graph.count(sid) > 0);
         m_graph.at(sid).try_add(nid, dist, true);  // push as a new neighbor
         ++buf_i;
@@ -1240,9 +1273,8 @@ class neo_dnnd {
           assert(priv_owner(nb) == pair_rank);
           const auto* src_fv = my_pstore[src];
           const auto* nb_fv  = pair_pstore[nb];
-          const auto  dist   = m_distance_func(
-              std::span(const_cast<fe_type*>(src_fv), num_dims()),
-              std::span(const_cast<fe_type*>(nb_fv), num_dims()));
+          const auto  dist =
+              priv_get_distance(src_fv, num_dims(), nb_fv, num_dims());
           distances[c] = dist;
         }
         m_time_recorder->get().stop();
@@ -1445,10 +1477,8 @@ class neo_dnnd {
       assert(priv_owner(pid) == m_comm.rank());
       const auto fv_idx      = (indices.size() > 0) ? indices[i] : i;
       const auto sent_fv_pos = fv_idx * num_dims();
-      const auto dist        = m_distance_func(
-          std::span(const_cast<fe_type*>(point_store[pid]), num_dims()),
-          std::span(const_cast<fe_type*>(&features.at(sent_fv_pos)),
-                           num_dims()));
+      const auto dist        = priv_get_distance(
+          point_store[pid], num_dims(), &features.at(sent_fv_pos), num_dims());
       out_distances[i] = dist;
     }
   }
@@ -1559,10 +1589,8 @@ class neo_dnnd {
       const auto        nfv_bank_no = priv_node_local_rank(priv_owner(nid));
       const auto* const nfv         = m_pop_fv_store->get(nfv_bank_no, nid);
       assert(nfv);
-      const auto dist =
-          m_distance_func(std::span(const_cast<fe_type*>(sfv), num_dims()),
-                          std::span(const_cast<fe_type*>(nfv), num_dims()));
-      distances[i] = dist;
+      const auto dist = priv_get_distance(sfv, num_dims(), nfv, num_dims());
+      distances[i]    = dist;
     }
     m_time_recorder->get().stop();
 
@@ -1666,21 +1694,29 @@ class neo_dnnd {
 
   // Variables initialized in the constructor
   distance_function                                    m_distance_func;
-  time_recorder                                        m_default_time_recorder;
   std::optional<std::reference_wrapper<time_recorder>> m_time_recorder;
   mpi::communicator&                                   m_comm;
   std::mt19937_64 m_rng;  // Must be initialized after m_comm as it uses rank
   bool            m_verbose{false};
 
-  bool                 m_read_nlocal_pstores_directly{false};
-  bool                 m_remove_duplicate_fvs{false};
-  std::size_t          m_k{0};
-  double               m_rho{1.0};
-  double               m_delta{0.001};
-  std::size_t          m_num_total_points{0};
-  dndetail::counter_db m_counter_db;
+  // Options
+  bool        m_read_nlocal_pstores_directly{false};
+  bool        m_remove_duplicate_fvs{false};
+  std::size_t m_k{0};
+  double      m_rho{1.0};
+  double      m_delta{0.001};
+  std::size_t m_num_total_points{0};
 
-  knn_heap_adj_list_t m_graph{};
+  // Core data structures
+  knn_heap_adj_list_t             m_graph{};
+  std::vector<const point_store*> m_point_stores;
+  std::vector<metall::manager*>   m_point_store_managers;
+  std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
+
+  std::size_t m_num_dims{0};
+  std::size_t m_super_step_no{0};
+  std::size_t m_min_cache_id{0};
+
   // For sending feature vectors
   std::size_t                 m_fv_send_batch_size{0};
   ::MPI_Datatype              m_nb_dist_type{MPI_DATATYPE_NULL};
@@ -1691,15 +1727,14 @@ class neo_dnnd {
   std::vector<::MPI_Datatype> m_fvs_types{};
   std::vector<int>            m_all_to_all_pairs{};
   std::vector<int>            m_all_to_all_node_pairs{};
+
+  // For profiling
+  std::size_t          m_num_distance_calculations{0};
+  dndetail::counter_db m_counter_db{};
+  time_recorder        m_default_time_recorder{};
 #ifdef PROFILE_FV
   // Counts how many times each feature vector was received.
-  bstuo::unordered_flat_map<id_type, std::size_t> m_fv_count;
+  bstuo::unordered_flat_map<id_type, std::size_t> m_fv_count{};
 #endif
-  std::size_t                     m_super_step_no{0};
-  std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
-  std::size_t                     m_min_cache_id{0};
-  std::vector<const point_store*> m_point_stores;
-  std::vector<metall::manager*>   m_point_store_managers;
-  std::size_t                     m_num_dims{0};
 };
 }  // namespace saltatlas
