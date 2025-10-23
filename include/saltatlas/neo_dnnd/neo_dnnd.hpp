@@ -323,7 +323,9 @@ class neo_dnnd {
       ++m_super_step_no;
     }
     m_comm.cout0() << "Finished NN-Descent core loop" << std::endl;
-    m_comm.cout0() << std::endl;
+    priv_cout0(m_verbose) << "#of distance calculations:\t"
+                          << m_comm.all_reduce_sum(m_num_distance_calculations)
+                          << std::endl;
     m_comm.barrier();
 
     priv_cout0(m_verbose) << std::endl;
@@ -409,6 +411,11 @@ class neo_dnnd {
       }
     }
     m_comm.barrier();
+
+    // This value is expected to be 0.
+    priv_cout0(m_verbose) << "#of distance calculations:\t"
+                          << m_comm.all_reduce_sum(m_num_distance_calculations)
+                          << std::endl;
   }
 
   /// \brief Dump the kNNG to a text file. Each MPI rank dumps its own file.
@@ -461,12 +468,6 @@ class neo_dnnd {
   }
 
   void print_profile([[maybe_unused]] const bool final) const {
-    if (final) {
-      m_comm.cout0() << "#of distance calculations:\t"
-                     << m_comm.all_reduce_sum(m_num_distance_calculations)
-                     << std::endl;
-    }
-
     if (final || m_verbose) {
       m_comm.cout0() << "FV processing breakdown:" << std::endl;
       m_comm.cout0() << "  #of normally sent:\t"
