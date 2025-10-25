@@ -55,15 +55,13 @@ struct options {
   double      rho   = 0.5;
   double      delta = 0.001;
   std::string knng_dump_dir;
-  bool        optimize                      = false;
-  double      pruning_factor                = -1;
-  int         num_threads                   = 2;
-  std::size_t batch_size                    = 1ULL << 25;
-  double      popular_fv_ratio              = 0.0f;
-  bool        donot_remove_dup_fvs          = false;
-  bool        donot_share_pstore_regionally = false;
-  bool        dump_distance                 = false;
-  bool        verbose                       = false;
+  bool        optimize         = false;
+  double      pruning_factor   = -1;
+  int         num_threads      = 2;
+  std::size_t batch_size       = 1ULL << 25;
+  double      popular_fv_ratio = 0.0f;
+  bool        dump_distance    = false;
+  bool        verbose          = false;
 
   template <typename out_stream_type>
   void show(out_stream_type& os) {
@@ -81,10 +79,6 @@ struct options {
     os << "  #of threads: " << num_threads << std::endl;
     os << "  Batch size: " << batch_size << std::endl;
     os << "  Ratio of FVs to replicate: " << popular_fv_ratio << std::endl;
-    os << "  Do not remove duplicate feature vectors: " << donot_remove_dup_fvs
-       << std::endl;
-    os << "  Do not share point store regionally: "
-       << donot_share_pstore_regionally << std::endl;
     os << "  Verbose: " << verbose << std::endl;
   }
 };
@@ -113,8 +107,6 @@ void usage(ost& os) {
         "NN-Descent. Default: 0.001."
      << "\n -t [int, optional] Number of threads per MPI rank. Default: 2."
      << "\n -b [int, optional] KNNG building batch size. Default: 2^25."
-     << "\n -L [optional] Do not share point store in local node."
-     << "\n -A [optional] Do not remove duplicate feature vectors."
      << "\n -P [double, optional] Ratio of FVs to replicate. Between 0 and "
         "1.0. Default: 0."
      << "\n -O [optional] Optimize KNNG after building."
@@ -127,7 +119,7 @@ void usage(ost& os) {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:r:d:t:b:G:AP:LSOm:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:r:d:t:b:G:P:Om:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.dataset_path = optarg;
@@ -156,16 +148,8 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
       case 'G':
         opt.knng_dump_dir = optarg;
         break;
-      case 'A':
-        opt.donot_remove_dup_fvs = true;
-        break;
       case 'P':
         opt.popular_fv_ratio = std::stod(optarg);
-        break;
-      case 'L':
-        opt.donot_share_pstore_regionally = true;
-        break;
-      case 'S':;  // Do nothing
         break;
       case 'O':
         opt.optimize = true;
@@ -268,8 +252,7 @@ int main(int argc, char* argv[]) {
       recorder.start("read_dataset");
       std::vector<std::filesystem::path> paths{
           saltatlas::dndetail::find_file_paths(opt.dataset_path)};
-      dnnd.load_points(paths.begin(), paths.end(), opt.dataset_format,
-                       !opt.donot_share_pstore_regionally);
+      dnnd.load_points(paths.begin(), paths.end(), opt.dataset_format);
       recorder.stop();
 
       comm.cout0() << "\n========================================" << std::endl;
@@ -277,9 +260,8 @@ int main(int argc, char* argv[]) {
       comm.cout0() << "========================================" << std::endl;
 
       recorder.start("KNNG build");
-      auto knng =
-          dnnd.build(opt.k, opt.rho, opt.delta, !opt.donot_remove_dup_fvs,
-                     opt.batch_size, opt.popular_fv_ratio);
+      auto knng = dnnd.build(opt.k, opt.rho, opt.delta, opt.popular_fv_ratio,
+                             opt.batch_size);
       recorder.stop();
       if (opt.verbose) {
         comm.cout0() << std::endl;

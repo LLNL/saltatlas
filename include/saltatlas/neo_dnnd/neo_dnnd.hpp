@@ -47,6 +47,16 @@
 
 #define SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
 
+// Avoid sending duplicate feature vectors
+#ifndef SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS
+#define SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS 1
+#endif
+
+// Read the point stores of other ranks directory
+#ifndef SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE
+#define SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE 1
+#endif
+
 #ifndef SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
 #define SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS 1
 #endif
@@ -192,16 +202,9 @@ class neo_dnnd {
   /// \param dataset_format Dataset format. Supported formats are "wsv
   /// (whitespace separated values)", "wsv-id (whitespace separated values with
   /// IDs in the first column)", "bin (binary)", and "bin-id (binary with IDs)".
-  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
-  /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string& dataset_format,
-                   const bool         read_nlocal_pstores_directly = true) {
-    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
-    priv_cout0(m_verbose) << "Read node local pstores directly: "
-                          << m_read_nlocal_pstores_directly << std::endl;
-
+                   const std::string& dataset_format) {
     std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
     auto partitioner = [this](const id_type id) -> int {
       return priv_owner(id);
@@ -228,16 +231,9 @@ class neo_dnnd {
   /// \param ids_end Iterator to the end of point IDs.
   /// \param points_begin Iterator to the beginning of points.
   /// \param points_end Iterator to the end of points.
-  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
-  /// on the same node directly.
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
-                  point_iterator points_begin, point_iterator points_end,
-                  const bool read_nlocal_pstores_directly = true) {
-    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
-    priv_cout0(m_verbose) << "Read node local pstores directly: "
-                          << m_read_nlocal_pstores_directly << std::endl;
-
+                  point_iterator points_begin, point_iterator points_end) {
     const std::size_t dims =
         (points_begin == points_end)
             ? 0
@@ -259,15 +255,22 @@ class neo_dnnd {
 
   /// \brief Build kNNG using NN-Descent.
   /// All ranks must call this function.
+  /// \param k Number of neighbors per point.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
+  /// \param popular_fv_ratio Ratio of feature vectors to replicate.
+  /// \param batch_size Batch size parameter.
+  /// \param initial_knng Initial kNNG to start NN-Descent from.
+  /// If not provided, the graph is initialized with random neighbors.
+  /// \return Constructed kNNG as an adjacency list.
   /// \warning inital_knng must be valid, e.g., already partitioned as same as
   /// the points, neighbors are sorted by distance, and no duplicate neighbors.
   /// It is designed to take a kNNG constructed previously by this class.
   knng_type build(const std::size_t k, const double rho = 0.5,
-                  const double      delta                = 0.001,
-                  const bool        remove_duplicate_fvs = true,
-                  const std::size_t batch_size           = 1 << 20,
-                  const double      popular_fv_ratio     = 0.0,
-                  const knng_type&  initial_knng         = knng_type()) {
+                  const double      delta            = 0.001,
+                  const double      popular_fv_ratio = 0.0,
+                  const std::size_t batch_size       = 1 << 25,
+                  const knng_type&  initial_knng     = knng_type()) {
     {
       m_fvs_disp.resize(m_fv_send_batch_size);
       m_fvs_block_lengths.resize(m_fv_send_batch_size, 1);
@@ -282,10 +285,9 @@ class neo_dnnd {
       priv_show_dram_usage();
     }
 
-    m_k                    = k;
-    m_rho                  = rho;
-    m_delta                = delta;
-    m_remove_duplicate_fvs = remove_duplicate_fvs;
+    m_k     = k;
+    m_rho   = rho;
+    m_delta = delta;
 
     assert(m_num_total_points > 0);
     priv_cout0(m_verbose) << "Terminal threshold: "
@@ -844,7 +846,8 @@ class neo_dnnd {
     m_point_store_managers.clear();
     m_point_stores.clear();
     for (std::size_t r = 0; r < m_comm.node_size(); ++r) {
-      if (!m_read_nlocal_pstores_directly && r != m_comm.node_local_rank()) {
+      if (!SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE &&
+          r != m_comm.node_local_rank()) {
         m_point_store_managers.emplace_back(nullptr);
         m_point_stores.emplace_back(nullptr);
         continue;
@@ -1357,7 +1360,7 @@ class neo_dnnd {
           pair_rank, std::move(pfv_neighbor_checks[pair_rank]));
       m_time_recorder->get().stop();
 
-      if (m_read_nlocal_pstores_directly &&
+      if (SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE &&
           priv_node_rank(pair_rank) == m_comm.node_rank()) {
         // Share the point store with the pair rank
         const auto& my_pstore = *(m_point_stores.at(m_comm.node_local_rank()));
@@ -1485,7 +1488,8 @@ class neo_dnnd {
     // vectors in the packed send buffer.
     std::size_t              num_to_sends_total = 0;
     std::vector<std::size_t> fvs_indices_send;
-    if (m_remove_duplicate_fvs) {
+#if SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS
+    {
       bstuo::unordered_flat_map<id_type, std::size_t> unique_fvs;
       for (const auto& check : checks) {
         const auto& src = check.first;
@@ -1498,9 +1502,10 @@ class neo_dnnd {
       }
       num_to_sends_total = unique_fvs.size();
       m_counter_db.add("DupFVs", checks.size() - num_to_sends_total);
-    } else {
-      num_to_sends_total = checks.size();
     }
+#else
+    num_to_sends_total = checks.size();
+#endif
     m_counter_db.add("SentFVs", num_to_sends_total);
 
     std::size_t num_to_recvs_total = 0;
@@ -1536,8 +1541,7 @@ class neo_dnnd {
                              ? fvs_indices_send.at(check_no)
                              : check_no;
         if (idx < num_already_sent + n) {
-          // This code path is for the case of m_remove_duplicate_fvs is true
-          assert(m_remove_duplicate_fvs);
+          assert(SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS);
           // This FV was already sent
           continue;
         }
@@ -1805,8 +1809,6 @@ class neo_dnnd {
   bool            m_verbose{false};
 
   // Options
-  bool        m_read_nlocal_pstores_directly{false};
-  bool        m_remove_duplicate_fvs{false};
   std::size_t m_k{0};
   double      m_rho{1.0};
   double      m_delta{0.001};
