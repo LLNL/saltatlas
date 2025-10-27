@@ -47,20 +47,30 @@
 
 #define SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
 
-// Avoid sending duplicate feature vectors
+// Avoid sending duplicate feature vectors to the same rank within a batch
 #ifndef SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS
 #define SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS 1
 #endif
 
-// Read the point stores of other ranks directory
+// Read the points stored in other ranks on the same node directly
 #ifndef SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE
 #define SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE 1
 #endif
 
-#ifndef SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
-#define SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS 1
+// Avoid sending duplicate neighbor checks within a superstep
+// This operation may require large memory to store all neighbor check intros
+// within a superstep.
+#ifndef SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+#define SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO 0
 #endif
 
+// Avoid performing duplicate neighbor checks within a batch.
+// This check is done after receiving all neighbor intros within a batch.
+#ifndef SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+#define SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS 1
+#endif
+
+/// Skip neighbor checks if the neighbor is already in the neighbor list.
 #ifndef SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
 #define SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS 1
 #endif
@@ -483,17 +493,24 @@ class neo_dnnd {
     }
 
     if (show_final_summary || m_verbose) {
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+      m_comm.cout0() << "#of duplicate neighbor introductions:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DupNCKIntros"))
+                     << std::endl;
+#endif
+
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+      m_comm.cout0() << "#of duplicate neighbor checks:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DupNCKIntros"))
+                     << std::endl;
+#endif
+
 #if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
       m_comm.cout0() << "#of skipped checks for existing neighbors:\t"
                      << (std::size_t)m_comm.all_reduce_sum(
                             m_counter_db.get_total("SkippedExistingNeighbors"))
-                     << std::endl;
-#endif
-
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
-      m_comm.cout0() << "#of duplicate neighbor checks:\t"
-                     << (std::size_t)m_comm.all_reduce_sum(
-                            m_counter_db.get_total("DuplicateNCKs"))
                      << std::endl;
 #endif
 
@@ -1126,7 +1143,7 @@ class neo_dnnd {
       return num_finished_ranks;
     };
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
     boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
     std::size_t num_duplicate_ncks = 0;
 #endif
@@ -1152,7 +1169,7 @@ class neo_dnnd {
               // store, which avoids to send x's FV to y.
               if (x >= y) continue;
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
               if (unique_recv_ncks.emplace(x, y).second == false) {
                 // duplicate check
                 ++num_duplicate_ncks;
@@ -1203,7 +1220,7 @@ class neo_dnnd {
               const auto x = std::min(nid, oid);
               const auto y = std::max(nid, oid);
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
               if (unique_recv_ncks.emplace(x, y).second == false) {
                 // duplicate check
                 ++num_duplicate_ncks;
@@ -1228,8 +1245,8 @@ class neo_dnnd {
     priv_cout0(m_verbose) << "#of performed old-new checks: "
                           << m_comm.all_reduce_sum(cnt_checks) << std::endl;
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
-    m_counter_db.add("DuplicateNCKs", num_duplicate_ncks);
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+    m_counter_db.add("DupNCKIntros", num_duplicate_ncks);
 #endif
 
     return m_comm.all_reduce_sum(num_updates);
@@ -1275,7 +1292,7 @@ class neo_dnnd {
   void priv_exchange_neighbor_intros(const matrix2d<id_pair_type>& nb_intros,
                                      matrix2d<id_pair_type>&       recv_nb_chks,
                                      matrix2d<id_pair_type>& recv_pfv_nb_chks) {
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
     // Keep track of all received neighbor checks to remove duplicates
     boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
     std::size_t num_duplicate_ncks = 0;
@@ -1309,7 +1326,7 @@ class neo_dnnd {
         }
 #endif
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
         if (unique_recv_ncks.insert(recv_buf[i]).second == false) {
           // duplicate neighbor check
           ++num_duplicate_ncks;
@@ -1334,7 +1351,7 @@ class neo_dnnd {
     m_counter_db.add("SkippedExistingNeighbors", num_existing_neighbor);
 #endif
 
-#if SALTATLAS_NEO_DNND_REMOVE_DUPLICATE_NCKS
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
     m_counter_db.add("DuplicateNCKs", num_duplicate_ncks);
 #endif
   }
