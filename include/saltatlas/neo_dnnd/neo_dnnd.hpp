@@ -25,6 +25,7 @@
 #include <boost/version.hpp>
 #if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_flat_set.hpp>
 #include <boost/unordered/unordered_node_map.hpp>
 #else
 #error "Boost 1.87.00 or higher is required."
@@ -44,7 +45,35 @@
 #include "saltatlas/neo_dnnd/mpi.hpp"
 #include "saltatlas/neo_dnnd/time_recorder.hpp"
 
-#define FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
+#define SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE (1ULL << 27)
+
+// Avoid sending duplicate feature vectors to the same rank within a batch
+#ifndef SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS
+#define SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS 1
+#endif
+
+// Read the points stored in other ranks on the same node directly
+#ifndef SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE
+#define SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE 1
+#endif
+
+// Avoid sending duplicate neighbor checks within a superstep
+// This operation may require large memory to store all neighbor check intros
+// within a superstep.
+#ifndef SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+#define SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO 0
+#endif
+
+// Avoid performing duplicate neighbor checks within a batch.
+// This check is done after receiving all neighbor intros within a batch.
+#ifndef SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+#define SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS 1
+#endif
+
+/// Skip neighbor checks if the neighbor is already in the neighbor list.
+#ifndef SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+#define SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS 1
+#endif
 
 namespace saltatlas {
 
@@ -78,8 +107,12 @@ class neo_dnnd {
  private:
   struct __attribute__((packed)) id_pair_type {
     id_pair_type() = default;
+
     id_pair_type(const id_type first, const id_type second)
         : first(first), second(second) {}
+
+    id_pair_type(const id_pair_type& other)
+        : first(other.first), second(other.second) {}
 
     bool operator==(const id_pair_type& other) const {
       return first == other.first && second == other.second;
@@ -102,10 +135,10 @@ class neo_dnnd {
 
   struct id_pair_hasher {
     std::size_t operator()(const id_pair_type& id_pair) const {
-      std::size_t buf;
+      std::size_t buf[2];
       detail::murmurhash3::MurmurHash3_x64_128(&id_pair, sizeof(id_pair), 12321,
-                                               &buf);
-      return buf;
+                                               buf);
+      return buf[0];
     }
   };
 
@@ -119,15 +152,14 @@ class neo_dnnd {
   template <typename T>
   using matrix2d = std::vector<std::vector<T>>;
 
-  using pop_fv_cache_t = dndetail::pfv_replica_store<id_type, fe_type>;
+  // Popular feature vector replica store type
+  using pfv_store_t = dndetail::pfv_replica_store<id_type, fe_type>;
 
   // For macOS
 #ifdef __APPLE__
-  static constexpr std::size_t k_def_cache_capacity = 1 << 10;
-  static constexpr const char* k_shm_dir            = "/tmp/";
+  static constexpr const char* k_shm_dir = "/tmp/";
 #else
-  static constexpr std::size_t       k_def_cache_capacity = 1 << 18;
-  static constexpr const char* const k_shm_dir            = "/dev/shm/";
+  static constexpr const char* const k_shm_dir = "/dev/shm/";
 #endif
   static constexpr const char* k_point_store_shm_name = "pstore";
 
@@ -180,16 +212,9 @@ class neo_dnnd {
   /// \param dataset_format Dataset format. Supported formats are "wsv
   /// (whitespace separated values)", "wsv-id (whitespace separated values with
   /// IDs in the first column)", "bin (binary)", and "bin-id (binary with IDs)".
-  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
-  /// on the same node directly.
   template <typename paths_iterator>
   void load_points(paths_iterator paths_begin, paths_iterator paths_end,
-                   const std::string& dataset_format,
-                   const bool         read_nlocal_pstores_directly = true) {
-    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
-    priv_cout0(m_verbose) << "Read node local pstores directly: "
-                          << m_read_nlocal_pstores_directly << std::endl;
-
+                   const std::string& dataset_format) {
     std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
     auto partitioner = [this](const id_type id) -> int {
       return priv_owner(id);
@@ -198,8 +223,8 @@ class neo_dnnd {
         point_file_paths, dataset_format, partitioner, m_verbose, m_comm);
 
     m_num_dims = m_comm.all_reduce_max(fvs.empty() ? 0 : fvs.front().size());
-    m_fv_send_batch_size =
-        FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
+    m_fv_send_batch_size = SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE /
+                           num_dims() / sizeof(fe_type);
 
     priv_ingest_points(ids, fvs);
   }
@@ -216,16 +241,9 @@ class neo_dnnd {
   /// \param ids_end Iterator to the end of point IDs.
   /// \param points_begin Iterator to the beginning of points.
   /// \param points_end Iterator to the end of points.
-  /// \param read_nlocal_pstores_directly If true, each rank reads point stores
-  /// on the same node directly.
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
-                  point_iterator points_begin, point_iterator points_end,
-                  const bool read_nlocal_pstores_directly = true) {
-    m_read_nlocal_pstores_directly = read_nlocal_pstores_directly;
-    priv_cout0(m_verbose) << "Read node local pstores directly: "
-                          << m_read_nlocal_pstores_directly << std::endl;
-
+                  point_iterator points_begin, point_iterator points_end) {
     const std::size_t dims =
         (points_begin == points_end)
             ? 0
@@ -235,8 +253,8 @@ class neo_dnnd {
       m_comm.cerr0() << "ERROR: point dimensionality is zero" << std::endl;
       m_comm.abort();
     }
-    m_fv_send_batch_size =
-        FV_SEND_BATCH_SIZE_BYTE / num_dims() / sizeof(fe_type);
+    m_fv_send_batch_size = SALTATLAS_NEO_DNND_FV_SEND_BATCH_SIZE_BYTE /
+                           num_dims() / sizeof(fe_type);
 
     auto [ids, fvs] =
         priv_partition_points(ids_begin, ids_end, points_begin, points_end);
@@ -247,15 +265,22 @@ class neo_dnnd {
 
   /// \brief Build kNNG using NN-Descent.
   /// All ranks must call this function.
+  /// \param k Number of neighbors per point.
+  /// \param rho Rho parameter in NN-Descent.
+  /// \param delta Delta parameter in NN-Descent.
+  /// \param popular_fv_ratio Ratio of feature vectors to replicate.
+  /// \param batch_size Batch size parameter.
+  /// \param initial_knng Initial kNNG to start NN-Descent from.
+  /// If not provided, the graph is initialized with random neighbors.
+  /// \return Constructed kNNG as an adjacency list.
   /// \warning inital_knng must be valid, e.g., already partitioned as same as
   /// the points, neighbors are sorted by distance, and no duplicate neighbors.
   /// It is designed to take a kNNG constructed previously by this class.
   knng_type build(const std::size_t k, const double rho = 0.5,
-                  const double      delta                = 0.001,
-                  const bool        remove_duplicate_fvs = true,
-                  const std::size_t batch_size           = 1 << 20,
-                  const double      popular_fv_ratio     = 0.0,
-                  const knng_type&  initial_knng         = knng_type()) {
+                  const double      delta            = 0.001,
+                  const double      popular_fv_ratio = 0.0,
+                  const std::size_t batch_size       = 1 << 25,
+                  const knng_type&  initial_knng     = knng_type()) {
     {
       m_fvs_disp.resize(m_fv_send_batch_size);
       m_fvs_block_lengths.resize(m_fv_send_batch_size, 1);
@@ -265,15 +290,14 @@ class neo_dnnd {
     if (m_verbose) {
       priv_show_dram_usage();
     }
-    priv_cache_popular_fvs(popular_fv_ratio);
+    priv_replicate_popular_fvs(popular_fv_ratio);
     if (m_verbose) {
       priv_show_dram_usage();
     }
 
-    m_k                    = k;
-    m_rho                  = rho;
-    m_delta                = delta;
-    m_remove_duplicate_fvs = remove_duplicate_fvs;
+    m_k     = k;
+    m_rho   = rho;
+    m_delta = delta;
 
     assert(m_num_total_points > 0);
     priv_cout0(m_verbose) << "Terminal threshold: "
@@ -323,9 +347,7 @@ class neo_dnnd {
       ++m_super_step_no;
     }
     m_comm.cout0() << "Finished NN-Descent core loop" << std::endl;
-    priv_cout0(m_verbose) << "#of distance calculations:\t"
-                          << m_comm.all_reduce_sum(m_num_distance_calculations)
-                          << std::endl;
+    m_counter_db.add("DistCalcs", m_num_distance_calculations);
     m_comm.barrier();
 
     priv_cout0(m_verbose) << std::endl;
@@ -411,11 +433,6 @@ class neo_dnnd {
       }
     }
     m_comm.barrier();
-
-    // This value is expected to be 0.
-    priv_cout0(m_verbose) << "#of distance calculations:\t"
-                          << m_comm.all_reduce_sum(m_num_distance_calculations)
-                          << std::endl;
   }
 
   /// \brief Dump the kNNG to a text file. Each MPI rank dumps its own file.
@@ -467,8 +484,36 @@ class neo_dnnd {
     }
   }
 
-  void print_profile([[maybe_unused]] const bool final) const {
-    if (final || m_verbose) {
+  void print_profile([[maybe_unused]] const bool show_final_summary) const {
+    if (show_final_summary) {
+      m_comm.cout0() << "#of distance calculations:\t"
+                     << m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DistCalcs"))
+                     << std::endl;
+    }
+
+    if (show_final_summary || m_verbose) {
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+      m_comm.cout0() << "#of duplicate neighbor introductions:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DupNCKIntros"))
+                     << std::endl;
+#endif
+
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+      m_comm.cout0() << "#of duplicate neighbor checks:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("DupNCKIntros"))
+                     << std::endl;
+#endif
+
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+      m_comm.cout0() << "#of skipped checks for existing neighbors:\t"
+                     << (std::size_t)m_comm.all_reduce_sum(
+                            m_counter_db.get_total("SkippedExistingNeighbors"))
+                     << std::endl;
+#endif
+
       m_comm.cout0() << "FV processing breakdown:" << std::endl;
       m_comm.cout0() << "  #of normally sent:\t"
                      << (std::size_t)m_comm.all_reduce_sum(
@@ -492,7 +537,7 @@ class neo_dnnd {
     }
 
 #ifdef PROFILE_FV
-    if (final) {
+    if (show_final_summary) {
       // make histogram
       std::size_t max_val = 0;
       for (const auto& item : m_fv_count) {
@@ -818,7 +863,8 @@ class neo_dnnd {
     m_point_store_managers.clear();
     m_point_stores.clear();
     for (std::size_t r = 0; r < m_comm.node_size(); ++r) {
-      if (!m_read_nlocal_pstores_directly && r != m_comm.node_local_rank()) {
+      if (!SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE &&
+          r != m_comm.node_local_rank()) {
         m_point_store_managers.emplace_back(nullptr);
         m_point_stores.emplace_back(nullptr);
         continue;
@@ -1070,6 +1116,7 @@ class neo_dnnd {
       const adj_list<id_type>& old_ng, const adj_list<id_type>& new_ng,
       const std::size_t batch_size) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
+
     matrix2d<id_pair_type> neighbor_intros(m_comm.size());
 
     std::size_t batch_no    = 0;
@@ -1096,8 +1143,13 @@ class neo_dnnd {
       return num_finished_ranks;
     };
 
-    // new-new neighbor checks
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+    boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
+    std::size_t num_duplicate_ncks = 0;
+#endif
+
     std::size_t cnt_checks = 0;
+    // new-new neighbor checks
     while (true) {
       if (!finished_all_local) {
         for (auto id_itr = point_store.ids_begin();
@@ -1109,7 +1161,21 @@ class neo_dnnd {
           const auto& nns = new_ng.at(sid);
           for (const auto& x : nns) {
             for (const auto& y : nns) {
+              // Send this introduction to the owner of x and
+              // x will send its feature vector to y
+
+              // Popular FV store holds higher ID FVs, so by ensuring x < y,
+              // we can increase the chance that y's FV is in the popular FV
+              // store, which avoids to send x's FV to y.
               if (x >= y) continue;
+
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+              if (unique_recv_ncks.emplace(x, y).second == false) {
+                // duplicate check
+                ++num_duplicate_ncks;
+                continue;
+              }
+#endif
 
               neighbor_intros[priv_owner(x)].emplace_back(x, y);
               ++cnt_checks;
@@ -1148,12 +1214,21 @@ class neo_dnnd {
                 continue;
               }
 
-              if (nid < oid) {
-                neighbor_intros[priv_owner(nid)].emplace_back(nid, oid);
-              } else {
-                neighbor_intros[priv_owner(oid)].emplace_back(oid, nid);
-              }
+              // The point that sends its FV is the one with the smaller ID.
+              // This increases the chance that the other point's FV is in the
+              // popular FV store.
+              const auto x = std::min(nid, oid);
+              const auto y = std::max(nid, oid);
 
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+              if (unique_recv_ncks.emplace(x, y).second == false) {
+                // duplicate check
+                ++num_duplicate_ncks;
+                continue;
+              }
+#endif
+
+              neighbor_intros[priv_owner(x)].emplace_back(x, y);
               ++cnt_checks;
               if (cnt_checks % batch_size == 0) {
                 launch_check_procedure();
@@ -1170,19 +1245,24 @@ class neo_dnnd {
     priv_cout0(m_verbose) << "#of performed old-new checks: "
                           << m_comm.all_reduce_sum(cnt_checks) << std::endl;
 
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS_INTRO
+    m_counter_db.add("DupNCKIntros", num_duplicate_ncks);
+#endif
+
     return m_comm.all_reduce_sum(num_updates);
   }
 
+  // Launch the neighbor check procedure.
   std::size_t priv_launch_neighbor_checks(
       const matrix2d<id_pair_type>& neighbor_intros) {
     matrix2d<id_pair_type> neighbor_checks(m_comm.size());
-    matrix2d<id_pair_type> cached_neighbor_checks(m_comm.size());
+    matrix2d<id_pair_type> pfv_neighbor_checks(m_comm.size());
     assert(int(neighbor_intros.size()) == m_comm.size());
 
-    // Send neighbor introductions
+    // Send and recieve neighbor introductions
     m_time_recorder->get().start("Send neighbor intros");
     priv_exchange_neighbor_intros(neighbor_intros, neighbor_checks,
-                                  cached_neighbor_checks);
+                                  pfv_neighbor_checks);
     const auto time_send_ncks = m_time_recorder->get().stop();
     m_comm.barrier();
 
@@ -1192,7 +1272,7 @@ class neo_dnnd {
     // Neighbor checks between pairs
     m_time_recorder->get().start("Neighbor checks core");
     const auto num_updated = priv_check_neighbors(
-        std::move(neighbor_checks), std::move(cached_neighbor_checks));
+        std::move(neighbor_checks), std::move(pfv_neighbor_checks));
     const auto time_nck_core = m_time_recorder->get().stop();
     m_comm.barrier();
 
@@ -1202,11 +1282,25 @@ class neo_dnnd {
     return num_updated;
   }
 
-  void priv_exchange_neighbor_intros(
-      const matrix2d<id_pair_type>& nb_intros,
-      matrix2d<id_pair_type>&       recv_nb_chks,
-      matrix2d<id_pair_type>&       recv_cached_nb_chks) {
-    std::size_t num_cached_checks = 0;
+  /// Exchange neighbor introductions among MPI ranks.
+  /// \param nb_intros neighbor introductions to send (pairs of source and
+  /// destination point IDs).
+  /// \param recv_nb_chks received neighbor checks. Source points are owned by
+  /// this rank, and destination points' FVs are not in the popular FV store.
+  /// \param recv_pfv_nb_chks received neighbor checks. Destination points'
+  /// FVs are in the popular FV store.
+  void priv_exchange_neighbor_intros(const matrix2d<id_pair_type>& nb_intros,
+                                     matrix2d<id_pair_type>&       recv_nb_chks,
+                                     matrix2d<id_pair_type>& recv_pfv_nb_chks) {
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+    // Keep track of all received neighbor checks to remove duplicates
+    boost::unordered_flat_set<id_pair_type, id_pair_hasher> unique_recv_ncks;
+    std::size_t num_duplicate_ncks = 0;
+#endif
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+    std::size_t num_existing_neighbor = 0;
+#endif
+    std::size_t num_pfv_checks = 0;
     for (std::size_t ri = 0; ri < m_all_to_all_pairs.size(); ++ri) {
       const auto pair_rank = m_all_to_all_pairs[ri];
       // send requests to the pair rank
@@ -1223,21 +1317,48 @@ class neo_dnnd {
         const auto sid = recv_buf[i].first;
         const auto nid = recv_buf[i].second;
         assert(priv_owner(sid) == m_comm.rank());
-        if (nid < m_min_cache_id) {
+        // If nid is already in sid's neighbor list, we can skip the neighbor
+        // check
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+        if (m_graph.count(sid) > 0 && m_graph.at(sid).contains(nid)) {
+          ++num_existing_neighbor;
+          continue;
+        }
+#endif
+
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+        if (unique_recv_ncks.insert(recv_buf[i]).second == false) {
+          // duplicate neighbor check
+          ++num_duplicate_ncks;
+          continue;
+        }
+#endif
+
+        if (nid < m_min_replicate_id) {
+          // nid's FV is not in the popular FV store
           recv_nb_chks[priv_owner(nid)].emplace_back(sid, nid);
         } else {
-          recv_cached_nb_chks[priv_owner(nid)].emplace_back(sid, nid);
-          ++num_cached_checks;
+          // nid's FV is in the popular FV store
+          recv_pfv_nb_chks[priv_owner(nid)].emplace_back(sid, nid);
+          ++num_pfv_checks;
         }
       }
       m_time_recorder->get().stop();
     }
-    m_counter_db.add("ReplicatedFVs", num_cached_checks);
+    m_counter_db.add("ReplicatedFVs", num_pfv_checks);
+
+#if SALTATLAS_NEO_DNND_SKIP_EXISTING_NEGHBORS
+    m_counter_db.add("SkippedExistingNeighbors", num_existing_neighbor);
+#endif
+
+#if SALTATLAS_NEO_DNND_AVOID_DUPLICATE_NCKS
+    m_counter_db.add("DuplicateNCKs", num_duplicate_ncks);
+#endif
   }
 
   std::size_t priv_check_neighbors(
       matrix2d<id_pair_type>&& neighbor_checks,
-      matrix2d<id_pair_type>&& cached_neighbor_checks) {
+      matrix2d<id_pair_type>&& pfv_neighbor_checks) {
     // Construct the following containers here to reuse memory over iterations
     std::vector<fe_type>       recv_features;
     std::vector<std::size_t>   fv_indices_recv;
@@ -1252,11 +1373,11 @@ class neo_dnnd {
       auto       assigned_checks = std::move(neighbor_checks[pair_rank]);
 
       m_time_recorder->get().start("Replicated neighbor check");
-      num_updated += priv_check_cached_neighbors(
-          pair_rank, std::move(cached_neighbor_checks[pair_rank]));
+      num_updated += priv_check_pfv_neighbors(
+          pair_rank, std::move(pfv_neighbor_checks[pair_rank]));
       m_time_recorder->get().stop();
 
-      if (m_read_nlocal_pstores_directly &&
+      if (SALTATLAS_NEO_DNND_READ_NODE_LOCAL_PSTORE &&
           priv_node_rank(pair_rank) == m_comm.node_rank()) {
         // Share the point store with the pair rank
         const auto& my_pstore = *(m_point_stores.at(m_comm.node_local_rank()));
@@ -1384,7 +1505,8 @@ class neo_dnnd {
     // vectors in the packed send buffer.
     std::size_t              num_to_sends_total = 0;
     std::vector<std::size_t> fvs_indices_send;
-    if (m_remove_duplicate_fvs) {
+#if SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS
+    {
       bstuo::unordered_flat_map<id_type, std::size_t> unique_fvs;
       for (const auto& check : checks) {
         const auto& src = check.first;
@@ -1397,9 +1519,10 @@ class neo_dnnd {
       }
       num_to_sends_total = unique_fvs.size();
       m_counter_db.add("DupFVs", checks.size() - num_to_sends_total);
-    } else {
-      num_to_sends_total = checks.size();
     }
+#else
+    num_to_sends_total = checks.size();
+#endif
     m_counter_db.add("SentFVs", num_to_sends_total);
 
     std::size_t num_to_recvs_total = 0;
@@ -1435,8 +1558,7 @@ class neo_dnnd {
                              ? fvs_indices_send.at(check_no)
                              : check_no;
         if (idx < num_already_sent + n) {
-          // This code path is for the case of m_remove_duplicate_fvs is true
-          assert(m_remove_duplicate_fvs);
+          assert(SALTATLAS_NEO_DNND_REMOVE_DUP_FVS_SENDS);
           // This FV was already sent
           continue;
         }
@@ -1505,10 +1627,11 @@ class neo_dnnd {
     return num_updated;
   }
 
-  void priv_cache_popular_fvs(const double popular_fv_ratio) {
+  void priv_replicate_popular_fvs(const double popular_fv_ratio) {
     if (popular_fv_ratio == 0.0) {
-      m_comm.cout0() << "No popular feature vectors are cached" << std::endl;
-      m_min_cache_id = std::numeric_limits<id_type>::max();
+      m_comm.cout0() << "No popular feature vectors are replicated"
+                     << std::endl;
+      m_min_replicate_id = std::numeric_limits<id_type>::max();
       return;
     }
 
@@ -1517,68 +1640,70 @@ class neo_dnnd {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
     if (popular_fv_ratio >= 1) {
-      m_min_cache_id = 0;
+      m_min_replicate_id = 0;
     } else {
-      m_min_cache_id =
+      m_min_replicate_id =
           m_num_total_points - (m_num_total_points * popular_fv_ratio);
     }
-    priv_cout0(m_verbose) << "Min ID to replicate: " << m_min_cache_id
+    // Points whose IDs are >= m_min_replicate_id are treated as popular points,
+    // i.e., their feature vectors are replicated to all nodes.
+    priv_cout0(m_verbose) << "Min ID to replicate: " << m_min_replicate_id
                           << std::endl;
 
     m_time_recorder->get().start("Replicate popular FVs");
     std::vector<id_type> popular_fvs;
     for (auto itr = point_store.ids_begin(); itr != point_store.ids_end();
          ++itr) {
-      if (*itr >= m_min_cache_id) {
+      if (*itr >= m_min_replicate_id) {
         popular_fvs.push_back(*itr);
       }
     }
     {
       const auto max_count    = m_comm.all_reduce_max(popular_fvs.size());
       const auto max_capacity = max_count * m_comm.num_nodes();
-      m_pop_fv_store          = std::make_unique<pop_fv_cache_t>(
+      m_pfv_store             = std::make_unique<pfv_store_t>(
           num_dims(), max_capacity, m_comm.node_size(),
           m_comm.node_local_rank(), std::to_string(m_comm.node_rank()), m_comm);
     }
 
-    // Construct my feature vector plication store
-    m_pop_fv_store->create_mine();
+    // Construct my feature vector replication store
+    m_pfv_store->create_mine();
     for (std::size_t n = 0; n < m_all_to_all_node_pairs.size(); ++n) {
-      const auto pair_cache_no = m_all_to_all_node_pairs[n];
+      const auto pair_node_no = m_all_to_all_node_pairs[n];
       const auto pair_rank =
-          pair_cache_no * m_comm.node_size() + m_comm.node_local_rank();
+          pair_node_no * m_comm.node_size() + m_comm.node_local_rank();
 
       std::vector<id_type> id_recv_buf;
       m_comm.sendrecv_arb_size(pair_rank, popular_fvs, id_recv_buf);
 
       priv_sendrecv_fvs(
           popular_fvs, pair_rank,
-          m_pop_fv_store->my_fv_pool() +
-              m_pop_fv_store->size(m_comm.node_local_rank()) * num_dims(),
+          m_pfv_store->my_fv_pool() +
+              m_pfv_store->size(m_comm.node_local_rank()) * num_dims(),
           id_recv_buf.size());
 
       for (const auto& id : id_recv_buf) {
         assert(priv_owner(id) == pair_rank);
         assert(m_comm.node_local_rank() == priv_node_local_rank(pair_rank));
-        m_pop_fv_store->register_id(id);
+        m_pfv_store->register_id(id);
       }
     }
-    m_pop_fv_store->close_mine();
+    m_pfv_store->close_mine();
     // Open all other local ranks FV stores for read-only access
-    m_pop_fv_store->open_all_read_only();
+    m_pfv_store->open_all_read_only();
     m_time_recorder->get().stop();
   }
 
-  std::size_t priv_check_cached_neighbors(const int                   pair_rank,
-                                          std::vector<id_pair_type>&& checks) {
+  std::size_t priv_check_pfv_neighbors(const int                   pair_rank,
+                                       std::vector<id_pair_type>&& checks) {
     const auto& point_store = *(m_point_stores.at(m_comm.node_local_rank()));
 
-    if (!m_pop_fv_store) {
+    if (!m_pfv_store) {
       return 0;
     }
 
-    // To receive distances where neighbors' feature vectors are cached
-    m_time_recorder->get().start("Calc dist (cached FVs)");
+    // Calculate distances using the popular FV store
+    m_time_recorder->get().start("Calc dist (replicated FVs)");
     std::vector<distance_type> distances(checks.size());
     OMP_DIRECTIVE(parallel for)
     for (std::size_t i = 0; i < checks.size(); ++i) {
@@ -1588,7 +1713,7 @@ class neo_dnnd {
       const auto* sfv = point_store[sid];
       assert(sfv);
       const auto        nfv_bank_no = priv_node_local_rank(priv_owner(nid));
-      const auto* const nfv         = m_pop_fv_store->get(nfv_bank_no, nid);
+      const auto* const nfv         = m_pfv_store->get(nfv_bank_no, nid);
       assert(nfv);
       const auto dist = priv_get_distance(sfv, num_dims(), nfv, num_dims());
       distances[i]    = dist;
@@ -1610,16 +1735,16 @@ class neo_dnnd {
     MPI_Request                recv_distances_req;
     m_comm.irecv(pair_rank, recv_distances, recv_distances_req);
 
-    m_time_recorder->get().start("Update kNNG sender (cached FVs)");
+    m_time_recorder->get().start("Update kNNG sender (popular FVs)");
     std::size_t num_updated = priv_update_knng(checks, false, distances);
     m_time_recorder->get().stop();
 
-    m_time_recorder->get().start("Wait for CHKs&DISTs (cached FVs)");
+    m_time_recorder->get().start("Wait for CHKs&DISTs (popular FVs)");
     m_comm.wait(recv_checks_req);
     m_comm.wait(recv_distances_req);
     m_time_recorder->get().stop();
 
-    m_time_recorder->get().start("Update kNNG receiver (cached FVs)");
+    m_time_recorder->get().start("Update kNNG receiver (popular FVs)");
     num_updated += priv_update_knng(recv_checks, true, recv_distances);
     m_time_recorder->get().stop();
 
@@ -1701,8 +1826,6 @@ class neo_dnnd {
   bool            m_verbose{false};
 
   // Options
-  bool        m_read_nlocal_pstores_directly{false};
-  bool        m_remove_duplicate_fvs{false};
   std::size_t m_k{0};
   double      m_rho{1.0};
   double      m_delta{0.001};
@@ -1712,11 +1835,11 @@ class neo_dnnd {
   knn_heap_adj_list_t             m_graph{};
   std::vector<const point_store*> m_point_stores;
   std::vector<metall::manager*>   m_point_store_managers;
-  std::unique_ptr<pop_fv_cache_t> m_pop_fv_store;
+  std::unique_ptr<pfv_store_t>    m_pfv_store;
 
   std::size_t m_num_dims{0};
   std::size_t m_super_step_no{0};
-  std::size_t m_min_cache_id{0};
+  std::size_t m_min_replicate_id{0};
 
   // For sending feature vectors
   std::size_t                 m_fv_send_batch_size{0};

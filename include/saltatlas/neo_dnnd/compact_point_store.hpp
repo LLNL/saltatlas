@@ -148,11 +148,13 @@ class compact_point_store {
 
   inline value_type *data() { return metall::to_raw_pointer(m_data); }
 
-  inline const value_type *data() const { return metall::to_raw_pointer(m_data); }
+  inline const value_type *data() const {
+    return metall::to_raw_pointer(m_data);
+  }
 
   inline std::size_t num_points() const { return m_id_map.size(); }
 
-  inline std::size_t dim() const { return m_num_dims; }
+  inline std::size_t dims() const { return m_num_dims; }
 
   const_iterator begin() const {
     return const_iterator(m_id_map.cbegin(), data());

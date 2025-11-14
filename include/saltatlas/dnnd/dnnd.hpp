@@ -402,8 +402,7 @@ class dnnd {
     m_comm.cf_barrier();
   }
 
-  /// \brief Deprecated API. Use dump_index() instead.
-  /// This function will be removed in future releases.
+  [[deprecated("Use dump_index() instead.")]]
   void dump_graph(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
     dump_index(path, dump_distance);

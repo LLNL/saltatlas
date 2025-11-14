@@ -17,7 +17,7 @@ mpirun -n 2 ./examples/dnnd_simple_levenshtein -p str -u  -k 3 -n 4\
 
 #include <ygm/comm.hpp>
 
-#include <saltatlas/dnnd/dnnd_simple.hpp>
+#include <saltatlas/dnnd/dnnd.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
 #include "dnnd_example_common.hpp"
@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
 
   if (!opt.index_dump_prefix.empty()) {
     comm.cout0() << "\nDumping index to " << opt.index_dump_prefix << std::endl;
-    g.dump_graph(opt.index_dump_prefix, opt.dump_index_with_distance);
+    g.dump_index(opt.index_dump_prefix, opt.dump_index_with_distance);
     comm.cf_barrier();
     comm.cout0() << "Finished dumping." << std::endl;
   }

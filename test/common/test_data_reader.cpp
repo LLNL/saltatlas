@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <ygm/comm.hpp>
+#include <ygm/detail/collective.hpp>
 
 #include <saltatlas/common/data_reader.hpp>
 #include <saltatlas/common/point_store.hpp>
@@ -107,7 +108,7 @@ void run_test(const std::string&          format,
                                            point_partitioner, pstore, comm);
 
   // Check the read points
-  const auto total_num_points = comm.all_reduce_sum(pstore.size());
+  const auto total_num_points = ygm::sum(pstore.size(), comm);
   if (total_num_points != test_points.size()) {
     comm.cerr0() << "Number of read points mismatch: " << total_num_points
                  << " vs " << test_points.size() << std::endl;
