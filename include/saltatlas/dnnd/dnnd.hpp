@@ -229,7 +229,7 @@ class dnnd {
             std::filesystem::path>,
         "paths_iterator must be an iterator of std::filesystem::path");
     std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
-    saltatlas::read_points(point_file_paths, file_format, false,
+    saltatlas::read_points(point_file_paths, file_format, m_verbose,
                            priv_get_point_partitioner(), m_pstore, m_comm);
   }
 

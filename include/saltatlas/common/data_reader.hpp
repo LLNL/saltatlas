@@ -92,7 +92,8 @@ inline void read_points_helper(
   comm.cf_barrier();
 
   // Reads points
-  std::size_t count_points = 0;
+  std::size_t count_points     = 0;
+  std::size_t unreadable_lines = 0;
   for (std::size_t i = 0; i < sorted_file_names.size(); ++i) {
     if (worker(i) != comm.rank()) continue;
     const auto &file_name = sorted_file_names[i];
@@ -107,11 +108,18 @@ inline void read_points_helper(
     std::string line_buf;
     id_t        id = id_offsets[i];
     while (std::getline(ifs, line_buf)) {
-      point_t    point;
-      const auto ret = parser(line_buf, point);
-      if (!ret || point.empty()) {
-        std::cerr << "Invalid line " << line_buf << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      point_t point;
+      try {
+        const auto ret = parser(line_buf, point);
+      } catch (...) {
+        ++unreadable_lines;
+        if (verbose) {
+          std::cerr << "Unable to read line " << id - id_offsets[i] + 1
+                    << " in " << file_name << ": " << line_buf << std::endl;
+        }
+
+        ++id;
+        continue;
       }
 
       // Send to the corresponding process
@@ -132,9 +140,10 @@ inline void read_points_helper(
     }
   }
   comm.barrier();
-  if (ygm::sum(count_points, comm) != total_num_points) {
-    comm.cerr0() << "Some points are missing" << std::endl;
-    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  std::size_t total_unreadable_lines = ygm::sum(unreadable_lines, comm);
+  if (total_unreadable_lines != 0) {
+    comm.cerr0() << "Found " << total_unreadable_lines << " unreadable lines"
+                 << std::endl;
   }
 }
 
@@ -155,6 +164,7 @@ inline void read_points_with_id_helper(
   ref_point_store              = local_point_store;
   comm.cf_barrier();
 
+  std::size_t unreadable_lines = 0;
   for (std::size_t file_no = 0; file_no < file_names.size(); ++file_no) {
     if (!assigned(file_no)) continue;
 
@@ -167,13 +177,21 @@ inline void read_points_with_id_helper(
     }
 
     std::string line_buf;
+    std::size_t line_num{0};
     while (std::getline(ifs, line_buf)) {
-      id_t       id{};
-      point_t    point;
-      const auto ret = parser(line_buf, id, point);
-      if (!ret) {
-        std::cerr << "Invalid line " << line_buf << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      ++line_num;
+
+      id_t    id{};
+      point_t point;
+      try {
+        const auto ret = parser(line_buf, id, point);
+      } catch (...) {
+        ++unreadable_lines;
+        if (verbose) {
+          std::cerr << "Unable to read line " << line_num << " in " << file_name
+                    << ": " << line_buf << std::endl;
+        }
+        continue;
       }
 
       // Send to the corresponding rank
@@ -188,6 +206,11 @@ inline void read_points_with_id_helper(
     }
   }
   comm.barrier();
+  std::size_t total_unreadable_lines = ygm::sum(unreadable_lines, comm);
+  if (total_unreadable_lines != 0) {
+    comm.cerr0() << "Found " << total_unreadable_lines << " unreadable lines"
+                 << std::endl;
+  }
 }
 
 /// \brief Read points (feature vectors) using multiple processes.
