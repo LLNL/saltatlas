@@ -42,6 +42,9 @@ struct option_t {
   int    query_k{1};  // #of neighbors to search for
   double epsilon{0.1};
 
+  // RNG seed
+  uint64_t rng_seed = std::random_device{}();
+
   // Data dump options
   std::filesystem::path index_dump_prefix;
   bool                  dump_index_with_distance{false};
@@ -77,7 +80,7 @@ int main(int argc, char **argv) {
   }
 
   saltatlas::dnnd<id_t, point_type, dist_t> g(
-      saltatlas::distance::id::levenshtein, comm);
+      saltatlas::distance::id::levenshtein, comm, opt.rng_seed, opt.verbose);
 
   comm.cout0() << "<<Read Points>>" << std::endl;
   // Read string points, where each line in files is a string
@@ -128,7 +131,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
   help = false;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:r:d:f:p:um:e:q:n:g:o:b:G:Dvh")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:r:d:f:p:um:e:q:n:g:o:b:G:Ds:vh")) != -1) {
     switch (n) {
       case 'k':
         opt.index_k = std::stoi(optarg);
@@ -184,6 +187,10 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 
       case 'D':
         opt.dump_index_with_distance = true;
+        break;
+
+      case 's':
+        opt.rng_seed = std::stoull(optarg);
         break;
 
       case 'v':
