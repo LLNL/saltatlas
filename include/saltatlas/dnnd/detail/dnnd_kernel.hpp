@@ -480,6 +480,7 @@ class dnnd_kernel {
                                  local_this, sid,
                                  std::numeric_limits<id_type>::max(),
                                  std::numeric_limits<distance_type>::max());
+        return;
       }
       std::uniform_int_distribution<id_type> dist(0, num_local_points - 1);
       const auto offset = dist(local_this->m_rnd_generator);
