@@ -109,9 +109,14 @@ inline void read_points_helper(
     id_t        id = id_offsets[i];
     while (std::getline(ifs, line_buf)) {
       point_t point;
+      bool    parse_success;
       try {
-        const auto ret = parser(line_buf, point);
+        parse_success = parser(line_buf, point);
       } catch (...) {
+        parse_success = false;
+      }
+
+      if (not parse_success) {
         ++unreadable_lines;
         if (verbose) {
           std::cerr << "Unable to read line " << id - id_offsets[i] + 1
@@ -183,9 +188,14 @@ inline void read_points_with_id_helper(
 
       id_t    id{};
       point_t point;
+      bool    parse_success;
       try {
-        const auto ret = parser(line_buf, id, point);
+        parse_success = parser(line_buf, id, point);
       } catch (...) {
+        parse_success = false;
+      }
+
+      if (not parse_success) {
         ++unreadable_lines;
         if (verbose) {
           std::cerr << "Unable to read line " << line_num << " in " << file_name
