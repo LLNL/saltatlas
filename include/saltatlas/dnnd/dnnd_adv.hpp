@@ -382,7 +382,8 @@ class dnnd_adv {
   /// \param distance_func_id Distance function ID.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index. The return value of get_index()
-  /// can be used.
+  /// can be used. Currently, index must be partitioned in the same way as the
+  /// point store.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   /// \param recheck If true, redo the neighbor check for the initial index,
@@ -405,7 +406,8 @@ class dnnd_adv {
   /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
   /// \param initial_index Initial index. The return value of get_index()
-  /// can be used.
+  /// can be used. Currently, index must be partitioned in the same way as the
+  /// point store.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   /// \param recheck If true, redo the neighbor check for the initial index,
@@ -440,7 +442,8 @@ class dnnd_adv {
   /// All ranks must call this function.
   /// \param distance_func_id Distance function ID.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index.
+  /// \param initial_index Initial index. Currently, index must be partitioned
+  /// in the same way as the point store.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   /// \param recheck If true, redo the neighbor check for the initial index,
@@ -463,7 +466,8 @@ class dnnd_adv {
   /// All ranks must call this function.
   /// \param dfunc Distance function.
   /// \param k Number of neighbors per point.
-  /// \param initial_index Initial index.
+  /// \param initial_index Initial index. Currently, index must be partitioned
+  /// in the same way as the point store.
   /// \param rho Rho parameter in NN-Descent.
   /// \param delta Delta parameter in NN-Descent.
   /// \param recheck If true, redo the neighbor check for the initial index,
