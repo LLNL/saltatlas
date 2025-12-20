@@ -1689,6 +1689,7 @@ class neo_dnnd {
       }
     }
     m_pfv_store->close_mine();
+    m_comm.node_local_barrier();
     // Open all other local ranks FV stores for read-only access
     m_pfv_store->open_all_read_only();
     m_time_recorder->get().stop();
