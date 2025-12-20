@@ -477,12 +477,12 @@ class dnnd_adv {
       const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
       const double rho = 0.5, const double delta = 0.001,
       const bool recheck = false, const double time_limit_sec = 0) {
-    typename nn_kernel_type::option option{.k                          = k,
-                                           .r                          = rho,
-                                           .delta                      = delta,
+    typename nn_kernel_type::option option{.k              = k,
+                                           .r              = rho,
+                                           .delta          = delta,
+                                           .time_limit_sec = time_limit_sec,
                                            .exchange_reverse_neighbors = true,
                                            .mini_batch_size = 1 << 26,
-                                           .time_limit_sec  = time_limit_sec,
                                            .rnd_seed        = m_rnd_seed,
                                            .verbose         = m_verbose};
 
