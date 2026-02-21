@@ -18,6 +18,9 @@ The dataset consists of the following files:
     - The digit in the tens place of the ID indicates the cluster to which the
       point belongs.
 
+- [point_5-4_str-id.txt](./point_5-4_str-id.txt):
+    - Contains the same data as point_5-4.txt with string IDs.
+
 - [query_5-4.txt](./query_5-4.txt):
     - Consists of 5 search queries.
     - Each query point is close to one of the clusters in the point_5-4.txt
@@ -44,6 +47,14 @@ There is also a string dataset.
 - [point_string.txt](./point_string.txt):
     - Contains 9 strings with different lengths.
     - Distance function is the Levenshtein.
+
+- [point_string_id.txt](./point_string_id.txt):
+    - Contains the same data as point_string.txt with IDs.
+    - Each line starts with an ID, followed by the string.
+
+- [point_string_str-id.txt](./point_string_str-id.txt):
+    - Contains the same data as point_string.txt with string IDs.
+    - Each line starts with a string ID, followed by the string.
 
 - [query_string.txt](./query_string.txt):
     - Contains 5 queries.

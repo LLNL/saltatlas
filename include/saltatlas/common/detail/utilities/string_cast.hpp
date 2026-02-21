@@ -61,6 +61,11 @@ inline double str_cast<double>(const std::string &input) {
   return std::stod(input.data());
 }
 
+template <>
+inline std::string str_cast<std::string>(const std::string &input) {
+  return input;
+}
+
 /// \brief Split a string by whitespace and store elements into a vector of T.
 /// \tparam T Type to cast.
 /// \param input Input string.

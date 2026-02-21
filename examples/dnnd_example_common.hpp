@@ -22,6 +22,8 @@
 #include <saltatlas/common/data_reader.hpp>
 #include <saltatlas/dnnd/utility.hpp>
 
+using string_id = std::string;
+
 /// Returns the name of the given primitive type in string.
 /// Returns the name of the given type in string.
 template <typename T>

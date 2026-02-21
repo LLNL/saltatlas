@@ -34,6 +34,8 @@
 #include <utility>
 #include <vector>
 
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_flat_set.hpp>
 #include <ygm/comm.hpp>
 #include <ygm/container/detail/base_concepts.hpp>
 #include <ygm/detail/collective.hpp>
@@ -47,6 +49,7 @@
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
 #include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
+#include "saltatlas/dnnd/utility.hpp"
 
 namespace saltatlas {
 
@@ -56,10 +59,10 @@ namespace saltatlas {
 /// \tparam Distance Distance type.
 template <typename Id       = uint64_t,
           typename Point    = saltatlas::feature_vector<double>,
-          typename Distance = double>
+          typename Distance = double, typename IdHash = std::hash<Id>>
 class dnnd {
  private:
-  using self_type = dnnd<Id, Point, Distance>;
+  using self_type = dnnd<Id, Point, Distance, IdHash>;
 
   constexpr static unsigned int k_pstore_hash_seed            = 0xA1B2C3D4;
   constexpr static unsigned int k_point_partitioner_hash_seed = 0x1A2B3C4D;
@@ -69,24 +72,41 @@ class dnnd {
 
  public:
   /// \brief Point ID type.
-  using id_type = Id;
+  using id_type = std::remove_cv_t<Id>;
   /// \brief Distance type.
-  using distance_type = Distance;
+  using distance_type = std::remove_cv_t<Distance>;
   /// \brief Point type.
   using point_type = Point;
+  /// \brief Point ID hasher.
+  using hasher = IdHash;
 
  private:
+  /// \brief Internal ID type (contiguous integers starting from 0).
+  using internal_id_type =
+      std::conditional_t<std::is_integral_v<id_type>, id_type, uint64_t>;
+
+  /// Use an ID table to map external IDs to internal IDs if id_type is not an
+  /// integral type. If id_type is an integral type, we can use the ID directly
+  /// as the internal
+  static constexpr bool k_use_eid_table = !std::is_integral_v<id_type>;
+
   /// \brief Point store type.
   using point_store_type =
+      point_store<internal_id_type, point_type, hash<k_pstore_hash_seed>,
+                  std::equal_to<>, std::allocator<std::byte>>;
+  using external_point_store_type =
       point_store<id_type, point_type, hash<k_pstore_hash_seed>,
                   std::equal_to<>, std::allocator<std::byte>>;
+
   /// \brief k-NN index type.
-  using knn_index_type = dndetail::nn_index<id_type, distance_type>;
+  using knn_index_type = dndetail::nn_index<internal_id_type, distance_type>;
+  /// \brief k-NN index type with external ID type (i.e., id_type).
+  using external_knn_index_type = dndetail::nn_index<id_type, distance_type>;
 
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
 
   /// \brief Point partitioner type.
-  using point_partitioner = typename nn_kernel_type::point_partitioner;
+  using internal_point_partitioner = typename nn_kernel_type::point_partitioner;
 
   using nn_index_optimizer_type =
       dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
@@ -96,10 +116,13 @@ class dnnd {
 
   using query_store_type = typename query_kernel_type::query_store_type;
 
+  using internal_neighbor_store_type =
+      typename query_kernel_type::neighbor_store_type;
+
  public:
   /// \brief Neighbor type (contains a neighbor ID and the distance to the
   /// neighbor).
-  using neighbor_type = typename knn_index_type::neighbor_type;
+  using neighbor_type = detail::neighbor<id_type, distance_type>;
 
   using iterator_proxy_type =
       detail::iterator_proxy<typename point_store_type::const_iterator>;
@@ -110,10 +133,9 @@ class dnnd {
   using distance_function_type =
       distance::distance_function_type<point_type, distance_type>;
 
- public:
   /// \brief Query result store type. Specifically,
   /// std::vector<std::vector<neighbor_type>>.
-  using neighbor_store_type = typename query_kernel_type::neighbor_store_type;
+  using neighbor_store_type = std::vector<std::vector<neighbor_type>>;
 
   /// \brief Constructor.
   /// \param distance_func_id Distance function id.
@@ -147,7 +169,7 @@ class dnnd {
   }
 
   /// \brief Add points to the internal point store.
-  /// All ranks must call this function although some ranks add no points.
+  /// All ranks must call this function even if some ranks add no points.
   /// \tparam id_iterator Iterator type for point IDs.
   /// \tparam point_iterator Iterator type for points.
   /// \param ids_begin Iterator to the beginning of point IDs.
@@ -157,24 +179,25 @@ class dnnd {
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
-    auto receiver = [](auto, auto this_ptr, const id_t id,
-                       const auto& sent_point) {
-      if (this_ptr->m_pstore.contains(id)) {
-        std::cerr << "Duplicate ID " << id << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-      }
-      this_ptr->m_pstore[id] = sent_point;
-    };
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+    static_assert(std::is_same_v<
+                      typename std::iterator_traits<point_iterator>::value_type,
+                      point_type>,
+                  "point_iterator must be an iterator of point_type");
 
-    for (; ids_begin != ids_end; ++ids_begin, ++points_begin) {
-      const auto dst = priv_get_point_partitioner()(*ids_begin);
-      m_comm.async(dst, receiver, m_this, *ids_begin, *points_begin);
+    priv_add_points(ids_begin, ids_end, points_begin, points_end);
+    if (m_verbose) {
+      m_comm.cout() << "Contains " << m_pstore.size()
+                    << " points after adding points." << std::endl;
+      m_comm.cf_barrier();
     }
-    m_comm.barrier();
   }
 
   /// \brief Add points to the internal point store.
-  /// All ranks must call this function although some ranks add no points.
+  /// All ranks must call this function even if some ranks add no point.
   /// \tparam ygm_container_type Associative YGM container type for key-value
   /// store.
   /// \param container Associative YGM container.
@@ -186,13 +209,13 @@ class dnnd {
                  typename ygm_container_type<id_type, point_type>::for_all_args>
   {
     container.for_all([this](const id_type id, const point_type& point) {
-      this->priv_add_point(id, point);
+      this->priv_add_point_async(id, point);
     });
     m_comm.barrier();
   }
 
   /// \brief Add points to the internal point store.
-  /// All ranks must call this function although some ranks add no points.
+  /// All ranks must call this function even if some ranks add no point.
   /// \tparam ygm_container_type Associative YGM container type for key-value
   /// store (with array-type template signature).
   /// \param container Associative YGM container.
@@ -204,7 +227,7 @@ class dnnd {
                  typename ygm_container_type<id_type, point_type>::for_all_args>
   {
     container.for_all([this](const id_type id, const point_type& point) {
-      this->priv_add_point(id, point);
+      this->priv_add_point_async(id, point);
     });
     m_comm.barrier();
   }
@@ -228,9 +251,34 @@ class dnnd {
             typename std::iterator_traits<paths_iterator>::value_type,
             std::filesystem::path>,
         "paths_iterator must be an iterator of std::filesystem::path");
+
     std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
-    saltatlas::read_points(point_file_paths, file_format, m_verbose,
-                           priv_get_point_partitioner(), m_pstore, m_comm);
+    if constexpr (k_use_eid_table) {
+      external_point_store_type                pstore;
+      std::vector<std::filesystem::path>       point_file_paths(paths_begin,
+                                                                paths_end);
+      const std::function<int(const id_type&)> partitioner =
+          priv_get_point_partitioner_external();
+      saltatlas::read_points(point_file_paths, file_format, m_verbose,
+                             partitioner, pstore, m_comm);
+
+      std::vector<id_type> eids;
+      eids.reserve(pstore.size());
+      for (const auto& [eid, _] : pstore) {
+        eids.push_back(eid);
+      }
+      priv_gen_internal_id(eids.begin(), eids.end());
+
+      for (const auto& [eid, point] : pstore) {
+        priv_add_point_async(eid, point);
+      }
+      m_comm.barrier();
+    } else {
+      const std::function<int(const id_type&)> partitioner =
+          priv_get_point_partitioner_internal();
+      saltatlas::read_points(point_file_paths, file_format, m_verbose,
+                             partitioner, m_pstore, m_comm);
+    }
   }
 
   /// \brief Load points from files and add to the internal point store.
@@ -249,7 +297,6 @@ class dnnd {
       const std::function<std::pair<id_type, point_type>(const std::string&)>&
           line_parser) {
     std::vector<std::filesystem::path> point_file_paths(paths_begin, paths_end);
-
     const auto parser_wrapper = [&line_parser](const std::string& line,
                                                id_type& id, point_type& point) {
       auto ret = line_parser(line);
@@ -258,9 +305,34 @@ class dnnd {
       return true;
     };
 
-    saltatlas::detail::read_points_with_id_helper(
-        point_file_paths, parser_wrapper, m_pstore,
-        priv_get_point_partitioner(), m_comm, false);
+    if constexpr (k_use_eid_table) {
+      external_point_store_type                pstore;
+      std::vector<std::filesystem::path>       point_file_paths(paths_begin,
+                                                                paths_end);
+      const std::function<int(const id_type&)> partitioner =
+          priv_get_point_partitioner_external();
+      saltatlas::detail::read_points_with_id_helper(
+          point_file_paths, parser_wrapper, pstore, partitioner, m_comm,
+          m_verbose);
+
+      std::vector<id_type> eids;
+      eids.reserve(pstore.size());
+      for (const auto& [eid, _] : pstore) {
+        eids.push_back(eid);
+      }
+      priv_gen_internal_id(eids.begin(), eids.end());
+
+      for (const auto& [eid, point] : pstore) {
+        priv_add_point_async(eid, point);
+      }
+      m_comm.barrier();
+    } else {
+      const std::function<int(const id_type&)> partitioner =
+          priv_get_point_partitioner_internal();
+      saltatlas::detail::read_points_with_id_helper(
+          point_file_paths, parser_wrapper, m_pstore, partitioner, m_comm,
+          m_verbose);
+    }
   }
 
   /// \brief Build a KNNG.
@@ -270,9 +342,9 @@ class dnnd {
   /// \param delta Delta parameter in NN-Descent.
   /// \param batch_size Batch size parameter.
   /// \param time_limit_sec Timeout in seconds for the main neighbor check
-  /// kernel. The elapsed time is checked after each neighbor check loop. If the
-  /// time limit is exceeded, the construction stops. All ranks must use the
-  /// same value. If 0 is given, there is no timeout.
+  /// kernel. The elapsed time is checked after each neighbor check loop. If
+  /// the time limit is exceeded, the construction stops. All ranks must use
+  /// the same value. If 0 is given, there is no timeout.
   void build(const int k, const double rho = 0.5, const double delta = 0.001,
              const std::size_t batch_size     = 1 << 26,
              const double      time_limit_sec = 0) {
@@ -285,10 +357,14 @@ class dnnd {
                                            .rnd_seed        = m_rnd_seed,
                                            .verbose         = m_verbose};
 
-    nn_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
+    nn_kernel_type kernel(option, m_pstore,
+                          priv_get_point_partitioner_internal(),
                           m_distance_func, m_comm);
     kernel.construct(m_knn_index);
     m_index_k = k;
+    if constexpr (k_use_eid_table) {
+      priv_gen_external_knng();
+    }
   }
 
   /// \brief Apply optimizations to an already constructed KNNG aiming at
@@ -308,10 +384,16 @@ class dnnd {
         .pruning_degree_multiplier = pruning_degree_multiplier,
         .remove_long_paths         = false,
         .verbose                   = m_verbose};
-    nn_index_optimizer_type optimizer{
-        opt,         m_pstore, priv_get_point_partitioner(), m_distance_func,
-        m_knn_index, m_comm};
+    nn_index_optimizer_type optimizer{opt,
+                                      m_pstore,
+                                      priv_get_point_partitioner_internal(),
+                                      m_distance_func,
+                                      m_knn_index,
+                                      m_comm};
     optimizer.run();
+    if constexpr (k_use_eid_table) {
+      priv_gen_external_knng();
+    }
   }
 
   /// \brief Query nearest neighbors of given points.
@@ -326,27 +408,17 @@ class dnnd {
   /// \return Computed k nearest neighbors of the given points.
   /// Returned as an adjacency list (vector of vectors).
   /// Specifically, k nearest neighbor data of the i-th query is stored in the
-  /// i-th inner vector. Each inner vector contains pairs of a neighbor ID and a
-  /// distance to the neighbor from the query point.
+  /// i-th inner vector. Each inner vector contains pairs of a neighbor ID and
+  /// a distance to the neighbor from the query point.
   template <typename query_iterator>
   neighbor_store_type query(query_iterator queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    typename query_kernel_type::option option{.k          = k,
-                                              .epsilon    = epsilon,
-                                              .mu         = 0,
-                                              .batch_size = 1 << 26,
-                                              .rnd_seed   = m_rnd_seed,
-                                              .verbose    = m_verbose};
-
-    query_kernel_type kernel(option, m_pstore, priv_get_point_partitioner(),
-                             m_distance_func, m_knn_index, m_comm);
-
-    query_store_type    queries(queries_begin, queries_end);
-    neighbor_store_type query_result;
-    kernel.query_batch(queries, query_result);
-
-    return query_result;
+    if constexpr (k_use_eid_table) {
+      return priv_run_query(queries_begin, queries_end, k, epsilon).first;
+    } else {
+      return priv_run_query(queries_begin, queries_end, k, epsilon).second;
+    }
   }
 
   /// \brief Run queries as the same as query() and return the query results
@@ -355,30 +427,21 @@ class dnnd {
   std::pair<neighbor_store_type, std::vector<std::vector<point_type>>>
   query_with_features(query_iterator queries_begin, query_iterator queries_end,
                       const int k, const double epsilon = 0.1) {
-    auto query_result = query(queries_begin, queries_end, k, epsilon);
+    const auto query_results =
+        priv_run_query(queries_begin, queries_end, k, epsilon);
+    const auto& external_query_result = query_results.first;
+    const auto& internal_query_result = query_results.second;
 
-    std::vector<std::vector<point_type>> neighbor_features_store;
-    neighbor_features_store.reserve(query_result.size());
-    std::set<id_type> neighbor_ids;
-    for (const auto& neighbors : query_result) {
-      for (const auto& neighbor : neighbors) {
-        neighbor_ids.insert(neighbor.id);
-      }
+    const auto neighbor_features =
+        priv_gather_neighbor_features(internal_query_result);
+
+    if constexpr (k_use_eid_table) {
+      return std::make_pair(std::move(external_query_result),
+                            std::move(neighbor_features));
+    } else {
+      return std::make_pair(std::move(internal_query_result),
+                            std::move(neighbor_features));
     }
-
-    auto neighbor_features =
-        get_points(neighbor_ids.begin(), neighbor_ids.end());
-
-    for (const auto& neighbors : query_result) {
-      std::vector<point_type> neighbor_features_vec;
-      neighbor_features_vec.reserve(neighbors.size());
-      for (const auto& neighbor : neighbors) {
-        neighbor_features_vec.push_back(neighbor_features.at(neighbor.id));
-      }
-      neighbor_features_store.push_back(std::move(neighbor_features_vec));
-    }
-
-    return std::make_pair(query_result, neighbor_features_store);
   }
 
   /// \brief Dump the k-NN index to distributed files.
@@ -389,16 +452,21 @@ class dnnd {
   /// source_id neighbor_id_1 neighbor_id_2 ...
   /// 0.0 distance_1 distance_2 ...
   /// ```
-  /// Each item is separated by a tab. The first line is the source id followed
-  /// by neighbor ids. The second line is the distances to each neighbor. The
-  /// first distance value is a dummy value (0.0), which is just a placeholder
-  /// so that a neighbor id and the corresponding distance value is stored in
-  /// the same column.
+  /// Each item is separated by a tab. The first line is the source id
+  /// followed by neighbor ids. The second line is the distances to each
+  /// neighbor. The first distance value is a dummy value (0.0), which is just
+  /// a placeholder so that a neighbor id and the corresponding distance value
+  /// is stored in the same column.
+  /// \Note This function does not dump external point IDs.
   void dump_index(const std::filesystem::path& path,
                   const bool                   dump_distance = false) const {
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
-    m_knn_index.dump(file_name.str(), dump_distance);
+    if (k_use_eid_table) {
+      m_external_knn_index.dump(file_name.str(), dump_distance);
+    } else {
+      m_knn_index.dump(file_name.str(), dump_distance);
+    }
     m_comm.cf_barrier();
   }
 
@@ -408,20 +476,31 @@ class dnnd {
     dump_index(path, dump_distance);
   }
 
-  /// \brief Check if the local point store contains a point with the given ID.
+  /// \brief Check if the local point store contains a point with the given
+  /// ID.
   /// \param id Point ID.
-  bool contains_local(const id_type id) const { return m_pstore.contains(id); }
+  bool contains_local(const id_type id) const {
+    if constexpr (k_use_eid_table) {
+      return m_local_e2i_id_table.contains(id);
+    } else {
+      return m_pstore.contains(id);
+    }
+  }
 
   /// \brief Get the owner rank of a point with the given ID.
   /// \param id Point ID.
   /// \return The rank that owns the point.
   int get_owner(const id_type id) const {
-    return priv_get_point_partitioner()(id);
+    static_assert(!k_use_eid_table,
+                  "get_owner() is not available when external ID and internal "
+                  "ID are different.");
+    return priv_get_point_partitioner_internal()(id);
   }
 
   /// \brief Get a point of the given ID from the local point store.
   const point_type& get_local_point(const id_type id) const {
-    return m_pstore.at(id);
+    const auto iid = priv_find_local_internal_id(id);
+    return m_pstore.at(iid);
   }
 
   /// \brief Get point data of the given IDs.
@@ -434,30 +513,7 @@ class dnnd {
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    static std::unordered_map<id_type, point_type> return_points_store;
-    return_points_store = decltype(return_points_store){};
-    return_points_store.reserve(std::distance(ids_begin, ids_end));
-
-    auto proc = [](auto comm, auto pthis, const id_type id,
-                   const int source_rank) {
-      assert(pthis->contains_local(id));
-
-      comm->async(
-          source_rank,
-          [](auto, const auto& id, const auto& point) {
-            return_points_store.emplace(id, point);
-          },
-          id, pthis->get_local_point(id));
-    };
-    m_comm.cf_barrier();
-
-    for (auto it = ids_begin; it != ids_end; ++it) {
-      const auto id = *it;
-      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
-    }
-    m_comm.barrier();
-
-    return return_points_store;
+    return priv_get_remote_points(ids_begin, ids_end);
   }
 
   /// \brife Returns an iterator that points to the beginning of the locally
@@ -486,7 +542,8 @@ class dnnd {
   /// \return The number of neighbors of the point.
   std::size_t num_local_neighbors(const id_type id) const {
     if (contains_local(id)) {
-      return m_knn_index.num_neighbors(id);
+      const auto iid = (k_use_eid_table) ? priv_find_local_internal_id(id) : id;
+      return m_knn_index.num_neighbors(iid);
     }
     return 0;
   }
@@ -497,11 +554,21 @@ class dnnd {
   /// \return The neighbors of the point. A vector of neighbor.
   std::vector<neighbor_type> get_local_neighbors(const id_type id) const {
     std::vector<neighbor_type> neighbors;
-    for (auto itr = m_knn_index.neighbors_begin(id),
-              end = m_knn_index.neighbors_end(id);
-         itr != end; ++itr) {
-      neighbors.push_back(*itr);
+    if constexpr (k_use_eid_table) {
+      for (auto itr = m_external_knn_index.neighbors_begin(id),
+                end = m_external_knn_index.neighbors_end(id);
+           itr != end; ++itr) {
+        neighbors.push_back(*itr);
+      }
+    } else {
+      const auto iid = priv_find_local_internal_id(id);
+      for (auto itr = m_knn_index.neighbors_begin(iid),
+                end = m_knn_index.neighbors_end(iid);
+           itr != end; ++itr) {
+        neighbors.push_back(*itr);
+      }
     }
+
     return neighbors;
   }
 
@@ -520,22 +587,47 @@ class dnnd {
     neighbors_table = decltype(neighbors_table){};
     neighbors_table.reserve(std::distance(ids_begin, ids_en));
 
-    auto proc = [](auto comm, auto pthis, const id_type id,
-                   const int source_rank) {
-      assert(pthis->contains_local(id));
-      const auto neighbors = pthis->get_local_neighbors(id);
-      comm->async(
-          source_rank,
-          [](auto, const auto& id, const auto& neighbors) {
-            neighbors_table.emplace(id, neighbors);
-          },
-          id, neighbors);
-    };
     m_comm.cf_barrier();
 
     for (auto it = ids_begin; it != ids_en; ++it) {
       const auto id = *it;
-      m_comm.async(get_owner(id), proc, m_this, id, m_comm.rank());
+      if constexpr (k_use_eid_table) {
+        m_comm.async(
+            priv_get_point_partitioner_external()(id),
+            [](auto comm, auto pthis, const id_type eid,
+               const int source_rank) {
+              const auto iid = pthis->priv_find_local_internal_id(eid);
+              comm->async(
+                  pthis->priv_get_point_partitioner_internal()(iid),
+                  [](auto comm, auto pthis, const auto& eid, const auto& iid,
+                     const auto& source_rank) {
+                    assert(pthis->m_pstore.contains(iid));
+                    const auto neighbors = pthis->get_local_neighbors(eid);
+                    comm->async(
+                        source_rank,
+                        [](auto, const auto& eid, const auto& neighbors) {
+                          neighbors_table.emplace(eid, neighbors);
+                        },
+                        pthis->m_this, eid, neighbors);
+                  },
+                  pthis->m_this, eid, iid, source_rank);
+            },
+            m_this, id, m_comm.rank());
+      } else {
+        m_comm.async(
+            priv_get_point_partitioner_internal()(id),
+            [](auto comm, auto pthis, const id_type id, const int source_rank) {
+              assert(pthis->m_pstore.contains(id));
+              const auto neighbors = pthis->get_local_neighbors(id);
+              comm->async(
+                  source_rank,
+                  [](auto, const auto& id, const auto& neighbors) {
+                    neighbors_table.emplace(id, neighbors);
+                  },
+                  pthis->m_this, id, neighbors);
+            },
+            m_this, id, m_comm.rank());
+      }
     }
     m_comm.barrier();
 
@@ -585,26 +677,388 @@ class dnnd {
  private:
   /// \brief Return a point partitioner instance.
   /// \return A point partitioner instance.
-  point_partitioner priv_get_point_partitioner() const {
+  auto priv_get_point_partitioner_external() const {
     const int size = m_comm.size();
     return [size](const id_type& id) {
+      return hash<k_point_partitioner_hash_seed>{}(hasher{}(id)) % size;
+    };
+  };
+
+  /// \brief Return a point partitioner instance.
+  /// \return A point partitioner instance.
+  internal_point_partitioner priv_get_point_partitioner_internal() const {
+    const int size = m_comm.size();
+    return [size](const internal_id_type& id) {
       return hash<k_point_partitioner_hash_seed>{}(id) % size;
     };
   };
 
-  /// \brief Add a single point. Only to be used by add_points.
-  void priv_add_point(const id_type id, const point_type& point) {
-    auto receiver = [](auto, auto this_ptr, const id_t id,
+  /// \brief Add points to the internal point store.
+  template <typename id_iterator, typename point_iterator>
+  void priv_add_points(id_iterator ids_begin, id_iterator ids_end,
+                       point_iterator points_begin, point_iterator points_end) {
+    if constexpr (k_use_eid_table) {
+      priv_gen_internal_id(ids_begin, ids_end);
+    }
+
+    for (; ids_begin != ids_end; ++ids_begin, ++points_begin) {
+      const auto& eid   = *ids_begin;
+      const auto& point = *points_begin;
+      priv_add_point_async(eid, point);
+    }
+    m_comm.barrier();
+  }
+
+  /// \brief Add a single point with external ID into pstore.
+  void priv_add_point_async(const id_type& eid, const point_type& point) {
+    const auto owner = priv_get_point_partitioner_external()(eid);
+
+    if constexpr (k_use_eid_table) {
+      // Get the internal ID corresponding to the given external ID.
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const id_type& eid,
+             const point_type& point) {
+            const internal_id_type itn_id =
+                pthis->priv_find_local_internal_id(eid);
+            // Add the point with the internal ID into the point store.
+            pthis->priv_add_point_with_internal_id_async(itn_id, eid, point);
+          },
+          m_this, eid, point);
+    } else {
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const id_type& id,
+             const point_type& point) {
+            pthis->priv_add_point_locally(id, point);
+          },
+          m_this, eid, point);
+    }
+  }
+
+  /// \brief Add a single point with internal ID into pstore.
+  void priv_add_point_with_internal_id_async(const internal_id_type& itn_id,
+                                             const id_type&          eid,
+                                             const point_type&       point) {
+    static_assert(k_use_eid_table,
+                  "priv_add_point_with_internal_id_async() is only available "
+                  "when external "
+                  "ID and internal ID are different.");
+
+    auto receiver = [](auto, auto this_ptr, const internal_id_type id,
                        const auto& sent_point) {
-      if (this_ptr->m_pstore.contains(id)) {
-        std::cerr << "Duplicate ID " << id << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-      }
-      this_ptr->m_pstore[id] = sent_point;
+      this_ptr->priv_add_point_locally(id, sent_point);
     };
 
-    const auto dst = priv_get_point_partitioner()(id);
-    m_comm.async(dst, receiver, m_this, id, point);
+    const auto owner = priv_get_point_partitioner_internal()(itn_id);
+    m_comm.async(owner, receiver, m_this, itn_id, point);
+  }
+
+  void priv_add_point_locally(const internal_id_type& iid,
+                              const point_type&       point) {
+    if (m_pstore.contains(iid)) {
+      std::cerr << "Duplicate internal ID " << iid << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    m_pstore[iid] = point;
+  }
+
+  // inline internal_id_type priv_find_or_make_local_internal_id(
+  //     const id_type& eid) {
+  //   if constexpr (!k_use_eid_table) {
+  //     return eid;
+  //   } else {
+  //     if (m_e2i_id_table.find(eid) == m_e2i_id_table.end()) {
+  //       const internal_id_type new_int_id = m_e2i_id_table.size();
+  //       m_e2i_id_table[eid]               = new_int_id;
+  //       return new_int_id;
+  //     } else {
+  //       return m_e2i_id_table.at(eid);
+  //     }
+  //   }
+  //   assert(false);  // Should not reach here.
+  //   return internal_id_type{};
+  // }
+
+  inline internal_id_type priv_find_local_internal_id(const id_type& id) const {
+    if constexpr (!k_use_eid_table) {
+      return id;
+    } else {
+      assert(m_e2i_id_table.contains(id));
+      return m_e2i_id_table.at(id);
+    }
+  }
+
+  inline id_type priv_get_local_external_id(const internal_id_type id) const {
+    if constexpr (!k_use_eid_table) {
+      return id;
+    } else {
+      return m_i2e_id_table.at(id);
+    }
+  }
+
+  template <typename id_iterator>
+  boost::unordered_flat_map<internal_id_type, id_type>
+  priv_get_external_ids_async(id_iterator internal_ids_begin,
+                              id_iterator internal_ids_end) const {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       internal_id_type>,
+        "id_iterator must be an iterator of internal_id_type");
+
+    static boost::unordered_flat_map<internal_id_type, id_type> return_id_table;
+    return_id_table = decltype(return_id_table){};
+    m_comm.cf_barrier();
+
+    for (; internal_ids_begin != internal_ids_end; ++internal_ids_begin) {
+      const auto internal_id = *internal_ids_begin;
+      const auto owner = priv_get_point_partitioner_internal()(internal_id);
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const internal_id_type internal_id,
+             const int source_rank) {
+            const auto external_id = pthis->m_i2e_id_table.at(internal_id);
+            comm->async(
+                source_rank,
+                [](auto, const auto& internal_id, const auto& external_id) {
+                  return_id_table[internal_id] = external_id;
+                },
+                internal_id, external_id);
+          },
+          m_this, internal_id, m_comm.rank());
+    }
+    m_comm.barrier();
+
+    return return_id_table;
+  }
+
+  /// Generate consecutive internal IDs for the given external IDs and store
+  /// the mapping in m_e2i_id_table and m_i2e_id_table.
+  template <typename id_iterator>
+  void priv_gen_internal_id(id_iterator eids_begin, id_iterator eids_end) {
+    static_assert(
+        k_use_eid_table,
+        "priv_gen_internal_id() is only available when external ID and "
+        "internal ID are different.");
+
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+
+    if constexpr (!k_use_eid_table) {
+      return;
+    }
+
+    for (auto eit = eids_begin; eit != eids_end; ++eit) {
+      const auto eid   = *eit;
+      const auto owner = priv_get_point_partitioner_external()(eid);
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const id_type eid) {
+            // Assign a dummy internal ID for now
+            pthis->m_e2i_id_table[eid] =
+                std::numeric_limits<internal_id_type>::max();
+          },
+          m_this, eid);
+    }
+    m_comm.barrier();
+
+    const size_t internal_id_offset =
+        ygm::prefix_sum(m_e2i_id_table.size(), m_comm);
+
+    // Assign internal IDs based on the computed offset
+    size_t cnt = 0;
+    for (auto& [eid, int_id] : m_e2i_id_table) {
+      int_id = cnt + internal_id_offset;
+      ++cnt;
+    }
+
+    // Tell the owner of each internal ID the corresponding external ID
+    for (auto& [eid, int_id] : m_e2i_id_table) {
+      const auto owner = priv_get_point_partitioner_internal()(int_id);
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const internal_id_type int_id,
+             const id_type eid) {
+            pthis->m_i2e_id_table[int_id]    = eid;
+            pthis->m_local_e2i_id_table[eid] = int_id;
+          },
+          m_this, int_id, eid);
+    }
+    m_comm.barrier();
+  }
+
+  void priv_gen_external_knng() {
+    static_assert(
+        k_use_eid_table,
+        "priv_gen_external_knng() is only available when external ID and "
+        "internal ID are different.");
+
+    m_external_knn_index.reset();
+    boost::unordered_flat_set<internal_id_type> internal_ids;
+    for (auto& [internal_id, neighbors] : m_knn_index) {
+      const auto external_id = priv_get_local_external_id(internal_id);
+      for (const auto& neighbor : neighbors) {
+        internal_ids.insert(neighbor.id);
+      }
+    }
+
+    const auto i2e_id_map =
+        priv_get_external_ids_async(internal_ids.begin(), internal_ids.end());
+    m_comm.barrier();
+
+    for (auto& [internal_id, neighbors] : m_knn_index) {
+      const auto src_eid = priv_get_local_external_id(internal_id);
+      for (const auto& neighbor : neighbors) {
+        const auto n_eid = i2e_id_map.at(neighbor.id);
+        m_external_knn_index.insert(src_eid,
+                                    neighbor_type(n_eid, neighbor.distance));
+      }
+    }
+  }
+
+  template <typename query_iterator>
+  std::pair<neighbor_store_type, internal_neighbor_store_type> priv_run_query(
+      query_iterator queries_begin, query_iterator queries_end, const int k,
+      const double epsilon = 0.1) {
+    typename query_kernel_type::option option{.k          = k,
+                                              .epsilon    = epsilon,
+                                              .mu         = 0,
+                                              .batch_size = 1 << 26,
+                                              .rnd_seed   = m_rnd_seed,
+                                              .verbose    = m_verbose};
+
+    query_kernel_type kernel(option, m_pstore,
+                             priv_get_point_partitioner_internal(),
+                             m_distance_func, m_knn_index, m_comm);
+
+    query_store_type             queries(queries_begin, queries_end);
+    internal_neighbor_store_type internal_query_result;
+    kernel.query_batch(queries, internal_query_result);
+
+    if constexpr (k_use_eid_table) {
+      return {priv_gen_external_query_result(internal_query_result),
+              std::move(internal_query_result)};
+    } else {
+      return {neighbor_store_type{}, std::move(internal_query_result)};
+    }
+  }
+
+  neighbor_store_type priv_gen_external_query_result(
+      const internal_neighbor_store_type& internal_query_result) const {
+    static_assert(
+        k_use_eid_table,
+        "priv_gen_external_query_result() is only available when external ID "
+        "and internal ID are different.");
+
+    boost::unordered_flat_set<internal_id_type> unique_neighbor_ids;
+    for (const auto& neighbors : internal_query_result) {
+      for (const auto& neighbor : neighbors) {
+        unique_neighbor_ids.insert(neighbor.id);
+      }
+    }
+
+    neighbor_store_type query_result;
+    query_result.resize(internal_query_result.size());
+    const auto i2e_id_map = priv_get_external_ids_async(
+        unique_neighbor_ids.begin(), unique_neighbor_ids.end());
+    for (std::size_t i = 0; i < internal_query_result.size(); ++i) {
+      for (const auto& neighbor : internal_query_result[i]) {
+        const auto eid = i2e_id_map.at(neighbor.id);
+        query_result[i].emplace_back(eid, neighbor.distance);
+      }
+    }
+
+    return query_result;
+  }
+
+  std::vector<std::vector<point_type>> priv_gather_neighbor_features(
+      const internal_neighbor_store_type& query_result) const {
+    std::vector<std::vector<point_type>> neighbor_features_store;
+    neighbor_features_store.reserve(query_result.size());
+    std::set<internal_id_type> neighbor_ids;
+    for (const auto& neighbors : query_result) {
+      for (const auto& neighbor : neighbors) {
+        neighbor_ids.insert(neighbor.id);
+      }
+    }
+
+    // Gather neighbor features
+    static boost::unordered_flat_map<internal_id_type, point_type>
+        neighbor_features;
+    neighbor_features = decltype(neighbor_features){};
+    m_comm.cf_barrier();
+    for (const auto& niid : neighbor_ids) {
+      const auto owner = priv_get_point_partitioner_internal()(niid);
+      m_comm.async(
+          owner,
+          [](auto comm, auto pthis, const internal_id_type iid,
+             const int source_rank) {
+            assert(pthis->m_pstore.contains(iid));
+            const auto& feature = pthis->m_pstore.at(iid);
+            comm->async(
+                source_rank,
+                [](auto, const auto& iid, const auto& feature) {
+                  neighbor_features[iid] = feature;
+                },
+                iid, feature);
+          },
+          m_this, niid, m_comm.rank());
+    }
+    m_comm.barrier();
+
+    for (const auto& neighbors : query_result) {
+      std::vector<point_type> neighbor_features_vec;
+      neighbor_features_vec.reserve(neighbors.size());
+      for (const auto& neighbor : neighbors) {
+        neighbor_features_vec.push_back(neighbor_features.at(neighbor.id));
+      }
+      neighbor_features_store.push_back(std::move(neighbor_features_vec));
+    }
+
+    return neighbor_features_store;
+  }
+
+  template <typename id_iterator>
+  std::unordered_map<id_type, point_type> priv_get_remote_points(
+      id_iterator ids_begin, id_iterator ids_end) const {
+    static std::unordered_map<id_type, point_type> return_points_store;
+    return_points_store = decltype(return_points_store){};
+    return_points_store.reserve(std::distance(ids_begin, ids_end));
+
+    auto proc = [](auto comm, auto pthis, const id_type eid,
+                   const int source_rank) {
+      const auto iid = pthis->priv_find_local_internal_id(eid);
+      comm->async(  // Move to the owner of the internal ID
+          pthis->priv_get_point_partitioner_internal()(iid),
+          [](auto comm, auto pthis, const auto& iid, const auto& eid,
+             const auto& source_rank) {
+            const auto& point = pthis->m_pstore.at(iid);
+            comm->async(  // Move back to the source rank
+                source_rank,
+                [](auto, const auto& eid, const auto& point) {
+                  return_points_store[eid] = point;
+                },
+                eid, point);
+          },
+          pthis->m_this, iid, eid, source_rank);
+    };
+    m_comm.cf_barrier();
+
+    for (auto it = ids_begin; it != ids_end; ++it) {
+      const auto id = *it;
+      if constexpr (k_use_eid_table) {
+        m_comm.async(priv_get_point_partitioner_external()(id), proc, m_this,
+                     id, m_comm.rank());
+      } else {
+        m_comm.async(priv_get_point_partitioner_internal()(id), proc, m_this,
+                     id, m_comm.rank());
+      }
+    }
+    m_comm.barrier();
+
+    return return_points_store;
   }
 
   distance_function_type  m_distance_func;
@@ -615,6 +1069,19 @@ class dnnd {
   std::size_t             m_index_k{0};
   bool                    m_verbose;
   ygm::ygm_ptr<self_type> m_this{this};
+
+  // Use the ID mapping tables only when id_type is not an integral type.
+  // Note: Owing an external ID does not necessarily mean owning the
+  // corresponding point data. The owner of a point data is determined by the
+  // point partitioner, which is based on the internal ID.
+  boost::unordered::unordered_flat_map<id_type, internal_id_type>
+      m_e2i_id_table;
+  // Contains external IDs of points stored locally.
+  boost::unordered::unordered_flat_map<id_type, internal_id_type>
+      m_local_e2i_id_table;
+  boost::unordered::unordered_flat_map<internal_id_type, id_type>
+                          m_i2e_id_table;
+  external_knn_index_type m_external_knn_index{};
 };
 
 }  // namespace saltatlas

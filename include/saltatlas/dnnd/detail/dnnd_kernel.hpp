@@ -185,6 +185,11 @@ class dnnd_kernel {
       return false;
     }
 
+    if (m_num_points == 0) {
+      m_comm.cerr0() << "Point store is empty." << std::endl;
+      return false;
+    }
+
     if (m_option.k >= m_num_points) {
       m_comm.cerr0() << "k (" << m_option.k
                      << ") must be less than the number of points ("
@@ -338,7 +343,7 @@ class dnnd_kernel {
 
     // Initialize the k-nn heap with randomly picked neighbors.
     // Use the batched algorithm to avoid sending too many messages at once.
-    // A single task corresponds to al works of a single point in the dataset
+    // A single task corresponds to all works of a single point in the dataset
     // to simplify the implementation.
     // Thus, the total number of tasks is equal to the number of points in the
     // dataset. The global batch size is equal to the mini-batch size divided by
@@ -482,11 +487,31 @@ class dnnd_kernel {
                                  std::numeric_limits<distance_type>::max());
         return;
       }
+
       std::uniform_int_distribution<id_type> dist(0, num_local_points - 1);
-      const auto offset = dist(local_this->m_rnd_generator);
-      auto       pitr   = local_this->m_point_store.begin();
-      std::advance(pitr, offset);
-      const auto& nid       = pitr->first;
+      auto       pitr      = local_this->m_point_store.begin();
+      const auto max_tries = (num_local_points > 1) ? num_local_points : 1;
+      id_type    nid{};
+      bool       found = false;
+      for (std::size_t attempt = 0; attempt < max_tries; ++attempt) {
+        pitr = local_this->m_point_store.begin();
+        std::advance(pitr, dist(local_this->m_rnd_generator));
+        nid = pitr->first;
+        if (nid != sid) {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        // Only self was found locally; force retry on another rank.
+        local_this->comm().async(src_rank, random_neighbor_explorer{},
+                                 local_this, sid,
+                                 std::numeric_limits<id_type>::max(),
+                                 std::numeric_limits<distance_type>::max());
+        return;
+      }
+
       const auto& nbr_point = pitr->second;
       const auto  d = local_this->priv_compute_distance(src_point, nbr_point);
       local_this->comm().async(local_this->m_point_partitioner(sid),

@@ -10,3 +10,4 @@ scripts/*
 .DS_Store
 .idea
 .cache
+/.vscode/

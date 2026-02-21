@@ -18,9 +18,9 @@
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/general.hpp>
 #include <saltatlas/common/detail/utilities/mpi.hpp>
-#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/detail/nn_index.hpp>
 #include <saltatlas/dnnd/detail/utilities/allocator.hpp>
+#include <saltatlas/dnnd/distance.hpp>
 #include "saltatlas/common/point_store.hpp"
 
 namespace saltatlas::dndetail {
@@ -76,6 +76,18 @@ class dknn_batch_query_kernel {
         m_comm(comm),
         m_rnd_generator(m_option.rnd_seed + m_comm.rank()) {
     priv_find_max_id();
+    const auto num_points = ygm::sum(m_point_store.size(), m_comm);
+    if (opt.k + 1 > num_points) {
+      m_comm.cerr0() << "k (" << opt.k
+                     << ") must be less than the number of points ("
+                     << num_points - 1 << ")." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    // if (num_points != m_global_max_id + 1) {
+    //   m_comm.cerr0() << "Point IDs are not contiguous" << std::endl;
+    //   MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    // }
     m_self.check(m_comm);
   }
 
@@ -158,10 +170,19 @@ class dknn_batch_query_kernel {
       }
       m_comm.cf_barrier();
 
+      /// Initialize the k-NN heap with random neighbors to guarantee that the
+      /// query result contains 'k' neighbors always.
+      for (std::size_t i = 0; i < local_batch_size; ++i) {
+        const auto query_no = query_no_offset + i;
+        priv_init_heap_with_random_neighbors(m_comm.rank(), query_no,
+                                             m_option.k);
+      }
+      m_comm.barrier();
+
       // Launch queries.
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
-        priv_launch_asynch_single_query(query_no, m_rnd_generator);
+        priv_launch_query_async(query_no);
         --num_local_remains;
       }
       m_comm.barrier();
@@ -169,7 +190,8 @@ class dknn_batch_query_kernel {
       // Move query results from heap to an array-like data structure.
       for (std::size_t i = 0; i < local_batch_size; ++i) {
         const auto query_no = query_no_offset + i;
-        auto&      heap     = m_knn_heap_table.at(query_no);
+        assert(m_knn_heap_table.count(query_no) > 0);
+        auto& heap = m_knn_heap_table.at(query_no);
         if (heap.empty()) {
           m_comm.cerr0() << query_no << "-th query result is empty."
                          << std::endl;
@@ -206,28 +228,82 @@ class dknn_batch_query_kernel {
     }
   }
 
-  /// Launches a single query asynchronously.
-  /// The query result is stored to m_knn_heap_table in the owner of the query.
-  template <typename random_generator_type>
-  void priv_launch_asynch_single_query(const std::size_t      query_no,
-                                       random_generator_type& rnd_gen) {
-    std::unordered_set<id_type>            set;
+  void priv_init_heap_with_random_neighbors(
+      const int query_owner_rank, const std::size_t query_no,
+      const std::size_t num_random_neighbors) {
     std::uniform_int_distribution<id_type> dis(0, m_global_max_id);
-
-    // Visit randomly selected points as search starting points.
-    for (std::size_t k = 0; k < m_knn_heap_table.at(query_no).k();
-         ++k) {  // sqrt(k) is enough?
+    // Init with 'k' random neighbors to guarantee that the query result
+    // contains 'k' neighbors always.
+    for (std::size_t i = 0; i < num_random_neighbors; ++i) {
       while (true) {
-        const id_type id = dis(rnd_gen);
-        if (set.count(id)) continue;
-        set.insert(id);
-
-        assert(m_point_partitioner);
-        m_comm.async(m_point_partitioner(id), neighbor_visitor_launcher{},
-                     m_self, m_comm.rank(), query_no, id,
-                     std::numeric_limits<distance_type>::max());
+        const id_type nid = dis(m_rnd_generator);
+        if (m_visited[query_no].count(nid)) {
+          continue;  // Already visited
+        }
+        m_visited[query_no].insert(nid);
+        // This function could be called by non-query owner, so we need to send
+        // the query owner rank and query number.
+        m_comm.async(m_point_partitioner(nid), initial_neighbor_visitor{},
+                     m_self, nid, query_owner_rank, query_no);
         break;
       }
+    }
+  }
+
+  // Visit a remote node and pick up a neighbor randomly.
+  struct initial_neighbor_visitor {
+    // 1st call: Visit a remote point, calculate the distance to the query
+    // point, and send the distance back to the query owner.
+    void operator()(const ygm::ygm_ptr<self_type>& local_this,
+                    const id_type trg_id, const int query_owner_rank,
+                    const std::size_t query_no) {
+      const auto num_local_points =
+          local_this->m_nn_index.num_neighbors(trg_id);
+      if (num_local_points == 0) {
+        // No neighbor, so try to find another one.
+        local_this->priv_init_heap_with_random_neighbors(query_owner_rank,
+                                                         query_no, 1);
+        return;
+      }
+
+      const auto& query_point = local_this->m_query_store[query_no];
+      assert(local_this->m_point_store.contains(trg_id));
+      const auto& trg_point = local_this->m_point_store[trg_id];
+      const auto  d = local_this->m_distance_function(query_point, trg_point);
+      local_this->comm().async(query_owner_rank, initial_neighbor_visitor{},
+                               local_this, query_owner_rank, query_no, trg_id,
+                               d);
+    }
+
+    // 2nd call: Update the query owner's heap.
+    void operator()(const ygm::ygm_ptr<self_type>& local_this,
+                    const int query_owner_rank, const std::size_t query_no,
+                    const id_type trg_id, const distance_type d) {
+      assert(local_this->m_knn_heap_table.count(query_no));
+      knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
+      if (heap.contains(trg_id)) {
+        local_this->priv_init_heap_with_random_neighbors(query_owner_rank,
+                                                         query_no, 1);
+        return;
+      }
+      const auto ret = heap.try_add(trg_id, d);
+      assert(ret);  // This should success always.
+    }
+  };
+
+  /// Launches a single query asynchronously.
+  /// The query result is stored to m_knn_heap_table in the owner of the query.
+  void priv_launch_query_async(const std::size_t query_no) {
+    // Visit randomly selected points as search starting points.
+    assert(m_knn_heap_table.count(query_no) > 0);
+    const auto neighbors = m_knn_heap_table.at(query_no).extract_neighbors();
+    for (std::size_t k = 0; k < std::max<std::size_t>(neighbors.size() / 2, 1);
+         ++k) {
+      assert(neighbors.at(k).id >= 0);
+      const auto nid = neighbors.at(k).id;
+      m_comm.async(m_point_partitioner(nid), neighbor_visitor_launcher{},
+                   m_self, m_comm.rank(), query_no, nid,
+                   std::numeric_limits<distance_type>::max());
     }
   }
 
@@ -278,6 +354,7 @@ class dknn_batch_query_kernel {
       }
       local_this->m_visited[query_no].insert(nid);
 
+      assert(local_this->m_knn_heap_table.count(query_no));
       knn_heap_type& heap = local_this->m_knn_heap_table.at(query_no);
       // m_visited does the same work
       //      if (heap.contains(nid)) {
