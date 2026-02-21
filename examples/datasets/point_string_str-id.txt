@@ -1,0 +1,9 @@
+p0 flag
+p1 tag
+p2 bag
+p3 cell
+p4 call
+p5 sell
+p6 start
+p7 stars
+p8 falg

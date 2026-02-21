@@ -1,0 +1,9 @@
+0 flag
+1 tag
+2 bag
+3 cell
+4 call
+5 sell
+6 start
+7 stars
+8 falg
