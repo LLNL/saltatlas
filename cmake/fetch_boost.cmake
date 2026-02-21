@@ -2,21 +2,23 @@ include(FetchContent)
 include(CMakeParseArguments)
 
 function(fetch_boost_url boost_url)
-    if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.25")
+    if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.25")
         FetchContent_Declare(Boost URL "${boost_url}" SYSTEM)
     else ()
         FetchContent_Declare(Boost URL "${boost_url}")
     endif ()
     FetchContent_MakeAvailable(Boost)
+    set(boost_POPULATED ${boost_POPULATED} PARENT_SCOPE)
 endfunction()
 
 function(fetch_boost_source boost_source)
-    if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.25")
+    if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.25")
         FetchContent_Declare(Boost SOURCE_DIR "${boost_source}" SYSTEM)
     else ()
         FetchContent_Declare(Boost SOURCE_DIR "${boost_source}")
     endif ()
     FetchContent_MakeAvailable(Boost)
+    set(boost_POPULATED ${boost_POPULATED} PARENT_SCOPE)
 endfunction()
 
 # Fetch Boost libraries using FetchContent.
@@ -30,6 +32,7 @@ endfunction()
 #       URL - URL or file path to an archived Boost source. Must be a version that supports CMake.
 # Output:
 #   BOOST_LIBS - List of Boost components to link using link_libraries() or target_link_libraries()
+#   boost_POPULATED - Set to true if Boost is populated by FetchContent, false otherwise.
 function(fetch_boost)
     # Add a prefix ('fetch_boost') to the messages.
     # To show prefix, set CMAKE_MESSAGE_CONTEXT to true.
@@ -69,9 +72,10 @@ function(fetch_boost)
     endif ()
 
     # Boost Components to link
-    foreach(lib IN LISTS BOOST_INCLUDE_LIBRARIES)
+    foreach (lib IN LISTS BOOST_INCLUDE_LIBRARIES)
         list(APPEND BOOST_LIBS "Boost::${lib}")
     endforeach ()
     set(BOOST_LIBS ${BOOST_LIBS} PARENT_SCOPE)
 
+    set(boost_POPULATED ${boost_POPULATED} PARENT_SCOPE)
 endfunction()
