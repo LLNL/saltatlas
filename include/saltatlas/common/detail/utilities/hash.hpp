@@ -198,4 +198,29 @@ struct hash {
   }
 };
 
+template <unsigned int seed = 0x25D1ECA>
+struct str_hash {
+  using is_transparent = void;
+
+  template <typename string_type>
+  inline std::size_t operator()(const string_type &str) const noexcept {
+    uint64_t hash_val[2];
+    if constexpr (std::is_same_v<string_type, char *> ||
+                  std::is_same_v<string_type, const char *>) {
+      detail::murmurhash3::MurmurHash3_x64_128(
+          str, std::char_traits<char>::length(str), seed, &hash_val);
+    } else {
+      static_assert(
+          std::is_same_v<typename string_type::value_type, char> ||
+              std::is_same_v<typename string_type::value_type, wchar_t> ||
+              std::is_same_v<typename string_type::value_type, char16_t> ||
+              std::is_same_v<typename string_type::value_type, char32_t>,
+          "string_type must be a string-like type.");
+      detail::murmurhash3::MurmurHash3_x64_128(
+          str.c_str(), str.length() * sizeof(typename string_type::value_type),
+          seed, &hash_val);
+    }
+    return hash_val[0];
+  }
+};
 }  // namespace saltatlas

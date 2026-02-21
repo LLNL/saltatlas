@@ -81,10 +81,12 @@ inline void read_points_helper(
   if (verbose) {
     comm.cout0() << "#of total points: " << total_num_points << std::endl;
   }
-  if (std::numeric_limits<id_t>::max() <= total_num_points) {
-    comm.cerr0() << "Too small ID type: " << typeid(id_t).name() << " to hold "
-                 << total_num_points << std::endl;
-    MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+  if constexpr (std::is_integral_v<id_t>) {
+    if (std::numeric_limits<id_t>::max() <= total_num_points) {
+      comm.cerr0() << "Too small ID type: " << typeid(id_t).name()
+                   << " to hold " << total_num_points << std::endl;
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    }
   }
 
   ygm::ygm_ptr<point_store<id_t, point_t, H, E, pstore_alloc>> ptr_point_store(
@@ -336,8 +338,13 @@ inline void read_points(
     if (verbose)
       comm.cout0() << "Read WSV/TSV (whitespace separated, no ID) format files"
                    << std::endl;
-    detail::read_points(point_file_names, local_point_store, point_partitioner,
-                        comm, verbose);
+    if constexpr (std::is_integral_v<id_type>) {
+      detail::read_points(point_file_names, local_point_store,
+                          point_partitioner, comm, verbose);
+    } else {
+      comm.cerr0() << "ID type must be an integral type for WSV/TSV format"
+                   << std::endl;
+    }
   } else if (format == "wsv-id" || format == "tsv-id") {
     if (verbose)
       comm.cout0()
@@ -348,8 +355,13 @@ inline void read_points(
   } else if (format == "csv") {
     if (verbose)
       comm.cout0() << "Read CSV format (without ID) files" << std::endl;
-    detail::read_points(point_file_names, ',', local_point_store,
-                        point_partitioner, comm, verbose);
+    if constexpr (std::is_integral_v<id_type>) {
+      detail::read_points(point_file_names, ',', local_point_store,
+                          point_partitioner, comm, verbose);
+    } else {
+      comm.cerr0() << "ID type must be an integral type for CSV format"
+                   << std::endl;
+    }
   } else if (format == "csv-id") {
     if (verbose) comm.cout0() << "Read CSV-ID format files" << std::endl;
     detail::read_points_with_id(point_file_names, ',', local_point_store,
@@ -359,8 +371,13 @@ inline void read_points(
     if (!std::is_same_v<typename point_t::value_type, char>) {
       comm.cerr0() << "Point type must be a vector of char" << std::endl;
     } else {
-      detail::read_points(point_file_names, local_point_store,
-                          point_partitioner, comm, verbose);
+      if constexpr (std::is_integral_v<id_type>) {
+        detail::read_points(point_file_names, local_point_store,
+                            point_partitioner, comm, verbose);
+      } else {
+        comm.cerr0() << "ID type must be an integral type for STR format"
+                     << std::endl;
+      }
     }
   } else if (format == "str-id") {
     if (verbose)
@@ -372,7 +389,7 @@ inline void read_points(
                                   point_partitioner, comm, verbose);
     }
   } else {
-    comm.cerr0() << "Invalid reader mode" << std::endl;
+    comm.cerr0() << "Unsupported point file format: " << format << std::endl;
   }
 }
 

@@ -71,7 +71,9 @@ class unique_knn_heap {
   /// \return True if the neighbor has been pushed; otherwise, false.
   bool try_add(const id_type& id, const distance_type& d,
                value_type v = value_type{}) {
-    if (m_map.count(id) > 0) return false;
+    if (m_map.count(id) > 0) {
+      return false;
+    }
 
     if (m_knn_heap.size() < m_k) {
       priv_push_nocheck(id, d, v);

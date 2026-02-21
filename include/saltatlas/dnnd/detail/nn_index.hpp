@@ -99,6 +99,10 @@ class nn_index {
     m_index[source].shrink_to_fit();
   }
 
+  point_iterator begin() { return m_index.begin(); }
+
+  point_iterator end() { return m_index.end(); }
+
   point_iterator points_begin() { return m_index.begin(); }
 
   point_iterator points_end() { return m_index.end(); }
