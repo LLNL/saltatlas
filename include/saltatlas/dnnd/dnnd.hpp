@@ -711,9 +711,8 @@ class dnnd {
 
   /// \brief Add a single point with external ID into pstore.
   void priv_add_point_async(const id_type& eid, const point_type& point) {
-    const auto owner = priv_get_point_partitioner_external()(eid);
-
     if constexpr (k_use_eid_table) {
+      const auto owner = priv_get_point_partitioner_external()(eid);
       // Get the internal ID corresponding to the given external ID.
       m_comm.async(
           owner,
@@ -726,6 +725,7 @@ class dnnd {
           },
           m_this, eid, point);
     } else {
+      const auto owner = priv_get_point_partitioner_internal()(eid);
       m_comm.async(
           owner,
           [](auto comm, auto pthis, const id_type& id,
@@ -784,8 +784,14 @@ class dnnd {
     if constexpr (!k_use_eid_table) {
       return id;
     } else {
-      assert(m_e2i_id_table.contains(id));
-      return m_e2i_id_table.at(id);
+      if (m_local_e2i_id_table.contains(id)) {
+        return m_local_e2i_id_table.at(id);
+      }
+      if (m_e2i_id_table.contains(id)) {
+        return m_e2i_id_table.at(id);
+      }
+      assert(false && "No internal ID mapping for the given external ID");
+      return internal_id_type{};
     }
   }
 
