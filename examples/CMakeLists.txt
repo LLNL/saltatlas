@@ -13,7 +13,9 @@ function(add_saltatlas_example example_name)
     target_link_libraries(${example_exe} PUBLIC saltatlas Boost::unordered Boost::container)
 endfunction()
 
-add_saltatlas_example(dhnsw_bench)
+if (SALTATLAS_USE_HNSWLIB)
+    add_saltatlas_example(dhnsw_bench)
+endif ()
 
 #
 # This function adds a DNND example with the given feature element type.
