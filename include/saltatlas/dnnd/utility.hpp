@@ -372,7 +372,7 @@ void dump_neighbors_with_features(
     std::cout << query_results[i].size() << "\t" << ngbr_features[i].size()
               << "\t" << ngbr_features.size() << std::endl;
     YGM_ASSERT_RELEASE(query_results[i].size() == ngbr_features[i].size());
-    for (size_t j = 0; j < query_results[j].size(); ++j) {
+    for (size_t j = 0; j < query_results[i].size(); ++j) {
       // TODO: this will work for strings, but not vectors or other unprintable
       // data
       ofs << "\t" << ngbr_features[i][j] << "\t"
