@@ -82,14 +82,29 @@ class dnnd_adv {
 
  public:
   /// \brief Point ID type.
-  using id_type = Id;
+  using id_type = std::remove_cv_t<Id>;
   /// \brief Distance type.
   using distance_type = Distance;
   /// \brief Point type.
   using point_type = Point;
 
+ private:
+  /// \brief Internal ID type (contiguous integers starting from 0).
+  using internal_id_type =
+      std::conditional_t<std::is_integral_v<id_type>, id_type, uint64_t>;
+
+  /// Use an ID table to map external IDs to internal IDs if id_type is not an
+  /// integral type. If id_type is an integral type, we can use the ID directly
+  /// as the internal
+  static constexpr bool k_use_eid_table = !std::is_integral_v<id_type>;
+
+ public:
   /// \brief k-NN index type.
-  using knn_index_type =
+  using knn_index_type = dndetail::nn_index<internal_id_type, distance_type,
+                                            allocator_type<std::byte>>;
+
+  /// \brief k-NN index type with external ID type (i.e., id_type).
+  using external_knn_index_type =
       dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>>;
 
  private:
@@ -116,6 +131,16 @@ class dnnd_adv {
                                          scp_allocator_type<knn_index_type>>;
   using size_container =
       metall::container::vector<std::size_t, scp_allocator_type<std::size_t>>;
+
+  using e2i_id_table_type = boost::unordered_flat_map<
+      id_type, internal_id_type, hash<k_point_partitioner_hash_seed>,
+      std::equal_to<>,
+      scp_allocator_type<std::pair<const id_type, internal_id_type>>>;
+
+  using i2e_id_table_type = boost::unordered_flat_map<
+      internal_id_type, id_type, hash<k_point_partitioner_hash_seed>,
+      std::equal_to<>,
+      scp_allocator_type<std::pair<const internal_id_type, id_type>>>;
 
  public:
   /// \brief Neighbor type (contains a neighbor ID and the distance to the
@@ -259,6 +284,15 @@ class dnnd_adv {
   template <typename id_iterator, typename point_iterator>
   void add_points(id_iterator ids_begin, id_iterator ids_end,
                   point_iterator points_begin, point_iterator points_end) {
+    static_assert(
+        std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
+                       id_type>,
+        "id_iterator must be an iterator of id_type");
+    static_assert(std::is_same_v<
+                      typename std::iterator_traits<point_iterator>::value_type,
+                      point_type>,
+                  "point_iterator must be an iterator of point_type");
+
     auto receiver = [](auto, auto this_ptr, const id_t id,
                        const auto& sent_point) {
       if ((this_ptr->m_pstore)->contains(id)) {
@@ -1050,6 +1084,16 @@ class dnnd_adv {
   std::unique_ptr<knn_index_container> m_knn_index_list{nullptr};
   std::unique_ptr<size_container>      m_index_k_list{nullptr};
   ygm::ygm_ptr<self_type>              m_this{this};
+
+  // Use the ID mapping tables only when id_type is not an integral type.
+  // Note: Owing an external ID does not necessarily mean owning the
+  // corresponding point data. The owner of a point data is determined by the
+  // point partitioner, which is based on the internal ID.
+  std::unique_ptr<e2i_id_table_type> m_e2i_id_table{nullptr};
+  // Contains external IDs of points stored locally.
+  std::unique_ptr<e2i_id_table_type>       m_local_e2i_id_table{nullptr};
+  std::unique_ptr<i2e_id_table_type>       m_i2e_id_table{nullptr};
+  std::unique_ptr<external_knn_index_type> m_external_knn_index{nullptr};
 };
 
 }  // namespace saltatlas
