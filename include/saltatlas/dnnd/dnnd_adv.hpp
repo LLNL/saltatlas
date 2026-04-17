@@ -59,6 +59,7 @@
 #include "saltatlas/dnnd/detail/query_kernel.hpp"
 #include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/dnnd/feature_vector.hpp"
+#include "saltatlas/dnnd/utility.hpp"
 
 namespace saltatlas {
 

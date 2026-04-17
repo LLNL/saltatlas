@@ -18,9 +18,26 @@
 #include <ygm/detail/collective.hpp>
 #endif
 
+#if __has_include(<metall/metall.hpp>)
+#include <metall/metall.hpp>
+#endif
+
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
+
+namespace saltatlas {
+#if __has_include(<metall/metall.hpp>)
+namespace {
+template <typename T>
+using metall_fallback_allocator = metall::manager::fallback_allocator<T>;
+}  // namespace
+// Use a Metall-compatible string type so IDs can live in persistent storage.
+using pm_id_type =
+    boost::container::basic_string<char, std::char_traits<char>,
+                                   metall_fallback_allocator<char>>;
+#endif
+}  // namespace saltatlas
 
 namespace saltatlas::utility {
 

@@ -27,17 +27,13 @@
 
 #include <saltatlas/common/detail/utilities/hash.hpp>
 #include <saltatlas/dnnd/dnnd_adv.hpp>
-#include <saltatlas/dnnd/feature_vector.hpp>
 
-using manager_type = metall::utility::metall_mpi_adaptor::manager_type;
-template <typename T>
-using fallback_allocator = manager_type::fallback_allocator<T>;
-
-using id_type = boost::container::basic_string<char, std::char_traits<char>,
-                                               fallback_allocator<char>>;
+using pm_id_type = saltatlas::pm_id_type;
 
 namespace cereal {
 
+// Serialize via std::string so MPI/cereal traffic does not depend on Metall's
+// allocator state.
 template <typename Archive, typename Char, typename Traits, typename Allocator>
 void save(
     Archive&                                                       archive,
@@ -59,8 +55,8 @@ void load(Archive&                                                 archive,
 namespace std {
 
 template <>
-struct hash<id_type> {
-  std::size_t operator()(const id_type& value) const noexcept {
+struct hash<pm_id_type> {
+  std::size_t operator()(const pm_id_type& value) const noexcept {
     return saltatlas::str_hash<>{}(value);
   }
 };
@@ -71,10 +67,11 @@ namespace {
 
 using point_type = saltatlas::pm_feature_vector<float>;
 using index_type =
-    saltatlas::dnnd_adv<id_type, point_type, double, saltatlas::str_hash<>>;
-using dataset_type        = std::vector<std::pair<id_type, point_type>>;
+    saltatlas::dnnd_adv<pm_id_type, point_type, double, saltatlas::str_hash<>>;
+using dataset_type        = std::vector<std::pair<pm_id_type, point_type>>;
 using neighbor_store_type = typename index_type::neighbor_store_type;
 
+// Keep all example inputs together so each phase reads as a short scenario.
 struct example_data {
   dataset_type            base_dataset;
   dataset_type            extra_dataset;
@@ -102,11 +99,11 @@ void require(ygm::comm& comm, const bool condition,
   }
 }
 
-id_type make_id(const std::string_view text) {
-  return id_type(text.data(), text.size());
+pm_id_type make_id(const std::string_view text) {
+  return pm_id_type(text.data(), text.size());
 }
 
-std::string to_std_string(const id_type& id) {
+std::string to_std_string(const pm_id_type& id) {
   return std::string(id.data(), id.size());
 }
 
@@ -170,8 +167,8 @@ example_data make_example_data() {
   return data;
 }
 
-std::vector<id_type> collect_ids(const dataset_type& dataset) {
-  std::vector<id_type> ids;
+std::vector<pm_id_type> collect_ids(const dataset_type& dataset) {
+  std::vector<pm_id_type> ids;
   ids.reserve(dataset.size());
   for (const auto& [id, point] : dataset) {
     (void)point;
@@ -183,6 +180,7 @@ std::vector<id_type> collect_ids(const dataset_type& dataset) {
 dataset_type make_local_slice(ygm::comm& comm, const dataset_type& dataset) {
   dataset_type local_dataset;
   for (std::size_t i = 0; i < dataset.size(); ++i) {
+    // Distribute example input explicitly so every rank contributes points.
     if (static_cast<int>(i % comm.size()) == comm.rank()) {
       local_dataset.push_back(dataset[i]);
     }
@@ -192,6 +190,7 @@ dataset_type make_local_slice(ygm::comm& comm, const dataset_type& dataset) {
 
 void add_dataset(ygm::comm& comm, index_type& index,
                  const dataset_type& dataset) {
+  // dnnd_adv expects every rank to participate in collective operations.
   const auto local_dataset = make_local_slice(comm, dataset);
   const auto ids           = collect_ids(local_dataset);
 
@@ -222,7 +221,7 @@ void print_points(ygm::comm& comm, index_type& index, const dataset_type& data,
   const auto ids    = collect_ids(data);
   const auto points = index.get_points(ids.begin(), ids.end());
 
-  // This is global operation
+  // num_points() is collective, so fetch it before rank-0-only printing.
   const size_t n = index.num_points();
 
   if (comm.rank0()) {
@@ -281,6 +280,7 @@ void print_query_results_with_features(
 
 std::size_t create_base_index(ygm::comm& comm, index_type& index,
                               const example_data& data) {
+  // Build one index over the original six points.
   add_dataset(comm, index, data.base_dataset);
 
   const auto index_id =
@@ -302,10 +302,12 @@ void run_create_only_phase(ygm::comm&                   comm,
                            const example_data&          data) {
   print_section(comm, "Phase 1: create_only");
 
+  // Create a fresh Metall datastore and populate it.
   index_type index(saltatlas::create_only, datastore_path, comm, k_seed);
 
   create_base_index(comm, index, data);
 
+  // The snapshot captures the six-point state before the later update step.
   require(comm, index.snapshot(snapshot_path), "snapshot() failed");
   if (comm.rank0()) {
     std::cout << "snapshot: " << snapshot_path << '\n';
@@ -317,6 +319,7 @@ void run_open_only_phase(ygm::comm&                   comm,
                          const example_data&          data) {
   print_section(comm, "Phase 2: open_only");
 
+  // Reopen the same datastore, add more points, then refresh index 0.
   index_type index(saltatlas::open_only, datastore_path, comm, k_seed);
   add_dataset(comm, index, data.extra_dataset);
   index.update(0, saltatlas::distance::id::sql2, k_graph_degree);
@@ -335,6 +338,7 @@ void run_open_read_only_phase(ygm::comm&                   comm,
                               const example_data&          data) {
   print_section(comm, "Phase 3: open_read_only");
 
+  // Open the snapshot read-only to show that it still sees the earlier state.
   index_type index(saltatlas::open_read_only, snapshot_path, comm, k_seed);
   print_query_results_with_features(
       comm, data.base_queries,
@@ -355,6 +359,7 @@ int main(int argc, char** argv) {
 
   const auto data = make_example_data();
 
+  // Start from a clean slate so repeated runs behave the same way.
   remove_store(comm, datastore_path);
   remove_store(comm, snapshot_path);
 

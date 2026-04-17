@@ -26,14 +26,8 @@
 #include <saltatlas/common/detail/utilities/hash.hpp>
 #include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/dnnd_adv.hpp>
-#include <saltatlas/dnnd/feature_vector.hpp>
 
-using manager_type = metall::utility::metall_mpi_adaptor::manager_type;
-template <typename T>
-using fallback_allocator = manager_type::fallback_allocator<T>;
-
-using id_type = boost::container::basic_string<char, std::char_traits<char>,
-                                               fallback_allocator<char>>;
+using pm_id_type = saltatlas::pm_id_type;
 
 namespace cereal {
 
@@ -58,8 +52,8 @@ void load(Archive                                                 &archive,
 namespace std {
 
 template <>
-struct hash<id_type> {
-  std::size_t operator()(const id_type &value) const noexcept {
+struct hash<pm_id_type> {
+  std::size_t operator()(const pm_id_type &value) const noexcept {
     return saltatlas::str_hash<>{}(value);
   }
 };
@@ -70,24 +64,24 @@ namespace {
 
 using point_type = saltatlas::pm_feature_vector<double>;
 using index_type =
-    saltatlas::dnnd_adv<id_type, point_type, double, saltatlas::str_hash<>>;
+    saltatlas::dnnd_adv<pm_id_type, point_type, double, saltatlas::str_hash<>>;
 using neighbor_type       = typename index_type::neighbor_type;
 using neighbor_store_type = typename index_type::neighbor_store_type;
-using dataset_type        = std::vector<std::pair<id_type, point_type>>;
-using point_table_type    = std::unordered_map<id_type, point_type>;
+using dataset_type        = std::vector<std::pair<pm_id_type, point_type>>;
+using point_table_type    = std::unordered_map<pm_id_type, point_type>;
 using initial_index_map_type =
-    std::unordered_map<id_type, std::vector<id_type>>;
+    std::unordered_map<pm_id_type, std::vector<pm_id_type>>;
 
 constexpr std::uint64_t k_seed         = 20260416;
 constexpr int           k_graph_degree = 3;
 constexpr int           k_query_degree = 2;
 
-std::string to_std_string(const id_type &id) {
+std::string to_std_string(const pm_id_type &id) {
   return std::string(id.data(), id.size());
 }
 
-id_type make_id(const std::string_view text) {
-  return id_type(text.data(), text.size());
+pm_id_type make_id(const std::string_view text) {
+  return pm_id_type(text.data(), text.size());
 }
 
 point_type make_point(const std::initializer_list<double> values) {
@@ -148,9 +142,9 @@ std::vector<point_type> make_queries(const bool include_extra) {
   return queries;
 }
 
-std::vector<std::vector<id_type>> make_expected_query_groups(
+std::vector<std::vector<pm_id_type>> make_expected_query_groups(
     const bool include_extra) {
-  std::vector<std::vector<id_type>> groups;
+  std::vector<std::vector<pm_id_type>> groups;
   groups.push_back({make_id("alpha"), make_id("bravo")});
   groups.push_back({make_id("charlie"), make_id("delta")});
   groups.push_back({make_id("echo"), make_id("foxtrot")});
@@ -160,8 +154,8 @@ std::vector<std::vector<id_type>> make_expected_query_groups(
   return groups;
 }
 
-std::vector<id_type> collect_ids(const dataset_type &dataset) {
-  std::vector<id_type> ids;
+std::vector<pm_id_type> collect_ids(const dataset_type &dataset) {
+  std::vector<pm_id_type> ids;
   ids.reserve(dataset.size());
   for (const auto &[id, point] : dataset) {
     (void)point;
@@ -192,12 +186,18 @@ initial_index_map_type make_external_initial_index(
   const auto             ids = collect_ids(dataset);
   initial_index_map_type initial_index;
   initial_index.reserve(ids.size());
-  initial_index.emplace(ids[0], std::vector<id_type>{ids[1], ids[2], ids[3]});
-  initial_index.emplace(ids[1], std::vector<id_type>{ids[0], ids[2], ids[3]});
-  initial_index.emplace(ids[2], std::vector<id_type>{ids[3], ids[0], ids[1]});
-  initial_index.emplace(ids[3], std::vector<id_type>{ids[2], ids[0], ids[1]});
-  initial_index.emplace(ids[4], std::vector<id_type>{ids[5], ids[2], ids[3]});
-  initial_index.emplace(ids[5], std::vector<id_type>{ids[4], ids[2], ids[3]});
+  initial_index.emplace(ids[0],
+                        std::vector<pm_id_type>{ids[1], ids[2], ids[3]});
+  initial_index.emplace(ids[1],
+                        std::vector<pm_id_type>{ids[0], ids[2], ids[3]});
+  initial_index.emplace(ids[2],
+                        std::vector<pm_id_type>{ids[3], ids[0], ids[1]});
+  initial_index.emplace(ids[3],
+                        std::vector<pm_id_type>{ids[2], ids[0], ids[1]});
+  initial_index.emplace(ids[4],
+                        std::vector<pm_id_type>{ids[5], ids[2], ids[3]});
+  initial_index.emplace(ids[5],
+                        std::vector<pm_id_type>{ids[4], ids[2], ids[3]});
   return initial_index;
 }
 
@@ -246,7 +246,7 @@ void require_ids_eq(ygm::comm &comm, const std::vector<std::size_t> &lhs,
 }
 
 bool contains_id(const std::vector<neighbor_type> &neighbors,
-                 const std::vector<id_type>       &candidates) {
+                 const std::vector<pm_id_type>    &candidates) {
   for (const auto &neighbor : neighbors) {
     for (const auto &candidate : candidates) {
       if (neighbor.id == candidate) {
@@ -283,9 +283,9 @@ void require_feature_alignment(ygm::comm                        &comm,
 
 void check_query_results(
     ygm::comm &comm, const neighbor_store_type &results,
-    const point_table_type                  &point_table,
-    const std::vector<std::vector<id_type>> &expected_groups,
-    const std::string                       &label) {
+    const point_table_type                     &point_table,
+    const std::vector<std::vector<pm_id_type>> &expected_groups,
+    const std::string                          &label) {
   require(comm, results.size() == expected_groups.size(),
           label + ": unexpected number of query results");
   for (std::size_t i = 0; i < results.size(); ++i) {
@@ -309,7 +309,7 @@ void check_query_with_features(
     ygm::comm &comm, const neighbor_store_type &results,
     const std::vector<std::vector<point_type>> &features,
     const point_table_type                     &point_table,
-    const std::vector<std::vector<id_type>>    &expected_groups,
+    const std::vector<std::vector<pm_id_type>> &expected_groups,
     const std::string                          &label) {
   check_query_results(comm, results, point_table, expected_groups, label);
   require(comm, results.size() == features.size(),
@@ -477,7 +477,7 @@ std::vector<std::filesystem::path> write_custom_dataset(
   return {dir / (stem + "_0.txt"), dir / (stem + "_1.txt")};
 }
 
-std::pair<id_type, point_type> parse_custom_line(const std::string &line) {
+std::pair<pm_id_type, point_type> parse_custom_line(const std::string &line) {
   std::stringstream ss{line};
   std::string       token;
   std::getline(ss, token, '|');
@@ -543,7 +543,7 @@ void run_load_points_parser_suite(ygm::comm                   &comm,
   const auto files =
       write_custom_dataset(comm, dataset, root / "inputs", "custom_parser");
   print_progress(comm, label + ": dataset files written");
-  const std::function<std::pair<id_type, point_type>(const std::string &)>
+  const std::function<std::pair<pm_id_type, point_type>(const std::string &)>
       parser = [](const std::string &line) { return parse_custom_line(line); };
 
   if (use_metall_runtime) {
