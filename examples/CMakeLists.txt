@@ -91,6 +91,7 @@ add_saltatlas_dnnd_example_id_and_fe_types(dnnd_bench string_id float)
 
 if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_advanced)
+    add_saltatlas_example(dnnd_advanced_str_id)
     add_saltatlas_example(dnnd_advanced_index_build)
     add_saltatlas_example(dnnd_advanced_get_neighbors)
     add_saltatlas_example(dnnd_advanced_query)

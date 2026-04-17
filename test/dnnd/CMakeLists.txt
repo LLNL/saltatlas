@@ -1,0 +1,1 @@
+add_saltatlas_test(test_dnnd_adv_str_id)

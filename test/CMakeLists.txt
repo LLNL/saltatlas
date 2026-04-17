@@ -14,4 +14,7 @@ function(add_saltatlas_test test_name)
 endfunction()
 
 add_subdirectory(common)
+if (SALTATLAS_USE_METALL)
+    add_subdirectory(dnnd)
+endif ()
 add_subdirectory(neo_dnnd)
