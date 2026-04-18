@@ -21,47 +21,11 @@
 #include <utility>
 #include <vector>
 
-#include <boost/container/string.hpp>
-#include <metall/utility/metall_mpi_adaptor.hpp>
 #include <ygm/comm.hpp>
 
-#include <saltatlas/common/detail/utilities/hash.hpp>
 #include <saltatlas/dnnd/dnnd_adv.hpp>
 
 using pm_id_type = saltatlas::pm_id_type;
-
-namespace cereal {
-
-// Serialize via std::string so MPI/cereal traffic does not depend on Metall's
-// allocator state.
-template <typename Archive, typename Char, typename Traits, typename Allocator>
-void save(
-    Archive&                                                       archive,
-    const boost::container::basic_string<Char, Traits, Allocator>& value) {
-  std::basic_string<Char, Traits> copied(value.data(), value.size());
-  archive(copied);
-}
-
-template <typename Archive, typename Char, typename Traits, typename Allocator>
-void load(Archive&                                                 archive,
-          boost::container::basic_string<Char, Traits, Allocator>& value) {
-  std::basic_string<Char, Traits> copied;
-  archive(copied);
-  value.assign(copied.data(), copied.size());
-}
-
-}  // namespace cereal
-
-namespace std {
-
-template <>
-struct hash<pm_id_type> {
-  std::size_t operator()(const pm_id_type& value) const noexcept {
-    return saltatlas::str_hash<>{}(value);
-  }
-};
-
-}  // namespace std
 
 namespace {
 

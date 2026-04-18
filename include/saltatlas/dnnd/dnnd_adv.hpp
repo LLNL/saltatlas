@@ -133,42 +133,64 @@ class dnnd_adv {
   /// as the internal ID.
   static constexpr bool k_use_eid_table = !std::is_integral_v<id_type>;
 
+  /// \brief Internal ID hasher for point store.
+  using pstore_internal_id_hasher = hash<k_pstore_hash_seed>;
+
+  /// \brief Internal ID hasher for point partitioner.
+  using point_partitioner_internal_id_hasher =
+      hash<k_point_partitioner_hash_seed>;
+
+  /// \brief External ID hasher for point store.
+  struct external_id_pstore_hasher {
+    inline std::size_t operator()(const id_type& id) const {
+      return hash<k_pstore_hash_seed>{}(hasher{}(id));
+    }
+  };
+
+  /// \brief External ID hasher for point partitioner.
+  struct external_id_partitioner_hasher {
+    inline std::size_t operator()(const id_type& id) const {
+      return hash<k_point_partitioner_hash_seed>{}(hasher{}(id));
+    }
+  };
+
   /// \brief Point store type.
   using point_store_type =
-      point_store<internal_id_type, point_type, hash<k_pstore_hash_seed>,
+      point_store<internal_id_type, point_type, pstore_internal_id_hasher,
                   std::equal_to<>, allocator_type<std::byte>>;
   using external_point_store_type =
-      point_store<id_type, point_type, hasher, std::equal_to<>,
-                  allocator_type<std::byte>>;
+      point_store<id_type, point_type, external_id_pstore_hasher,
+                  std::equal_to<>, allocator_type<std::byte>>;
 
  public:
-  /// \brief k-NN index type.
-  using knn_index_type = dndetail::nn_index<internal_id_type, distance_type,
-                                            allocator_type<std::byte>>;
-
   /// \brief k-NN index type with external ID type (i.e., id_type).
-  using external_knn_index_type =
+  using knn_index_type =
       dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>>;
 
  private:
+  /// \brief k-NN index type.
+  using internal_knn_index_type =
+      dndetail::nn_index<internal_id_type, distance_type,
+                         allocator_type<std::byte>>;
+
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
 
   /// \brief Point partitioner type.
   using internal_point_partitioner = typename nn_kernel_type::point_partitioner;
 
   using nn_index_optimizer_type =
-      dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
+      dndetail::nn_index_optimizer<point_store_type, internal_knn_index_type>;
 
   using query_kernel_type =
-      dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
+      dndetail::dknn_batch_query_kernel<point_store_type,
+                                        internal_knn_index_type>;
 
   using query_store_type = typename query_kernel_type::query_store_type;
   using internal_neighbor_store_type =
       typename query_kernel_type::neighbor_store_type;
 
-  using knn_index_container =
-      boost::interprocess::stable_vector<knn_index_type,
-                                         scp_allocator_type<knn_index_type>>;
+  using internal_knn_index_container = boost::interprocess::stable_vector<
+      internal_knn_index_type, scp_allocator_type<internal_knn_index_type>>;
   using size_container =
       metall::container::vector<std::size_t, scp_allocator_type<std::size_t>>;
 
@@ -177,8 +199,7 @@ class dnnd_adv {
       scp_allocator_type<std::pair<const id_type, internal_id_type>>>;
 
   using i2e_id_table_type = boost::unordered::unordered_flat_map<
-      internal_id_type, id_type, hash<k_point_partitioner_hash_seed>,
-      std::equal_to<>,
+      internal_id_type, id_type, pstore_internal_id_hasher, std::equal_to<>,
       scp_allocator_type<std::pair<const internal_id_type, id_type>>>;
 
  public:
@@ -199,11 +220,15 @@ class dnnd_adv {
   /// std::vector<std::vector<neighbor_type>>.
   using neighbor_store_type = std::vector<std::vector<neighbor_type>>;
 
+  using external_initial_index_type =
+      std::unordered_map<id_type, std::vector<id_type>,
+                         external_id_pstore_hasher>;
+
   static constexpr int get_owner(const id_type& id, const int mpi_size) {
     static_assert(!k_use_eid_table,
                   "get_owner() is not available when external ID and internal "
                   "ID are different.");
-    return hash<k_point_partitioner_hash_seed>{}(id) % mpi_size;
+    return point_partitioner_internal_id_hasher{}(id) % mpi_size;
   }
 
   static bool copy(const std::filesystem::path& src_path,
@@ -236,7 +261,7 @@ class dnnd_adv {
                     const bool     verbose  = false)
       : m_comm(comm), m_rnd_seed(rnd_seed), m_verbose(verbose) {
     m_pstore         = std::make_unique<point_store_type>();
-    m_knn_index_list = std::make_unique<knn_index_container>();
+    m_knn_index_list = std::make_unique<internal_knn_index_container>();
     m_index_k_list   = std::make_unique<size_container>();
     priv_init_dram_id_tables();
     m_comm.cf_barrier();
@@ -258,7 +283,7 @@ class dnnd_adv {
     auto& localm = m_metall->get_local_manager();
     m_pstore.reset(localm.construct<point_store_type>(metall::unique_instance)(
         localm.get_allocator<>()));
-    m_knn_index_list.reset(localm.construct<knn_index_container>(
+    m_knn_index_list.reset(localm.construct<internal_knn_index_container>(
         metall::unique_instance)(localm.get_allocator<>()));
     m_index_k_list.reset(localm.construct<size_container>(
         metall::unique_instance)(localm.get_allocator<>()));
@@ -279,7 +304,8 @@ class dnnd_adv {
         localm.find<point_store_type>(metall::unique_instance).first);
     assert(m_pstore);
     m_knn_index_list.reset(
-        localm.find<knn_index_container>(metall::unique_instance).first);
+        localm.find<internal_knn_index_container>(metall::unique_instance)
+            .first);
     assert(m_knn_index_list);
     m_index_k_list.reset(
         localm.find<size_container>(metall::unique_instance).first);
@@ -301,7 +327,8 @@ class dnnd_adv {
         localm.find<point_store_type>(metall::unique_instance).first);
     assert(m_pstore);
     m_knn_index_list.reset(
-        localm.find<knn_index_container>(metall::unique_instance).first);
+        localm.find<internal_knn_index_container>(metall::unique_instance)
+            .first);
     assert(m_knn_index_list);
     m_index_k_list.reset(
         localm.find<size_container>(metall::unique_instance).first);
@@ -566,11 +593,11 @@ class dnnd_adv {
   /// kernel. The elapsed time is checked after each neighbor check loop. If the
   /// time limit is exceeded, the construction stops. All ranks must use the
   /// same value. If 0 is given, there is no timeout.
-  std::size_t build(
-      const distance::id& distance_func_id, const int k,
-      const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.5, const double delta = 0.001,
-      const bool recheck = false, const double time_limit_sec = 0) {
+  std::size_t build(const distance::id& distance_func_id, const int k,
+                    const external_initial_index_type& initial_index,
+                    const double rho = 0.5, const double delta = 0.001,
+                    const bool   recheck        = false,
+                    const double time_limit_sec = 0) {
     return build(distance::distance_function<point_type, distance_type>(
                      distance_func_id),
                  k, initial_index, rho, delta, recheck, time_limit_sec);
@@ -590,11 +617,11 @@ class dnnd_adv {
   /// kernel. The elapsed time is checked after each neighbor check loop. If the
   /// time limit is exceeded, the construction stops. All ranks must use the
   /// same value. If 0 is given, there is no timeout.
-  std::size_t build(
-      distance_function_type dfunc, const int k,
-      const std::unordered_map<id_type, std::vector<id_type>>& initial_index,
-      const double rho = 0.5, const double delta = 0.001,
-      const bool recheck = false, const double time_limit_sec = 0) {
+  std::size_t build(distance_function_type dfunc, const int k,
+                    const external_initial_index_type& initial_index,
+                    const double rho = 0.5, const double delta = 0.001,
+                    const bool   recheck        = false,
+                    const double time_limit_sec = 0) {
     typename nn_kernel_type::option option{.k              = k,
                                            .r              = rho,
                                            .delta          = delta,
@@ -792,7 +819,7 @@ class dnnd_adv {
                             query_iterator         queries_begin,
                             query_iterator queries_end, const int k,
                             const double epsilon = 0.1) {
-    knn_index_type tmp_index;
+    internal_knn_index_type tmp_index;
     for (auto index_id = index_ids_begin; index_id != index_ids_end;
          ++index_id) {
       tmp_index.merge(m_knn_index_list->at(*index_id));
@@ -816,7 +843,7 @@ class dnnd_adv {
                       distance_function_type distance_function,
                       query_iterator queries_begin, query_iterator queries_end,
                       const int k, const double epsilon = 0.1) {
-    knn_index_type tmp_index;
+    internal_knn_index_type tmp_index;
     for (auto index_id = index_ids_begin; index_id != index_ids_end;
          ++index_id) {
       tmp_index.merge(m_knn_index_list->at(*index_id));
@@ -919,7 +946,7 @@ class dnnd_adv {
   /// This function invokes YGM barrier. All ranks must call this function.
   /// Note: returned data are always stored in normal heap memory, not Metall.
   template <typename id_iterator>
-  std::unordered_map<id_type, point_type> get_points(
+  std::unordered_map<id_type, point_type, external_id_pstore_hasher> get_points(
       id_iterator ids_begin, id_iterator ids_end) const {
     static_assert(
         std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
@@ -993,20 +1020,25 @@ class dnnd_adv {
   /// \brief Get the neighbors of the given point.
   /// This function invokes YGM barrier. All ranks must call this function.
   template <typename id_iterator>
-  std::unordered_map<id_type, std::vector<neighbor_type>> get_neighbors(
-      std::size_t index_id, id_iterator ids_begin, id_iterator ids_end) const {
+  std::unordered_map<id_type, std::vector<neighbor_type>,
+                     external_id_pstore_hasher>
+  get_neighbors(std::size_t index_id, id_iterator ids_begin,
+                id_iterator ids_end) const {
     static_assert(
         std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    static std::unordered_map<id_type, std::vector<neighbor_type>>
+    static std::unordered_map<id_type, std::vector<neighbor_type>,
+                              external_id_pstore_hasher>
         neighbors_table;
     neighbors_table = decltype(neighbors_table){};
     neighbors_table.reserve(std::distance(ids_begin, ids_end));
 
-    using internal_neighbor_type = typename knn_index_type::neighbor_type;
-    static std::unordered_map<id_type, std::vector<internal_neighbor_type>>
+    using internal_neighbor_type =
+        typename internal_knn_index_type::neighbor_type;
+    static std::unordered_map<id_type, std::vector<internal_neighbor_type>,
+                              external_id_pstore_hasher>
         internal_neighbors_table;
     if constexpr (k_use_eid_table) {
       internal_neighbors_table = decltype(internal_neighbors_table){};
@@ -1095,7 +1127,8 @@ class dnnd_adv {
   /// neighbors.
   template <typename id_iterator>
   std::unordered_map<
-      id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+      id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>,
+      external_id_pstore_hasher>
   get_neighbors_with_features(std::size_t index_id, id_iterator ids_begin,
                               id_iterator ids_end) const {
     const auto neighbors_table = get_neighbors(index_id, ids_begin, ids_end);
@@ -1110,7 +1143,8 @@ class dnnd_adv {
         get_points(neighbor_ids.begin(), neighbor_ids.end());
 
     std::unordered_map<
-        id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>>
+        id_type, std::pair<std::vector<neighbor_type>, std::vector<point_type>>,
+        external_id_pstore_hasher>
         result;
     for (auto& [id, neighbors] : neighbors_table) {
       std::vector<point_type> neighbor_features(neighbors.size());
@@ -1134,12 +1168,16 @@ class dnnd_adv {
     return index_ids;
   }
 
-  /// \brief Return the reference to k-NN index associated with index_id.
+  /// \brief Return the k-NN index associated with index_id.
   /// \param index_id Index ID.
-  const knn_index_type& get_index(const std::size_t index_id) const {
-    // Stable vector (or similar container) must be used to avoid dangling
-    // reference when m_knn_index_list's size is changed.
-    return m_knn_index_list->at(index_id);
+  decltype(auto) get_index(const std::size_t index_id) const {
+    if constexpr (k_use_eid_table) {
+      return priv_gen_external_knng(m_knn_index_list->at(index_id));
+    } else {
+      // Stable vector (or similar container) must be used to avoid dangling
+      // reference when m_knn_index_list's size is changed.
+      return (m_knn_index_list->at(index_id));
+    }
   }
 
   /// \brief Create a snapshot of the current persistent datastore.
@@ -1214,14 +1252,14 @@ class dnnd_adv {
       const {
     const int size = m_comm.size();
     return [size](const id_type& id) {
-      return hash<k_point_partitioner_hash_seed>{}(hasher{}(id)) % size;
+      return external_id_partitioner_hasher{}(id) % size;
     };
   }
 
   internal_point_partitioner priv_get_point_partitioner_internal() const {
     const int size = m_comm.size();
     return [size](const internal_id_type& id) {
-      return hash<k_point_partitioner_hash_seed>{}(id) % size;
+      return point_partitioner_internal_id_hasher{}(id) % size;
     };
   }
 
@@ -1470,8 +1508,8 @@ class dnnd_adv {
     m_comm.barrier();
   }
 
-  external_knn_index_type priv_gen_external_knng(
-      const knn_index_type& internal_index) const {
+  knn_index_type priv_gen_external_knng(
+      const internal_knn_index_type& internal_index) const {
     static_assert(
         k_use_eid_table,
         "priv_gen_external_knng() is only available when external ID and "
@@ -1487,8 +1525,8 @@ class dnnd_adv {
       }
     }
 
-    external_knn_index_type external_index;
-    const auto              i2e_id_map =
+    knn_index_type external_index;
+    const auto     i2e_id_map =
         priv_get_external_ids(internal_ids.begin(), internal_ids.end());
     for (auto itr = internal_index.points_begin();
          itr != internal_index.points_end(); ++itr) {
@@ -1506,7 +1544,8 @@ class dnnd_adv {
 
   template <typename query_iterator>
   std::pair<neighbor_store_type, internal_neighbor_store_type> priv_run_query(
-      const knn_index_type& index, distance_function_type distance_function,
+      const internal_knn_index_type& index,
+      distance_function_type distance_function,
       query_iterator queries_begin, query_iterator queries_end, const int k,
       const double epsilon = 0.1) {
     typename query_kernel_type::option option{.k          = k,
@@ -1612,8 +1651,8 @@ class dnnd_adv {
   }
 
   std::vector<neighbor_type> priv_get_local_external_neighbors(
-      const knn_index_type&  internal_index,
-      const internal_id_type source_iid) const {
+      const internal_knn_index_type& internal_index,
+      const internal_id_type         source_iid) const {
     static_assert(
         k_use_eid_table,
         "priv_get_local_external_neighbors() is only available when external "
@@ -1640,9 +1679,10 @@ class dnnd_adv {
   }
 
   template <typename id_iterator>
-  std::unordered_map<id_type, point_type> priv_get_remote_points(
-      id_iterator ids_begin, id_iterator ids_end) const {
-    static std::unordered_map<id_type, point_type> return_points_store;
+  std::unordered_map<id_type, point_type, external_id_pstore_hasher>
+  priv_get_remote_points(id_iterator ids_begin, id_iterator ids_end) const {
+    static std::unordered_map<id_type, point_type, external_id_pstore_hasher>
+        return_points_store;
     return_points_store = decltype(return_points_store){};
     return_points_store.reserve(std::distance(ids_begin, ids_end));
 
@@ -1686,8 +1726,7 @@ class dnnd_adv {
 
   std::unordered_map<internal_id_type, std::vector<internal_id_type>>
   priv_gen_internal_initial_index(
-      const std::unordered_map<id_type, std::vector<id_type>>& initial_index)
-      const {
+      const external_initial_index_type& initial_index) const {
     static_assert(
         k_use_eid_table,
         "priv_gen_internal_initial_index() is only available when external "
@@ -1735,9 +1774,9 @@ class dnnd_adv {
   bool                                                 m_verbose;
   std::unique_ptr<metall::utility::metall_mpi_adaptor> m_metall{nullptr};
   std::unique_ptr<point_store_type>                    m_pstore{nullptr};
-  std::unique_ptr<knn_index_container> m_knn_index_list{nullptr};
-  std::unique_ptr<size_container>      m_index_k_list{nullptr};
-  ygm::ygm_ptr<self_type>              m_this{this};
+  std::unique_ptr<internal_knn_index_container> m_knn_index_list{nullptr};
+  std::unique_ptr<size_container>               m_index_k_list{nullptr};
+  ygm::ygm_ptr<self_type>                       m_this{this};
 
   // Use the ID mapping tables only when id_type is not an integral type.
   //

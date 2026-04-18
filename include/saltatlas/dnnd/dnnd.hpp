@@ -90,16 +90,37 @@ class dnnd {
   /// as the internal
   static constexpr bool k_use_eid_table = !std::is_integral_v<id_type>;
 
+  /// \brief Internal ID hasher for point store.
+  using iid_pstore_hasher = hash<k_pstore_hash_seed>;
+
+  /// \brief Internal ID hasher for point partitioner
+  using iid_partitioner_hasher = hash<k_point_partitioner_hash_seed>;
+
+  /// \brief External ID hasher for point store.
+  struct eid_pstore_hasher {
+    inline std::size_t operator()(const id_type& id) const {
+      return hash<k_pstore_hash_seed>{}(hasher{}(id));
+    }
+  };
+
+  /// \brief External ID hasher for point partitioner.
+  struct eid_partitioner_hasher {
+    inline std::size_t operator()(const id_type& id) const {
+      return hash<k_point_partitioner_hash_seed>{}(hasher{}(id));
+    }
+  };
+
   /// \brief Point store type.
   using point_store_type =
-      point_store<internal_id_type, point_type, hash<k_pstore_hash_seed>,
+      point_store<internal_id_type, point_type, iid_pstore_hasher,
                   std::equal_to<>, std::allocator<std::byte>>;
   using external_point_store_type =
-      point_store<id_type, point_type, hash<k_pstore_hash_seed>,
-                  std::equal_to<>, std::allocator<std::byte>>;
+      point_store<id_type, point_type, eid_pstore_hasher, std::equal_to<>,
+                  std::allocator<std::byte>>;
 
   /// \brief k-NN index type.
-  using knn_index_type = dndetail::nn_index<internal_id_type, distance_type>;
+  using internal_knn_index_type =
+      dndetail::nn_index<internal_id_type, distance_type>;
   /// \brief k-NN index type with external ID type (i.e., id_type).
   using external_knn_index_type = dndetail::nn_index<id_type, distance_type>;
 
@@ -109,10 +130,11 @@ class dnnd {
   using internal_point_partitioner = typename nn_kernel_type::point_partitioner;
 
   using nn_index_optimizer_type =
-      dndetail::nn_index_optimizer<point_store_type, knn_index_type>;
+      dndetail::nn_index_optimizer<point_store_type, internal_knn_index_type>;
 
   using query_kernel_type =
-      dndetail::dknn_batch_query_kernel<point_store_type, knn_index_type>;
+      dndetail::dknn_batch_query_kernel<point_store_type,
+                                        internal_knn_index_type>;
 
   using query_store_type = typename query_kernel_type::query_store_type;
 
@@ -506,7 +528,7 @@ class dnnd {
   /// \brief Get point data of the given IDs.
   /// This function invokes YGM barrier. All ranks must call this function.
   template <typename id_iterator>
-  std::unordered_map<id_type, point_type> get_points(
+  std::unordered_map<id_type, point_type, eid_pstore_hasher> get_points(
       id_iterator ids_begin, id_iterator ids_end) const {
     static_assert(
         std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
@@ -575,14 +597,15 @@ class dnnd {
   /// \brief Get the neighbors of the given point.
   /// This function invokes YGM barrier. All ranks must call this function.
   template <typename id_iterator>
-  std::unordered_map<id_type, std::vector<neighbor_type>> get_neighbors(
-      id_iterator ids_begin, id_iterator ids_en) const {
+  std::unordered_map<id_type, std::vector<neighbor_type>, eid_pstore_hasher>
+  get_neighbors(id_iterator ids_begin, id_iterator ids_en) const {
     static_assert(
         std::is_same_v<typename std::iterator_traits<id_iterator>::value_type,
                        id_type>,
         "id_iterator must be an iterator of id_type");
 
-    static std::unordered_map<id_type, std::vector<neighbor_type>>
+    static std::unordered_map<id_type, std::vector<neighbor_type>,
+                              eid_pstore_hasher>
         neighbors_table;
     neighbors_table = decltype(neighbors_table){};
     neighbors_table.reserve(std::distance(ids_begin, ids_en));
@@ -680,7 +703,7 @@ class dnnd {
   auto priv_get_point_partitioner_external() const {
     const int size = m_comm.size();
     return [size](const id_type& id) {
-      return hash<k_point_partitioner_hash_seed>{}(hasher{}(id)) % size;
+      return eid_partitioner_hasher{}(id) % size;
     };
   };
 
@@ -689,7 +712,7 @@ class dnnd {
   internal_point_partitioner priv_get_point_partitioner_internal() const {
     const int size = m_comm.size();
     return [size](const internal_id_type& id) {
-      return hash<k_point_partitioner_hash_seed>{}(id) % size;
+      return iid_partitioner_hasher{}(id) % size;
     };
   };
 
@@ -1027,9 +1050,10 @@ class dnnd {
   }
 
   template <typename id_iterator>
-  std::unordered_map<id_type, point_type> priv_get_remote_points(
-      id_iterator ids_begin, id_iterator ids_end) const {
-    static std::unordered_map<id_type, point_type> return_points_store;
+  std::unordered_map<id_type, point_type, eid_pstore_hasher>
+  priv_get_remote_points(id_iterator ids_begin, id_iterator ids_end) const {
+    static std::unordered_map<id_type, point_type, eid_pstore_hasher>
+        return_points_store;
     return_points_store = decltype(return_points_store){};
     return_points_store.reserve(std::distance(ids_begin, ids_end));
 
@@ -1071,7 +1095,7 @@ class dnnd {
   ygm::comm&              m_comm;
   uint64_t                m_rnd_seed;
   point_store_type        m_pstore;
-  knn_index_type          m_knn_index{};
+  internal_knn_index_type m_knn_index{};
   std::size_t             m_index_k{0};
   bool                    m_verbose;
   ygm::ygm_ptr<self_type> m_this{this};

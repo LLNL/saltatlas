@@ -12,10 +12,13 @@
 #include <unordered_set>
 #include <vector>
 
-#if __has_include(<ygm/comm.hpp>) && __has_include(<ygm/detail/collective.hpp>)
+#if __has_include(<ygm/comm.hpp>)
 #define SALTATLAS_UTILITY_INCLUDED_YGM
+#include <cereal/cereal.hpp>
 #include <ygm/comm.hpp>
 #include <ygm/detail/collective.hpp>
+#include <ygm/detail/ygm_cereal_archive.hpp>
+#include <ygm/utility/boost_json.hpp>
 #endif
 
 #if __has_include(<metall/metall.hpp>)
@@ -38,6 +41,31 @@ using pm_id_type =
                                    metall_fallback_allocator<char>>;
 #endif
 }  // namespace saltatlas
+
+#ifdef SALTATLAS_UTILITY_INCLUDED_YGM
+// Support cereal for pm_id_type.
+namespace cereal {
+template <typename Archive>
+void CEREAL_SAVE_FUNCTION_NAME(Archive                     &archive,
+                               const saltatlas::pm_id_type &str) {
+  // Length (#of chars in the string)
+  archive(cereal::make_size_tag(static_cast<std::size_t>(str.size())));
+
+  // String data
+  archive(cereal::binary_data(str.data(), str.size() * sizeof(char)));
+}
+
+template <typename Archive>
+void CEREAL_LOAD_FUNCTION_NAME(Archive &archive, saltatlas::pm_id_type &str) {
+  std::size_t size;
+  archive(cereal::make_size_tag(size));
+
+  str.resize(size);
+  archive(
+      cereal::binary_data(const_cast<char *>(str.data()), size * sizeof(char)));
+}
+}  // namespace cereal
+#endif
 
 namespace saltatlas::utility {
 

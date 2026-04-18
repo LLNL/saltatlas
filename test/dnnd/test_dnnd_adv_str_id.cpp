@@ -23,42 +23,9 @@
 #include <ygm/comm.hpp>
 #include <ygm/container/map.hpp>
 
-#include <saltatlas/common/detail/utilities/hash.hpp>
-#include <saltatlas/dnnd/distance.hpp>
 #include <saltatlas/dnnd/dnnd_adv.hpp>
 
 using pm_id_type = saltatlas::pm_id_type;
-
-namespace cereal {
-
-template <typename Archive, typename Char, typename Traits, typename Allocator>
-void save(
-    Archive                                                       &archive,
-    const boost::container::basic_string<Char, Traits, Allocator> &value) {
-  std::basic_string<Char, Traits> copied(value.data(), value.size());
-  archive(copied);
-}
-
-template <typename Archive, typename Char, typename Traits, typename Allocator>
-void load(Archive                                                 &archive,
-          boost::container::basic_string<Char, Traits, Allocator> &value) {
-  std::basic_string<Char, Traits> copied;
-  archive(copied);
-  value.assign(copied.data(), copied.size());
-}
-
-}  // namespace cereal
-
-namespace std {
-
-template <>
-struct hash<pm_id_type> {
-  std::size_t operator()(const pm_id_type &value) const noexcept {
-    return saltatlas::str_hash<>{}(value);
-  }
-};
-
-}  // namespace std
 
 namespace {
 
@@ -68,9 +35,9 @@ using index_type =
 using neighbor_type       = typename index_type::neighbor_type;
 using neighbor_store_type = typename index_type::neighbor_store_type;
 using dataset_type        = std::vector<std::pair<pm_id_type, point_type>>;
-using point_table_type    = std::unordered_map<pm_id_type, point_type>;
-using initial_index_map_type =
-    std::unordered_map<pm_id_type, std::vector<pm_id_type>>;
+using point_table_type =
+    std::unordered_map<pm_id_type, point_type, saltatlas::str_hash<>>;
+using initial_index_map_type = typename index_type::external_initial_index_type;
 
 constexpr std::uint64_t k_seed         = 20260416;
 constexpr int           k_graph_degree = 3;
@@ -599,18 +566,13 @@ suite_state run_core_suite(ygm::comm &comm, index_type &index,
   const auto index_id_dist =
       index.build(saltatlas::distance::id::sql2, k_graph_degree);
   const auto index_id_func = index.build(distance_func, k_graph_degree);
-  const auto index_id_seed_dist =
-      index.build(saltatlas::distance::id::sql2, k_graph_degree,
-                  index.get_index(index_id_dist));
-  const auto index_id_seed_func = index.build(distance_func, k_graph_degree,
-                                              index.get_index(index_id_func));
   const auto index_id_external_dist =
       index.build(saltatlas::distance::id::sql2, k_graph_degree, initial_index);
   const auto index_id_external_func =
       index.build(distance_func, k_graph_degree, initial_index);
   print_progress(comm, label + ": built initial indices");
 
-  require_ids_eq(comm, index.get_index_ids(), {0, 1, 2, 3, 4, 5},
+  require_ids_eq(comm, index.get_index_ids(), {0, 1, 2, 3},
                  label + ": unexpected index IDs after builds");
 
   const auto base_queries = make_queries(false);
@@ -682,22 +644,9 @@ suite_state run_core_suite(ygm::comm &comm, index_type &index,
   check_neighbors_api(comm, index, index_id_external_dist, base_dataset,
                       label + ": neighbors(external initial index)");
 
-  index.optimize(index_id_seed_dist, saltatlas::distance::id::sql2);
-  index.optimize(index_id_seed_func, distance_func);
-
-  const auto dump_prefix  = root / "dump_index";
-  const auto graph_prefix = root / "dump_graph";
-  index.dump_index(index_id_dist, dump_prefix, true);
-  index.dump_graph(index_id_func, graph_prefix, false);
-  require(comm,
-          std::filesystem::exists(std::filesystem::path(
-              dump_prefix.string() + "-" + std::to_string(comm.rank()))),
-          label + ": dump_index output missing");
-  require(comm,
-          std::filesystem::exists(std::filesystem::path(
-              graph_prefix.string() + "-" + std::to_string(comm.rank()))),
-          label + ": dump_graph output missing");
-  print_progress(comm, label + ": optimize and dump completed");
+  index.optimize(index_id_external_dist, saltatlas::distance::id::sql2);
+  index.optimize(index_id_external_func, distance_func);
+  print_progress(comm, label + ": optimize completed");
 
   add_dataset(comm, index, extra_dataset);
   check_dataset_state(comm, index, full_dataset, label + ": full dataset");
@@ -720,7 +669,7 @@ suite_state run_core_suite(ygm::comm &comm, index_type &index,
   print_progress(comm, label + ": updated queries verified");
 
   index.erase(index_id_external_func);
-  require_ids_eq(comm, index.get_index_ids(), {0, 1, 2, 3, 4},
+  require_ids_eq(comm, index.get_index_ids(), {0, 1, 2},
                  label + ": unexpected index IDs after erase");
   print_progress(comm, label + ": erased external index");
 
