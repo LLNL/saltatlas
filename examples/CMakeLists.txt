@@ -97,6 +97,9 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_advanced_query)
     add_saltatlas_example(dnnd_advanced_timeout)
 
+    add_saltatlas_example(dnnd_advanced_str_id_index_build)
+    add_saltatlas_example(dnnd_advanced_str_id_query)
+
     add_saltatlas_neo_dnnd_example(neo_dnnd_example)
     add_saltatlas_neo_dnnd_example(neo_dnnd_initial_knng_example)
 

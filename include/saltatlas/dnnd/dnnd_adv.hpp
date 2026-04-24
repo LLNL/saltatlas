@@ -165,7 +165,8 @@ class dnnd_adv {
  public:
   /// \brief k-NN index type with external ID type (i.e., id_type).
   using knn_index_type =
-      dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>>;
+      dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>,
+                         hasher>;
 
  private:
   /// \brief k-NN index type.

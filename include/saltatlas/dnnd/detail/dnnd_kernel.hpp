@@ -89,9 +89,10 @@ class dnnd_kernel {
 
   /// \brief Construct a knn-index.
   /// \param knn_index k-nn index instance to store the constructed one.
-  template <typename index_alloc_type>
+  template <typename index_alloc_type, typename index_hasher_type>
   void construct(
-      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
+      nn_index<id_type, distance_type, index_alloc_type, index_hasher_type>&
+          knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
@@ -110,12 +111,14 @@ class dnnd_kernel {
   /// \param recheck If true, redo the neighbor check for the initial index,
   /// i.e., mark the initial neighbors as 'new' neighbors.
   /// \param knn_index k-nn index instance to store the constructed one.
-  template <typename init_index_alloc_type, typename index_alloc_type>
+  template <typename init_index_alloc_type, typename init_index_hasher_type,
+            typename index_alloc_type, typename index_hasher_type>
   void construct(
-      const nn_index<id_type, distance_type, init_index_alloc_type>&
-                                                          init_knn_index,
-      const bool                                          recheck,
-      nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
+      const nn_index<id_type, distance_type, init_index_alloc_type,
+                     init_index_hasher_type>& init_knn_index,
+      const bool                              recheck,
+      nn_index<id_type, distance_type, index_alloc_type, index_hasher_type>&
+          knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
@@ -133,11 +136,11 @@ class dnnd_kernel {
   /// \param recheck If true, redo the neighbor check for the initial index,
   /// i.e., mark the initial neighbors as 'new' neighbors.
   /// \param knn_index k-nn index instance to store the constructed one.
-  template <typename alloc_type>
+  template <typename alloc_type, typename hasher_type>
   void construct(
       const std::unordered_map<id_type, std::vector<id_type>>& init_knn_index,
       const bool                                               recheck,
-      nn_index<id_type, distance_type, alloc_type>&            knn_index) {
+      nn_index<id_type, distance_type, alloc_type, hasher_type>& knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Running NN-Descent kernel" << std::endl;
     }
@@ -150,8 +153,10 @@ class dnnd_kernel {
     priv_convert(knn_index);
   }
 
-  template <typename index_alloc_type>
-  void update(nn_index<id_type, distance_type, index_alloc_type>& knn_index) {
+  template <typename index_alloc_type, typename index_hasher_type>
+  void update(
+      nn_index<id_type, distance_type, index_alloc_type, index_hasher_type>&
+          knn_index) {
     if (m_option.verbose) {
       m_comm.cout0() << "Rerunning NN-Descent kernel" << std::endl;
     }
@@ -379,10 +384,10 @@ class dnnd_kernel {
   }
 
   /// \brief Fills k-NN heap with a given index.
-  template <typename alloc>
+  template <typename alloc, typename hasher>
   void priv_fill_knn_heap_with_initial_index(
-      const nn_index<id_type, distance_type, alloc>& init_knn_index,
-      const bool                                     recheck) {
+      const nn_index<id_type, distance_type, alloc, hasher>& init_knn_index,
+      const bool                                             recheck) {
     for (auto pitr = init_knn_index.points_begin();
          pitr != init_knn_index.points_end(); ++pitr) {
       const auto& sid = pitr->first;
@@ -954,8 +959,9 @@ class dnnd_kernel {
     ++m_mini_batch_no;
   }
 
-  template <typename allocator>
-  void priv_convert(nn_index<id_type, distance_type, allocator>& knn_index) {
+  template <typename allocator, typename hasher>
+  void priv_convert(
+      nn_index<id_type, distance_type, allocator, hasher>& knn_index) {
     knn_index.reset();
     knn_index.reserve(m_knn_heap_table.size());
     for (auto& item : m_knn_heap_table) {

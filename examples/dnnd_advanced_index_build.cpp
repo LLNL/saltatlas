@@ -8,10 +8,10 @@
 ///     cd build
 ///     mpirun -n 2 ./example/dnnd_adv_index_build -p /path/to/points -f l2
 
-#include <iostream>
-#include <vector>
-#include <string>
 #include <filesystem>
+#include <iostream>
+#include <string>
+#include <vector>
 
 #include <ygm/comm.hpp>
 
@@ -19,10 +19,12 @@
 
 // Point ID type
 using id_t   = uint32_t;
-using dist_t = double;
+using dist_t = float;
 
 // Point Type
 using point_type = saltatlas::pm_feature_vector<float>;
+using index_type =
+    saltatlas::dnnd_adv<id_t, point_type, dist_t, saltatlas::str_hash<>>;
 
 struct option_t {
   int                                index_k;
@@ -85,8 +87,9 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help) {
 }
 
 template <typename cout_type>
-void show_help(const std::string& exe_name, cout_type &cout) {
-  cout << "Usage: " << exe_name << " [options] point_files...\n"
+void show_help(const std::string &exe_name, cout_type &cout) {
+  cout << "Usage: " << exe_name
+       << " [options] point_files...\n"
           "Options:\n"
           "  -k <int>          The number of neighbors to build the index\n"
           "  -f <string>       The distance function name\n"

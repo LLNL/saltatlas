@@ -122,7 +122,9 @@ class dnnd {
   using internal_knn_index_type =
       dndetail::nn_index<internal_id_type, distance_type>;
   /// \brief k-NN index type with external ID type (i.e., id_type).
-  using external_knn_index_type = dndetail::nn_index<id_type, distance_type>;
+  using external_knn_index_type =
+      dndetail::nn_index<id_type, distance_type, std::allocator<std::byte>,
+                         hasher>;
 
   using nn_kernel_type = dndetail::dnnd_kernel<point_store_type, distance_type>;
 

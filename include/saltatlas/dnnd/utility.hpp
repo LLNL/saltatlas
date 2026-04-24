@@ -36,18 +36,18 @@ template <typename T>
 using metall_fallback_allocator = metall::manager::fallback_allocator<T>;
 }  // namespace
 // Use a Metall-compatible string type so IDs can live in persistent storage.
-using pm_id_type =
+using pm_str_id_type =
     boost::container::basic_string<char, std::char_traits<char>,
                                    metall_fallback_allocator<char>>;
 #endif
 }  // namespace saltatlas
 
 #ifdef SALTATLAS_UTILITY_INCLUDED_YGM
-// Support cereal for pm_id_type.
+// Support cereal for pm_str_id_type.
 namespace cereal {
 template <typename Archive>
-void CEREAL_SAVE_FUNCTION_NAME(Archive                     &archive,
-                               const saltatlas::pm_id_type &str) {
+void CEREAL_SAVE_FUNCTION_NAME(Archive                         &archive,
+                               const saltatlas::pm_str_id_type &str) {
   // Length (#of chars in the string)
   archive(cereal::make_size_tag(static_cast<std::size_t>(str.size())));
 
@@ -56,7 +56,8 @@ void CEREAL_SAVE_FUNCTION_NAME(Archive                     &archive,
 }
 
 template <typename Archive>
-void CEREAL_LOAD_FUNCTION_NAME(Archive &archive, saltatlas::pm_id_type &str) {
+void CEREAL_LOAD_FUNCTION_NAME(Archive                   &archive,
+                               saltatlas::pm_str_id_type &str) {
   std::size_t size;
   archive(cereal::make_size_tag(size));
 

@@ -3,10 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-/// \brief A simple example of building k-NN index (KNN graph) in Metall
-/// datastore. Usage:
-///     cd build
-///     mpirun -n 2 ./example/dnnd_adv_index_build -p /path/to/points -f l2
+/// \brief A simple example of ANN search using DNND's advanced API.
 
 #include <filesystem>
 #include <iostream>
@@ -110,7 +107,7 @@ int main(int argc, char **argv) {
   {
     saltatlas::dnnd_adv<id_t, point_type, dist_t> g(saltatlas::open_read_only,
                                                     opt.datastore_path, comm);
-    const auto                                index_ids = g.get_index_ids();
+    const auto                                    index_ids = g.get_index_ids();
 
     // Run queries
     {

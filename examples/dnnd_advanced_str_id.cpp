@@ -25,14 +25,14 @@
 
 #include <saltatlas/dnnd/dnnd_adv.hpp>
 
-using pm_id_type = saltatlas::pm_id_type;
+using id_type = saltatlas::pm_str_id_type;
 
 namespace {
 
 using point_type = saltatlas::pm_feature_vector<float>;
 using index_type =
-    saltatlas::dnnd_adv<pm_id_type, point_type, double, saltatlas::str_hash<>>;
-using dataset_type        = std::vector<std::pair<pm_id_type, point_type>>;
+    saltatlas::dnnd_adv<id_type, point_type, double, saltatlas::str_hash<>>;
+using dataset_type        = std::vector<std::pair<id_type, point_type>>;
 using neighbor_store_type = typename index_type::neighbor_store_type;
 
 // Keep all example inputs together so each phase reads as a short scenario.
@@ -63,11 +63,11 @@ void require(ygm::comm& comm, const bool condition,
   }
 }
 
-pm_id_type make_id(const std::string_view text) {
-  return pm_id_type(text.data(), text.size());
+id_type make_id(const std::string_view text) {
+  return id_type(text.data(), text.size());
 }
 
-std::string to_std_string(const pm_id_type& id) {
+std::string to_std_string(const id_type& id) {
   return std::string(id.data(), id.size());
 }
 
@@ -131,8 +131,8 @@ example_data make_example_data() {
   return data;
 }
 
-std::vector<pm_id_type> collect_ids(const dataset_type& dataset) {
-  std::vector<pm_id_type> ids;
+std::vector<id_type> collect_ids(const dataset_type& dataset) {
+  std::vector<id_type> ids;
   ids.reserve(dataset.size());
   for (const auto& [id, point] : dataset) {
     (void)point;

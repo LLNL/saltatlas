@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -29,16 +30,19 @@ namespace saltatlas::dndetail {
 
 // Forward declaration
 template <typename IdType = uint64_t, typename DistanceType = double,
-          typename Allocator = std::allocator<std::byte>>
+          typename Allocator = std::allocator<std::byte>,
+          typename Hasher    = std::hash<IdType>>
 class nn_index;
 
-template <typename IdType, typename DistanceType, typename Allocator>
+template <typename IdType, typename DistanceType, typename Allocator,
+          typename Hasher>
 class nn_index {
  public:
   using id_type        = IdType;
   using distance_type  = DistanceType;
   using neighbor_type  = detail::neighbor<id_type, distance_type>;
   using allocator_type = Allocator;
+  using hasher_type    = Hasher;
 
   using neighbor_list_type =
       boost::container::vector<neighbor_type,
@@ -46,7 +50,7 @@ class nn_index {
 
  private:
   using point_table_type = boost::unordered::unordered_flat_map<
-      id_type, neighbor_list_type, std::hash<id_type>, std::equal_to<>,
+      id_type, neighbor_list_type, hasher_type, std::equal_to<>,
       other_scoped_allocator<allocator_type,
                              std::pair<const id_type, neighbor_list_type>>>;
 
@@ -129,7 +133,7 @@ class nn_index {
     return m_index.at(source).end();
   }
 
-  void merge(nn_index<IdType, DistanceType, Allocator> &other) {
+  void merge(nn_index &other) {
     for (const auto &[source, neighbors] : other.m_index) {
       for (const auto &neighbor : neighbors) {
         insert(source, neighbor);
