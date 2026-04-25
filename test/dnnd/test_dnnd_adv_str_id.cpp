@@ -25,7 +25,7 @@
 
 #include <saltatlas/dnnd/dnnd_adv.hpp>
 
-using pm_id_type = saltatlas::pm_id_type;
+using pm_id_type = saltatlas::pm_str_id_type;
 
 namespace {
 
