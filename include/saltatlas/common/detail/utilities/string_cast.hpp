@@ -8,12 +8,27 @@
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+#include <boost/container/string.hpp>
 
 namespace saltatlas::detail {
 template <typename T>
-inline T str_cast(const std::string &) {
+struct is_boost_container_basic_string : std::false_type {};
+
+template <typename Char, typename Traits, typename Allocator>
+struct is_boost_container_basic_string<
+    boost::container::basic_string<Char, Traits, Allocator>> : std::true_type {
+};
+
+template <typename T>
+inline T str_cast(const std::string &input) {
+  if constexpr (is_boost_container_basic_string<T>::value) {
+    return T(input.data(), input.size());
+  }
   std::cerr << "str_cast is not implemented for this type." << typeid(T).name()
             << std::endl;
   std::abort();

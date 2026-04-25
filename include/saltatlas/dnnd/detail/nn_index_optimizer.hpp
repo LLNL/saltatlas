@@ -36,7 +36,8 @@ class nn_index_optimizer {
                   typename PointStore::allocator_type>;
   // Redefine index store type so that autocompletion works when writing code.
   using nn_index_type =
-      nn_index<id_type, distance_type, typename KNNIndex::allocator_type>;
+      nn_index<id_type, distance_type, typename KNNIndex::allocator_type,
+               typename KNNIndex::hasher_type>;
 
   using point_partitioner = std::function<int(const id_type& id)>;
   using distance_function_type =

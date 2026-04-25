@@ -12,15 +12,61 @@
 #include <unordered_set>
 #include <vector>
 
-#if __has_include(<ygm/comm.hpp>) && __has_include(<ygm/detail/collective.hpp>)
+#if __has_include(<ygm/comm.hpp>)
 #define SALTATLAS_UTILITY_INCLUDED_YGM
+#include <cereal/cereal.hpp>
 #include <ygm/comm.hpp>
 #include <ygm/detail/collective.hpp>
+#include <ygm/detail/ygm_cereal_archive.hpp>
+#include <ygm/utility/boost_json.hpp>
+#endif
+
+#if __has_include(<metall/metall.hpp>)
+#include <metall/metall.hpp>
 #endif
 
 #include <saltatlas/common/detail/neighbor.hpp>
 #include <saltatlas/common/detail/utilities/float.hpp>
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
+
+namespace saltatlas {
+#if __has_include(<metall/metall.hpp>)
+namespace {
+template <typename T>
+using metall_fallback_allocator = metall::manager::fallback_allocator<T>;
+}  // namespace
+// Use a Metall-compatible string type so IDs can live in persistent storage.
+using pm_str_id_type =
+    boost::container::basic_string<char, std::char_traits<char>,
+                                   metall_fallback_allocator<char>>;
+#endif
+}  // namespace saltatlas
+
+#ifdef SALTATLAS_UTILITY_INCLUDED_YGM
+// Support cereal for pm_str_id_type.
+namespace cereal {
+template <typename Archive>
+void CEREAL_SAVE_FUNCTION_NAME(Archive                         &archive,
+                               const saltatlas::pm_str_id_type &str) {
+  // Length (#of chars in the string)
+  archive(cereal::make_size_tag(static_cast<std::size_t>(str.size())));
+
+  // String data
+  archive(cereal::binary_data(str.data(), str.size() * sizeof(char)));
+}
+
+template <typename Archive>
+void CEREAL_LOAD_FUNCTION_NAME(Archive                   &archive,
+                               saltatlas::pm_str_id_type &str) {
+  std::size_t size;
+  archive(cereal::make_size_tag(size));
+
+  str.resize(size);
+  archive(
+      cereal::binary_data(const_cast<char *>(str.data()), size * sizeof(char)));
+}
+}  // namespace cereal
+#endif
 
 namespace saltatlas::utility {
 

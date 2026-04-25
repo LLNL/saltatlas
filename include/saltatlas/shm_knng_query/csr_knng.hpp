@@ -49,10 +49,41 @@ class csr_knng {
   using const_offset_pointer =
       typename std::allocator_traits<offset_allocator_type>::const_pointer;
 
+  /// \brief Construct a csr_knng object by loading the index files.
+  /// \param index_file_paths Paths to the index files.
+  /// Each row contains the source point ID at the beginning followed by the
+  /// neighbor point IDs.
+  /// \param contain_distances Whether the index files contain distances. If
+  /// true, every odd numbered line is considered as a distance line and
+  /// skipped. This graph structure does not hold neighbor distances.
   explicit csr_knng(const std::vector<std::filesystem::path>& index_file_paths,
+                    const bool            contain_distances = false,
+                    const allocator_type& alloc             = allocator_type{})
+      : m_allocator(alloc) {
+    priv_load_index<id_type>(
+        index_file_paths, contain_distances,
+        [](const id_type id) noexcept -> id_type { return id; });
+  }
+
+  template <typename e2i_id_map_type>
+  explicit csr_knng(const std::vector<std::filesystem::path>& index_file_paths,
+                    const e2i_id_map_type&                    e2i_id_map,
+                    const bool contain_distances = false,
                     const allocator_type& alloc = allocator_type{})
       : m_allocator(alloc) {
-    priv_load_index(index_file_paths);
+    using external_id_type = typename e2i_id_map_type::key_type;
+    priv_load_index<external_id_type>(
+        index_file_paths, contain_distances,
+        [&e2i_id_map](const external_id_type& eid) -> id_type {
+          const auto itr = e2i_id_map.find(eid);
+          if (itr == e2i_id_map.end()) {
+            std::cerr << "External ID in index is not found in the given ID "
+                         "map."
+                      << std::endl;
+            std::abort();
+          }
+          return static_cast<id_type>(itr->second);
+        });
   }
 
   csr_knng(const csr_knng&)            = delete;
@@ -154,10 +185,11 @@ class csr_knng {
     m_num_total_neighbors = 0;
   }
 
-  /// \warning This function assumes that the index file contains the point
-  /// IDs in the first column and distances are not included.
+  template <typename file_id_type, typename convert_id_fn_type>
   void priv_load_index(
-      const std::vector<std::filesystem::path>& index_file_paths) {
+      const std::vector<std::filesystem::path>& index_file_paths,
+      const bool                                contain_distances,
+      const convert_id_fn_type&                 convert_id) {
     std::size_t num_points          = 0;
     std::size_t num_total_neighbors = 0;
 
@@ -171,14 +203,23 @@ class csr_knng {
       }
 
       std::string buf;
+      bool        is_distance_line = false;
       while (std::getline(ifs, buf)) {
+        // Skip every other line if distances are included (i.e., the distance
+        // line)
+        if (is_distance_line) {
+          is_distance_line = false;
+          continue;
+        }
+
         ++num_points;
         std::istringstream iss(buf);
-        id_type            dummy;
+        file_id_type       dummy;
         iss >> dummy;  // the first element is the point id
         while (iss >> dummy) {
           ++num_total_neighbors;
         }
+        is_distance_line = contain_distances;
       }
     }
 
@@ -197,17 +238,28 @@ class csr_knng {
       }
 
       std::string buf;
+      bool        is_distance_line = false;
       while (std::getline(ifs, buf)) {
+        // Skip every other line if distances are included (i.e., the distance
+        // line)
+        if (is_distance_line) {
+          is_distance_line = false;
+          continue;
+        }
+
         std::istringstream iss(buf);
-        id_type            point_id;
-        iss >> point_id;
+        file_id_type       point_id_in_file;
+        iss >> point_id_in_file;
+        const id_type point_id = convert_id(point_id_in_file);
         priv_check_value_range<uint64_t>(point_id, 0, num_points - 1);
 
-        id_type neighbor_id;
-        while (iss >> neighbor_id) {
+        file_id_type neighbor_id_in_file;
+        while (iss >> neighbor_id_in_file) {
+          const id_type neighbor_id = convert_id(neighbor_id_in_file);
           priv_check_value_range<uint64_t>(neighbor_id, 0, num_points - 1);
           ++m_offsets[point_id];
         }
+        is_distance_line = contain_distances;
       }
     }
 
@@ -231,15 +283,26 @@ class csr_knng {
       }
 
       std::string buf;
+      bool        is_distance_line = false;
       while (std::getline(ifs, buf)) {
+        // Skip every other line if distances are included (i.e., the distance
+        // line)
+        if (is_distance_line) {
+          is_distance_line = false;
+          continue;
+        }
+
         std::istringstream iss(buf);
-        id_type            point_id;
-        iss >> point_id;
-        id_type neighbor_id;
-        while (iss >> neighbor_id) {
+        file_id_type       point_id_in_file;
+        iss >> point_id_in_file;
+        const id_type point_id = convert_id(point_id_in_file);
+        file_id_type  neighbor_id_in_file;
+        while (iss >> neighbor_id_in_file) {
+          const id_type neighbor_id = convert_id(neighbor_id_in_file);
           m_neighbors[m_offsets[point_id]] = neighbor_id;
           ++m_offsets[point_id];
         }
+        is_distance_line = contain_distances;
       }
     }
     // print_arrays();
