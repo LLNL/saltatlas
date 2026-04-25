@@ -7,8 +7,12 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+#include <boost/unordered/unordered_node_map.hpp>
 
 #include <saltatlas/common/detail/utilities/string_cast.hpp>
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
@@ -20,33 +24,44 @@
 #include <saltatlas/shm_knng_query/dense_point_store.hpp>
 #include <saltatlas/shm_knng_query/query.hpp>
 
-using id_type = uint32_t;
+#if defined(SALTATLAS_USE_STRING_ID)
+using eid_type = saltatlas::pm_str_id_type;
+#else
+using eid_type = uint32_t;
+#endif
+using iid_type = uint32_t;  // Internal ID type
 #ifdef SALTATLAS_FEATURE_ELEMENT_TYPE
 using fe_type = SALTATLAS_FEATURE_ELEMENT_TYPE;
 #else
 using fe_type = float;
 #endif
-using distance_type =
+using dist_type =
     std::conditional_t<std::is_same_v<fe_type, double>, double, float>;
 
-using point_store_type = saltatlas::dense_point_store<id_type, fe_type>;
+using point_store_type = saltatlas::dense_point_store<iid_type, fe_type>;
 
-using knng_type = saltatlas::csr_knng<id_type, std::size_t>;
+using knng_type = saltatlas::csr_knng<iid_type, std::size_t>;
 
 using nn_query_kernel =
-    saltatlas::knn_parallel_query_kernel<point_store_type, knng_type, id_type,
-                                         distance_type, fe_type>;
+    saltatlas::knn_parallel_query_kernel<point_store_type, knng_type, iid_type,
+                                         dist_type, fe_type>;
+
+using e2i_id_map_type =
+    boost::unordered::unordered_node_map<eid_type, uint32_t>;
+using i2e_id_map_type =
+    boost::unordered::unordered_node_map<iid_type, eid_type>;
 
 struct option {
-  nn_query_kernel::option    query_option;
-  std::filesystem::path      point_files_path;
-  std::string                point_file_format;
-  std::filesystem::path      index_files_path;
-  std::string                distance_metric;
-  std::filesystem::path      query_file_path;
-  std::vector<distance_type> epsilons{0.0, 0.1, 0.2};
-  std::filesystem::path      ground_truth_file_path;
-  std::filesystem::path      query_result_file_path;
+  nn_query_kernel::option query_option;
+  std::filesystem::path   point_files_path;
+  std::string             point_file_format;
+  std::filesystem::path   index_files_path;
+  std::string             distance_metric;
+  std::filesystem::path   query_file_path;
+  std::vector<dist_type>  epsilons{0.0, 0.1, 0.2};
+  std::filesystem::path   ground_truth_file_path;
+  std::filesystem::path   query_result_file_path;
+  std::filesystem::path   id_map_file_path;
 
   /// Show the option values
   void show() const {
@@ -54,6 +69,7 @@ struct option {
     std::cout << "point_files_path: " << point_files_path << std::endl;
     std::cout << "point_file_format: " << point_file_format << std::endl;
     std::cout << "index_files_path: " << index_files_path << std::endl;
+    std::cout << "id_map_file_path: " << id_map_file_path << std::endl;
     std::cout << "distance_metric: " << distance_metric << std::endl;
     std::cout << "query_file_path: " << query_file_path << std::endl;
     std::cout << "ground_truth_file_path: " << ground_truth_file_path
@@ -73,7 +89,7 @@ struct option {
 // parse CLI arguments
 bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
   int c;
-  while ((c = getopt(argc, argv, "i:g:p:f:q:n:e:G:o:vh")) != -1) {
+  while ((c = getopt(argc, argv, "i:g:p:f:q:n:e:G:o:M:vh")) != -1) {
     switch (c) {
       case 'i':
         opt.point_files_path = optarg;
@@ -100,7 +116,7 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
         break;
 
       case 'e': {
-        opt.epsilons = saltatlas::detail::str_split<distance_type>(optarg, ',');
+        opt.epsilons = saltatlas::detail::str_split<dist_type>(optarg, ',');
         break;
       }
       case 'G':
@@ -109,6 +125,10 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
 
       case 'o':
         opt.query_result_file_path = optarg;
+        break;
+
+      case 'M':
+        opt.id_map_file_path = optarg;
         break;
 
       case 'v':
@@ -145,6 +165,13 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
     std::cerr << "Query file path is not given." << std::endl;
     return false;
   }
+  if constexpr (!std::is_same_v<eid_type, iid_type>) {
+    if (opt.id_map_file_path.empty()) {
+      std::cerr << "External-to-internal ID map file path is not given."
+                << std::endl;
+      return false;
+    }
+  }
   if (opt.query_option.k == 0) {
     std::cerr << "k (number of nearest neighbors) must be > 0." << std::endl;
     return false;
@@ -170,8 +197,8 @@ void show_usage(char* argv[]) {
          "files.\n"
       << "-p string : Point file format.\n"
       << "-g string : Path to k-NN index (graph) file or directory that "
-         "contain "
-         "index files.\n"
+         "contain index files.\n"
+      << "-M string : Path to external-to-internal ID map file.\n"
       << "-f string : Distance function name.\n"
       << "-q string : Path to a query file.\n"
       << "-n int    : Number of nearest neighbors to search for each query.\n"
@@ -183,6 +210,55 @@ void show_usage(char* argv[]) {
       << "-v        : Verbose output.\n"
       << "-h       : Show this help message.\n"
       << std::endl;
+}
+
+e2i_id_map_type load_e2i_id_map(const std::filesystem::path& point_files_path) {
+  e2i_id_map_type e2i_id_map;
+  const auto      point_file_paths =
+      saltatlas::dndetail::find_file_paths(point_files_path);
+  for (const auto& file_path : point_file_paths) {
+    std::ifstream ifs(file_path);
+    if (!ifs.is_open()) {
+      std::cerr << "Failed to open " << file_path << std::endl;
+      std::abort();
+    }
+
+    for (std::string line; std::getline(ifs, line);) {
+      std::stringstream ss(line);
+
+      // External ID
+      std::string buf;
+      ss >> buf;
+      eid_type eid = saltatlas::detail::str_cast<eid_type>(buf);
+
+      // Internal ID
+      iid_type iid;
+      ss >> iid;
+
+      const auto [itr, inserted] = e2i_id_map.emplace(eid, iid);
+      if (!inserted) {
+        std::cerr << "Duplicate external ID found in ID map: " << eid
+                  << std::endl;
+        std::abort();
+      }
+    }
+  }
+  return e2i_id_map;
+}
+
+i2e_id_map_type make_i2e_id_map(const e2i_id_map_type& e2i_id_map) {
+  i2e_id_map_type i2e_id_map;
+  for (const auto& [eid, iid] : e2i_id_map) {
+    std::cout << "Mapping internal ID " << iid << " to external ID " << eid
+              << std::endl;
+    const auto [itr, inserted] = i2e_id_map.emplace(iid, eid);
+    if (!inserted) {
+      std::cerr << "Duplicate internal ID found in ID map: " << iid
+                << std::endl;
+      std::abort();
+    }
+  }
+  return i2e_id_map;
 }
 
 int main(int argc, char* argv[]) {
@@ -199,18 +275,32 @@ int main(int argc, char* argv[]) {
   opt.show();
   std::cout << std::endl;
 
+  std::optional<e2i_id_map_type> e2i_id_map = std::nullopt;
+  std::optional<i2e_id_map_type> i2e_id_map = std::nullopt;
+  if constexpr (!std::is_same_v<eid_type, iid_type>) {
+    e2i_id_map = load_e2i_id_map(opt.id_map_file_path);
+    i2e_id_map = make_i2e_id_map(*e2i_id_map);
+  }
+
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
       saltatlas::dndetail::find_file_paths(opt.point_files_path);
-  const auto points = saltatlas::load_points<id_type, fe_type>(
-      point_file_paths, opt.point_file_format);
+  const auto points =
+      saltatlas::load_points<eid_type, iid_type, fe_type, e2i_id_map_type>(
+          point_file_paths, opt.point_file_format, e2i_id_map);
   std::cout << "Number of points: " << points.num_points() << std::endl;
   std::cout << "Number of dimensions: " << points.num_dimensions() << std::endl;
 
   std::cout << "\nLoad k-nn index" << std::endl;
   const auto index_file_paths =
       saltatlas::dndetail::find_file_paths(opt.index_files_path);
-  const auto knng = knng_type(index_file_paths);
+  const auto knng = [&]() {
+    if constexpr (std::is_same_v<eid_type, iid_type>) {
+      return knng_type(index_file_paths);
+    } else {
+      return knng_type(index_file_paths, *e2i_id_map);
+    }
+  }();
   std::cout << "Number of points: " << knng.num_points() << std::endl;
   std::cout << "Number of total neighbors: " << knng.num_total_neighbors()
             << std::endl;
@@ -243,8 +333,30 @@ int main(int argc, char* argv[]) {
     if (!opt.query_result_file_path.empty()) {
       std::string path_str =
           opt.query_result_file_path.string() + ".e" + std::to_string(epsilon);
-      std::cout << "Dump query result to " << path_str << std::endl;
-      saltatlas::utility::dump_neighbors(results, path_str);
+
+      if constexpr (std::is_same_v<eid_type, iid_type>) {
+        std::cout << "Dump query results to " << path_str << std::endl;
+        saltatlas::utility::dump_neighbors(results, path_str);
+      } else {
+        std::cout << "Dump query results with external IDs to " << path_str
+                  << std::endl;
+        std::vector<
+            std::vector<saltatlas::detail::neighbor<eid_type, dist_type>>>
+            results_eid(results.size());
+        for (std::size_t i = 0; i < results.size(); ++i) {
+          for (const auto& neighbor : results[i]) {
+            const auto itr = i2e_id_map->find(neighbor.id);
+            if (itr == i2e_id_map->end()) {
+              std::cerr << "Internal ID " << neighbor.id
+                        << " not found in internal-to-external ID map."
+                        << std::endl;
+              std::abort();
+            }
+            results_eid[i].emplace_back(itr->second, neighbor.distance);
+          }
+        }
+        saltatlas::utility::dump_neighbors(results_eid, path_str);
+      }
     }
 
     if (!opt.ground_truth_file_path.empty()) {

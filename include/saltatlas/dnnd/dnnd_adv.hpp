@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <fstream>
 #ifdef SALTATLAS_DNND_INCLUDED_HPP
 #error \
     "saltatlas/dnnd/dnnd.hpp is already included. Please include either saltatlas/dnnd/dnnd.hpp or saltatlas/dnnd/dnnd_adv.hpp, but not both."
@@ -164,9 +165,8 @@ class dnnd_adv {
 
  public:
   /// \brief k-NN index type with external ID type (i.e., id_type).
-  using knn_index_type =
-      dndetail::nn_index<id_type, distance_type, allocator_type<std::byte>,
-                         hasher>;
+  using knn_index_type = dndetail::nn_index<id_type, distance_type,
+                                            allocator_type<std::byte>, hasher>;
 
  private:
   /// \brief k-NN index type.
@@ -899,6 +899,16 @@ class dnnd_adv {
   /// \param dump_distance If true, also dump distances.
   void dump_index(const std::size_t index_id, const std::filesystem::path& path,
                   const bool dump_distance = false) const {
+    auto parent_path = path.parent_path();
+    if (!parent_path.empty()) {
+      std::error_code ec;
+      std::filesystem::create_directories(parent_path, ec);
+      if (ec) {
+        throw std::runtime_error("Failed to create directories: " +
+                                 ec.message());
+      }
+    }
+
     std::stringstream file_name;
     file_name << path.string() << "-" << m_comm.rank();
     if constexpr (k_use_eid_table) {
@@ -1206,6 +1216,138 @@ class dnnd_adv {
                      << std::endl;
     }
     return true;
+  }
+
+  // Dump the external ID to internal ID mapping table to a single file.
+  // There are two columns: external ID and internal ID.
+  bool dump_external_id_map(const std::filesystem::path& output_path) const {
+    if constexpr (!k_use_eid_table) {
+      m_comm.cerr0() << "Error: dump_external_id_map() cannot be called when "
+                        "external ID and internal ID are the same."
+                     << std::endl;
+      return false;
+    }
+
+    std::ofstream ofs;
+    if (m_comm.rank0()) {
+      ofs.open(output_path);
+      if (!ofs) {
+        m_comm.cerr0() << "Error: Failed to open file " << output_path
+                       << " for writing." << std::endl;
+        return false;
+      }
+      // ofs << "external_id internal_id\n";
+    }
+    ygm::ygm_ptr<std::ofstream> ptr_ofs{&ofs};
+    m_comm.cf_barrier();
+
+    for (const auto& [eid, iid] : *m_e2i_id_table) {
+      m_comm.async(
+          0,
+          [](auto comm, auto ptr_ofs, const id_type eid,
+             const internal_id_type iid) {
+            (*ptr_ofs) << eid << " " << iid << "\n";
+          },
+          ptr_ofs, eid, iid);
+    }
+    m_comm.barrier();
+
+    return true;
+  }
+
+  void aggregate_datastore(const std::filesystem::path& output_datastore_path) {
+    std::shared_ptr<metall::manager>           ptr_main_manager{nullptr};
+    ygm::ygm_ptr<point_store_type>             ptr_main_pstore{nullptr};
+    ygm::ygm_ptr<internal_knn_index_container> ptr_main_knng_index_list{
+        nullptr};
+
+    ygm::ygm_ptr<e2i_id_table_type> ptr_main_e2i_id_table{nullptr};
+    ygm::ygm_ptr<i2e_id_table_type> ptr_main_i2e_id_table{nullptr};
+
+    if (m_comm.rank0()) {
+      // Create a new Metall manager for the aggregated datastore.
+      ptr_main_manager.reset(
+          new metall::manager(metall::create_only, output_datastore_path));
+      ptr_main_pstore = ptr_main_manager->construct<point_store_type>(
+          metall::unique_instance)();
+      ptr_main_knng_index_list =
+          ptr_main_manager->construct<internal_knn_index_container>(
+              metall::unique_instance)();
+
+      if constexpr (k_use_eid_table) {
+        ptr_main_e2i_id_table = ptr_main_manager->construct<e2i_id_table_type>(
+            k_e2i_id_table_name)(ptr_main_manager->get_allocator<>());
+        ptr_main_i2e_id_table = ptr_main_manager->construct<i2e_id_table_type>(
+            k_i2e_id_table_name)(ptr_main_manager->get_allocator<>());
+      }
+
+      auto index_k_list = ptr_main_manager->construct<size_container>(
+          metall::unique_instance)();
+      *index_k_list = *m_index_k_list;
+    }
+    m_comm.cf_barrier();
+
+    // Assume that local data is already constructed or opened.
+    for (auto itr = m_pstore->begin(); itr != m_pstore->end(); ++itr) {
+      const auto sid   = itr->first;
+      const auto point = itr->second;
+      m_comm.async(
+          0,
+          [](auto comm, auto ptr_main_pstore, const internal_id_type sid,
+             const point_type& point) {
+            (*ptr_main_pstore)[sid] = priv_copy_value_to_heap(point);
+          },
+          ptr_main_pstore, sid, point);
+    }
+
+    // Next, merge local k-NN indices into a single index on rank 0.
+    // Send each element one by one to rank 0.
+    for (std::size_t index_id = 0; index_id < m_knn_index_list->size();
+         ++index_id) {
+      for (auto itr = m_knn_index_list->at(index_id).begin();
+           itr != m_knn_index_list->at(index_id).end(); ++itr) {
+        const auto id        = itr->first;
+        const auto neighbors = itr->second;
+        m_comm.async(
+            0,
+            [](auto comm, auto ptr_main_knng_index_list,
+               const std::size_t index_id, const internal_id_type id,
+               const auto& neighbors) {
+              // If the index_id is greater than the current size of the main
+              // index list, emplace a new index to the main index list.
+              if (index_id >= ptr_main_knng_index_list->size()) {
+                ptr_main_knng_index_list->emplace_back();
+              }
+              // Add neighbors to the main k-NN index list.
+              auto& main_index = ptr_main_knng_index_list->at(index_id);
+              for (const auto& neighbor : neighbors) {
+                main_index.insert(id, neighbor);
+              }
+            },
+            ptr_main_knng_index_list, index_id, id, neighbors);
+      }
+    }
+
+    // Next, merge ID mapping tables if they exist.
+    if constexpr (k_use_eid_table) {
+      for (auto itr = m_e2i_id_table->begin(); itr != m_e2i_id_table->end();
+           ++itr) {
+        const auto eid = itr->first;
+        const auto iid = itr->second;
+        m_comm.async(
+            0,
+            [](auto comm, auto ptr_main_e2i_id_table,
+               auto ptr_main_i2e_id_table, const id_type eid,
+               const internal_id_type iid) {
+              (*ptr_main_e2i_id_table)[eid] = iid;
+              (*ptr_main_i2e_id_table)[iid] = eid;
+            },
+            ptr_main_e2i_id_table, ptr_main_i2e_id_table, eid, iid);
+      }
+    }
+
+    // Wait for all async operations to finish.
+    m_comm.barrier();
   }
 
  private:
@@ -1546,9 +1688,8 @@ class dnnd_adv {
   template <typename query_iterator>
   std::pair<neighbor_store_type, internal_neighbor_store_type> priv_run_query(
       const internal_knn_index_type& index,
-      distance_function_type distance_function,
-      query_iterator queries_begin, query_iterator queries_end, const int k,
-      const double epsilon = 0.1) {
+      distance_function_type distance_function, query_iterator queries_begin,
+      query_iterator queries_end, const int k, const double epsilon = 0.1) {
     typename query_kernel_type::option option{.k          = k,
                                               .epsilon    = epsilon,
                                               .mu         = 0,

@@ -326,6 +326,35 @@ inline void read_points(
 namespace saltatlas {
 
 /// \brief Read points (feature vectors) using multiple processes.
+/// Supported values for `format` are:
+/// - `wsv`, `tsv`: whitespace-separated points without explicit IDs.
+///   IDs are generated from global line order and therefore require integral
+///   `id_type`.
+/// - `wsv-id`, `tsv-id`: whitespace-separated records where the first field is
+///   an explicit ID. External ID can be string or numeric type depending on the
+///   template parameter.
+/// - `csv`: comma-separated points without explicit IDs. Requires integral
+///   `id_type`.
+/// - `csv-id`: comma-separated records where the first field is an explicit ID.
+///   External ID can be string or numeric type depending on the template
+///   parameter.
+/// - `str`: whitespace-separated string points without explicit IDs. Requires
+///   `point_t::value_type == char` and integral `id_type`.
+/// - `str-id`: string points with explicit IDs. External ID can be string or
+/// numeric type depending on the template parameter.
+///
+/// Parse or type-constraint failures are reported to `comm.cerr0()`. Input
+/// records that pass parsing are inserted into `local_point_store` on the rank
+/// returned by `point_partitioner(id)`.
+///
+/// \param point_file_names Input files. For formats without explicit IDs, files
+/// should be ordered by global ID order.
+/// \param format Input record format selector listed above.
+/// \param verbose Enables informational logs on rank 0 and per-rank file-open
+/// logs in helpers.
+/// \param point_partitioner Maps point IDs to destination rank IDs.
+/// \param local_point_store Local distributed storage for owned points.
+/// \param comm YGM communicator used for distributed reads and point exchange.
 template <typename id_type, typename point_t, typename H, typename E,
           typename PA>
 inline void read_points(

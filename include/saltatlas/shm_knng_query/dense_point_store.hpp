@@ -80,8 +80,8 @@ class dense_point_store {
 
   void assign(const std::size_t pid, const std::vector<T>& point) {
     if (pid >= m_num_points) {
-      std::cerr << "pid is out of range [0, " << m_num_points << ")"
-                << std::endl;
+      std::cerr << "pid " << pid << " is out of range [0, " << m_num_points
+                << "). Only consecutive IDs are allowed." << std::endl;
       std::abort();
     }
     if (point.size() != m_dims) {
