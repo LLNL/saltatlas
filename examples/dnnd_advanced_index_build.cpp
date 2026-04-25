@@ -51,7 +51,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help,
   ::opterr = 0;
 
   int n;
-  while ((n = ::getopt(argc, argv, "k:f:p:d:O:M:h")) != -1) {
+  while ((n = ::getopt(argc, argv, "k:f:p:d:G:M:h")) != -1) {
     switch (n) {
       case 'k':
         opt.index_k = std::atoi(optarg);
@@ -69,7 +69,7 @@ bool parse_options(int argc, char **argv, option_t &opt, bool &help,
         opt.datastore_path = optarg;
         break;
 
-      case 'O':
+      case 'G':
         opt.index_dump_path = optarg;
         break;
 
@@ -116,7 +116,7 @@ void show_help(const std::string &exe_name, cout_type &cout) {
           "format\n"
           "\n"
           "Optional:\n"
-          "  -O <string>       Index dump file path\n"
+          "  -G <string>       Index dump file path\n"
           "  -M <string>       External-ID to internal-ID map file path\n"
           "  -h                Show this help message\n"
           "\n"

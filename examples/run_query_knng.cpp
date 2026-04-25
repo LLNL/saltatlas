@@ -24,12 +24,15 @@
 #include <saltatlas/shm_knng_query/dense_point_store.hpp>
 #include <saltatlas/shm_knng_query/query.hpp>
 
+// External ID type and internal ID types.
 #if defined(SALTATLAS_USE_STRING_ID)
 using eid_type = saltatlas::pm_str_id_type;
+using iid_type = uint32_t;
 #else
 using eid_type = uint32_t;
+using iid_type = eid_type;
 #endif
-using iid_type = uint32_t;  // Internal ID type
+
 #ifdef SALTATLAS_FEATURE_ELEMENT_TYPE
 using fe_type = SALTATLAS_FEATURE_ELEMENT_TYPE;
 #else
@@ -56,12 +59,11 @@ struct option {
   std::filesystem::path   point_files_path;
   std::string             point_file_format;
   std::filesystem::path   index_files_path;
-  std::string             distance_metric;
+  std::string             distance_function;
   std::filesystem::path   query_file_path;
   std::vector<dist_type>  epsilons{0.0, 0.1, 0.2};
   std::filesystem::path   ground_truth_file_path;
   std::filesystem::path   query_result_file_path;
-  std::filesystem::path   id_map_file_path;
 
   /// Show the option values
   void show() const {
@@ -69,14 +71,13 @@ struct option {
     std::cout << "point_files_path: " << point_files_path << std::endl;
     std::cout << "point_file_format: " << point_file_format << std::endl;
     std::cout << "index_files_path: " << index_files_path << std::endl;
-    std::cout << "id_map_file_path: " << id_map_file_path << std::endl;
-    std::cout << "distance_metric: " << distance_metric << std::endl;
+    std::cout << "distance_function: " << distance_function << std::endl;
     std::cout << "query_file_path: " << query_file_path << std::endl;
     std::cout << "ground_truth_file_path: " << ground_truth_file_path
               << std::endl;
     std::cout << "query_result_file_path: " << query_result_file_path
               << std::endl;
-    std::cout << "query_option.k: " << query_option.k << std::endl;
+    std::cout << "n: " << query_option.k << std::endl;
     std::cout << "epsilons: ";
     for (const auto e : epsilons) {
       std::cout << e << " ";
@@ -104,7 +105,7 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
         break;
 
       case 'f':
-        opt.distance_metric = optarg;
+        opt.distance_function = optarg;
         break;
 
       case 'q':
@@ -125,10 +126,6 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
 
       case 'o':
         opt.query_result_file_path = optarg;
-        break;
-
-      case 'M':
-        opt.id_map_file_path = optarg;
         break;
 
       case 'v':
@@ -157,20 +154,13 @@ bool parse_options(int argc, char* argv[], option& opt, bool& show_help) {
     std::cerr << "k-NN index file path is not given." << std::endl;
     return false;
   }
-  if (opt.distance_metric.empty()) {
+  if (opt.distance_function.empty()) {
     std::cerr << "Distance function name is not given." << std::endl;
     return false;
   }
   if (opt.query_file_path.empty()) {
     std::cerr << "Query file path is not given." << std::endl;
     return false;
-  }
-  if constexpr (!std::is_same_v<eid_type, iid_type>) {
-    if (opt.id_map_file_path.empty()) {
-      std::cerr << "External-to-internal ID map file path is not given."
-                << std::endl;
-      return false;
-    }
   }
   if (opt.query_option.k == 0) {
     std::cerr << "k (number of nearest neighbors) must be > 0." << std::endl;
@@ -198,7 +188,6 @@ void show_usage(char* argv[]) {
       << "-p string : Point file format.\n"
       << "-g string : Path to k-NN index (graph) file or directory that "
          "contain index files.\n"
-      << "-M string : Path to external-to-internal ID map file.\n"
       << "-f string : Distance function name.\n"
       << "-q string : Path to a query file.\n"
       << "-n int    : Number of nearest neighbors to search for each query.\n"
@@ -246,11 +235,76 @@ e2i_id_map_type load_e2i_id_map(const std::filesystem::path& point_files_path) {
   return e2i_id_map;
 }
 
+e2i_id_map_type build_e2i_id_map(const std::filesystem::path& point_files_path,
+                                 const std::string& point_file_format) {
+  if (point_file_format != "wsv-id" && point_file_format != "tsv-id") {
+    std::cerr << "Unsupported format: " << point_file_format << std::endl;
+    std::abort();
+  }
+
+  const auto point_file_paths =
+      saltatlas::dndetail::find_file_paths(point_files_path);
+  const auto line_counts =
+      saltatlas::smqdetail::count_lines_in_files(point_file_paths);
+
+  std::vector<std::size_t> id_offsets(point_file_paths.size(), 0);
+  for (std::size_t i = 1; i < point_file_paths.size(); ++i) {
+    id_offsets[i] = id_offsets[i - 1] + line_counts[i - 1];
+  }
+
+  e2i_id_map_type global_e2i_id_map;
+  global_e2i_id_map.reserve(
+      std::accumulate(line_counts.begin(), line_counts.end(), std::size_t{0}));
+
+  OMP_DIRECTIVE(parallel) {
+    e2i_id_map_type local_e2i_id_map;
+
+    for (std::size_t i = 0; i < point_file_paths.size(); ++i) {
+      const auto&   file_path = point_file_paths[i];
+      std::ifstream ifs(file_path);
+      if (!ifs.is_open()) {
+        std::cerr << "Failed to open " << file_path << std::endl;
+        std::abort();
+      }
+
+      std::size_t line_no = 0;
+      for (std::string line; std::getline(ifs, line); ++line_no) {
+        const auto iid = id_offsets[i] + line_no;
+
+        eid_type          eid;
+        std::string       token;
+        std::stringstream ss(line);
+        ss >> token;
+        if (token.empty()) {
+          std::cerr << "Failed to parse external ID from line: " << line
+                    << std::endl;
+          std::abort();
+        }
+        eid = saltatlas::detail::str_cast<eid_type>(token);
+
+        const auto [itr, inserted] =
+            local_e2i_id_map.emplace(std::move(eid), iid);
+        if (!inserted) {
+          std::cerr << "Duplicate external ID found while building ID map: "
+                    << line << std::endl;
+          std::abort();
+        }
+      }
+    }
+
+#pragma omp critical
+    {
+      global_e2i_id_map.insert(local_e2i_id_map.begin(),
+                               local_e2i_id_map.end());
+    }
+  }
+
+  return global_e2i_id_map;
+}
+
 i2e_id_map_type make_i2e_id_map(const e2i_id_map_type& e2i_id_map) {
   i2e_id_map_type i2e_id_map;
   for (const auto& [eid, iid] : e2i_id_map) {
-    std::cout << "Mapping internal ID " << iid << " to external ID " << eid
-              << std::endl;
     const auto [itr, inserted] = i2e_id_map.emplace(iid, eid);
     if (!inserted) {
       std::cerr << "Duplicate internal ID found in ID map: " << iid
@@ -278,7 +332,10 @@ int main(int argc, char* argv[]) {
   std::optional<e2i_id_map_type> e2i_id_map = std::nullopt;
   std::optional<i2e_id_map_type> i2e_id_map = std::nullopt;
   if constexpr (!std::is_same_v<eid_type, iid_type>) {
-    e2i_id_map = load_e2i_id_map(opt.id_map_file_path);
+    std::cout << "\nBuild external-to-internal ID map" << std::endl;
+    // Construct external-to-internal ID map from point files if the map file
+    // path is not given.
+    e2i_id_map = build_e2i_id_map(opt.point_files_path, opt.point_file_format);
     i2e_id_map = make_i2e_id_map(*e2i_id_map);
   }
 
@@ -314,7 +371,7 @@ int main(int argc, char* argv[]) {
   for (const auto epsilon : opt.epsilons) {
     opt.query_option.epsilon = epsilon;
     nn_query_kernel kernel(opt.query_option, points,
-                           opt.distance_metric.c_str(), knng);
+                           opt.distance_function.c_str(), knng);
     std::cout << "epsilon: " << epsilon << std::endl;
 
     std::vector<std::vector<nn_query_kernel::neighbor_type>> results;

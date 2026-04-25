@@ -82,9 +82,9 @@ inline eid_t make_generated_external_id(const std::size_t      value,
 }
 
 template <typename iid_t, typename eid_t, typename e2i_id_map_type>
-inline iid_t make_internal_id(const eid_t                         &eid,
-                              const std::optional<e2i_id_map_type> &e2i_id_table,
-                              const std::string_view                format) {
+inline iid_t make_internal_id(
+    const eid_t &eid, const std::optional<e2i_id_map_type> &e2i_id_table,
+    const std::string_view format) {
   if (e2i_id_table) {
     return e2i_id_table->at(eid);
   }
@@ -236,6 +236,13 @@ inline dense_point_store<iid_t, fe_t, alloc_t> load_points(
         },
         point_store);
   } else if (format == "csv-id") {
+    // String ID with CSV format is not supported
+    if (!std::is_arithmetic_v<eid_t>) {
+      std::cerr << "Format '" << format
+                << "' does not support non-numeric ID types." << std::endl;
+      std::abort();
+    }
+
     load_points_kernel<eid_t, iid_t, fe_t, e2i_id_map_type, alloc_t>(
         point_file_paths,
         [&format](const std::size_t /*file_no*/, const std::size_t /*line_no*/,

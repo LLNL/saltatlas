@@ -192,16 +192,12 @@ int main(int argc, char **argv) {
     const auto ret = dnnd.query(index_id, distance_func, queries.begin(),
                                 queries.end(), opt.query_n);
 
-    const bool dump_ok = dump_local_query_results(ret, opt.out_file_path, comm);
-    if (!dump_ok && comm.rank0()) {
-      comm.cerr0() << "Failed to dump query results on one or more ranks."
+    if (!opt.out_file_path.empty()) {
+      comm.cout0() << "Dump query results to " << opt.out_file_path
                    << std::endl;
+      saltatlas::utility::gather_and_dump_neighbors(ret, opt.out_file_path,
+                                                    comm);
     }
-    if (!opt.out_file_path.empty() && comm.rank0()) {
-      comm.cout0() << "Dumped local query results to "
-                   << opt.out_file_path.string() << "-<rank>" << std::endl;
-    }
-
     comm.cf_barrier();
   }
 
