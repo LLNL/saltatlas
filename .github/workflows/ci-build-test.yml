@@ -5,6 +5,9 @@ on: [ push, pull_request ]
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        use-metall: ["ON","OFF"]
     steps:
       - &checkout
         uses: actions/checkout@v4
@@ -14,7 +17,7 @@ jobs:
       - name: Build
         run: |
           mkdir build && cd build
-          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_METALL=ON -DSALTATLAS_USE_HNSWLIB=ON -DSALTATLAS_BUILD_TEST=ON
+          cmake ../ -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_CXX_COMPILER=g++-12 -DSALTATLAS_USE_METALL=${{ matrix.use-metall }} -DSALTATLAS_USE_HNSWLIB=ON -DSALTATLAS_BUILD_TEST=ON
           make -j4
       - name: Test
         run: |
