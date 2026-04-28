@@ -39,6 +39,9 @@ using metall_fallback_allocator = metall::manager::fallback_allocator<T>;
 using pm_str_id_type =
     boost::container::basic_string<char, std::char_traits<char>,
                                    metall_fallback_allocator<char>>;
+#else
+using pm_str_id_type =
+    boost::container::basic_string<char, std::char_traits<char>>;
 #endif
 }  // namespace saltatlas
 
