@@ -42,7 +42,7 @@ class dense_point_store {
 
   dense_point_store(const std::size_t num_points, const std::size_t dims,
                     const allocator_type& alloc = allocator_type{})
-      : m_num_points(num_points), m_dims(dims), m_allocator(alloc) {
+      : m_allocator(alloc), m_dims(dims), m_num_points(num_points) {
     priv_alloc();
   }
 
@@ -75,7 +75,11 @@ class dense_point_store {
 
   const T* at(const std::size_t pid) const {
     assert(pid < m_num_points);
+#if __cpp_lib_generic_unwrap >= 202110L
     return std::to_address(m_data) + pid * m_dims;
+#else
+    return &(*m_data) + pid * m_dims;
+#endif
   }
 
   void assign(const std::size_t pid, const std::vector<T>& point) {
@@ -90,8 +94,12 @@ class dense_point_store {
                 << std::endl;
       std::abort();
     }
-    std::copy(point.begin(), point.end(),
-              std::to_address(m_data) + pid * m_dims);
+#if __cpp_lib_generic_unwrap >= 202110L
+    auto* addr = std::to_address(m_data);
+#else
+    auto* addr = &(*m_data);
+#endif
+    std::copy(point.begin(), point.end(), addr + pid * m_dims);
   }
 
   std::size_t num_dimensions() const { return m_dims; }

@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -167,8 +169,9 @@ inline void read_points_with_id_helper(
   const auto assigned = [&comm](const std::size_t i) -> bool {
     return (hash<>{}(i) % comm.size()) == comm.rank();
   };
-  static auto &ref_point_store = local_point_store;
-  ref_point_store              = local_point_store;
+  static point_store<id_t, point_t, H, E, pstore_alloc> *ref_point_store =
+      nullptr;
+  ref_point_store = &local_point_store;
   comm.cf_barrier();
 
   std::size_t unreadable_lines = 0;
@@ -208,11 +211,11 @@ inline void read_points_with_id_helper(
 
       // Send to the corresponding rank
       auto receiver = [](auto, const id_t id, const auto &sent_point) {
-        if (ref_point_store.contains(id)) {
+        if (ref_point_store->contains(id)) {
           std::cerr << "Duplicate ID " << id << std::endl;
           MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        ref_point_store[id] = sent_point;
+        (*ref_point_store)[id] = sent_point;
       };
       comm.async(point_partitioner(id), receiver, id, point);
     }
@@ -276,6 +279,149 @@ inline void read_points_with_id(
 
   read_points_with_id_helper(file_names, parser, local_point_store,
                              point_partitioner, comm, verbose);
+}
+
+template <typename id_type, typename point_t, typename H, typename E,
+          typename pstore_alloc>
+inline void read_points_binary_with_id(
+    const std::vector<std::filesystem::path>          &file_names,
+    point_store<id_type, point_t, H, E, pstore_alloc> &local_point_store,
+    const std::function<int(const id_type &id)>       &point_partitioner,
+    ygm::comm &comm, const bool verbose) {
+  const auto assigned = [&comm](const std::size_t i) -> bool {
+    return (hash<>{}(i) % comm.size()) == comm.rank();
+  };
+
+  using feature_element_t = typename point_t::value_type;
+  static point_store<id_type, point_t, H, E, pstore_alloc> *ref_point_store =
+      nullptr;
+  ref_point_store = &local_point_store;
+  comm.cf_barrier();
+
+  const auto receiver = [](auto, const id_type id, const auto &sent_point) {
+    if (ref_point_store->contains(id)) {
+      std::cerr << "Duplicate ID " << id << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+    (*ref_point_store)[id] = sent_point;
+  };
+
+  const auto validate_file_layout = [&comm](
+                                        const std::filesystem::path &file_name,
+                                        const uint64_t               num_points,
+                                        const uint64_t               dims) {
+    constexpr std::uintmax_t k_header_bytes = 2 * sizeof(uint64_t);
+    std::error_code          ec;
+    const auto file_size = std::filesystem::file_size(file_name, ec);
+    if (ec) {
+      comm.cerr() << "Failed to stat " << file_name << ": " << ec.message()
+                  << std::endl;
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    }
+
+    if (file_size < k_header_bytes) {
+      comm.cerr() << "Invalid bin-id file: " << file_name
+                  << " is smaller than the binary header." << std::endl;
+      MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+    }
+
+    const auto               payload_bytes = file_size - k_header_bytes;
+    constexpr std::uintmax_t id_bytes      = sizeof(id_type);
+    const std::uintmax_t     feature_bytes_per_point =
+        static_cast<std::uintmax_t>(dims) * sizeof(feature_element_t);
+    const std::uintmax_t expected_point_bytes =
+        id_bytes + feature_bytes_per_point;
+    const std::uintmax_t expected_payload_bytes =
+        static_cast<std::uintmax_t>(num_points) * expected_point_bytes;
+
+    if (payload_bytes == expected_payload_bytes) {
+      return;
+    }
+
+    comm.cerr() << "Invalid bin-id file layout for " << file_name << ". "
+                << "Header declares " << num_points << " points with " << dims
+                << " dimensions, which requires "
+                << (expected_payload_bytes + k_header_bytes)
+                << " bytes when feature elements are "
+                << sizeof(feature_element_t)
+                << " byte(s), but the file size is " << file_size << " bytes.";
+    if (num_points > 0 && payload_bytes % num_points == 0) {
+      const auto bytes_per_point = payload_bytes / num_points;
+      if (bytes_per_point >= id_bytes) {
+        const auto feature_bytes = bytes_per_point - id_bytes;
+        if (dims > 0 && feature_bytes % dims == 0) {
+          comm.cerr() << " File contents imply feature elements of "
+                      << (feature_bytes / dims) << " byte(s).";
+        }
+      }
+    }
+    comm.cerr()
+        << " This usually means the file was written by a build that used a "
+        << "different SALTATLAS_FEATURE_ELEMENT_TYPE." << std::endl;
+    MPI_Abort(comm.get_mpi_comm(), EXIT_FAILURE);
+  };
+
+  for (std::size_t file_no = 0; file_no < file_names.size(); ++file_no) {
+    if (!assigned(file_no)) continue;
+
+    const auto &file_name = file_names[file_no];
+    if (verbose) comm.cout() << "Open " << file_name << std::endl;
+    std::ifstream ifs(file_name, std::ios::binary);
+    if (!ifs.is_open()) {
+      comm.cerr() << "Failed to open " << file_name << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    uint64_t num_points = 0;
+    uint64_t dims       = 0;
+    ifs.read(reinterpret_cast<char *>(&num_points), sizeof(num_points));
+    ifs.read(reinterpret_cast<char *>(&dims), sizeof(dims));
+    if (!ifs) {
+      comm.cerr() << "Failed reading data from " << file_name << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    validate_file_layout(file_name, num_points, dims);
+
+    // Read multiple points (ID + feature vector) in a batch
+    const std::size_t single_point_bytes =
+        sizeof(id_type) + dims * sizeof(feature_element_t);
+    constexpr std::size_t k_buf_size = 256 * 1024 * 1024;
+    std::size_t           batch_size = k_buf_size / single_point_bytes;
+    if (batch_size == 0) batch_size = 1;
+    std::vector<char> buffer(batch_size * single_point_bytes);
+
+    point_t point;
+    point.resize(dims);
+
+    uint64_t remaining = num_points;
+    while (remaining > 0) {
+      const std::size_t chunk_size  = (remaining < batch_size)
+                                          ? static_cast<std::size_t>(remaining)
+                                          : batch_size;
+      const std::size_t chunk_bytes = chunk_size * single_point_bytes;
+      ifs.read(buffer.data(), chunk_bytes);
+      if (!ifs) {
+        comm.cerr() << "Failed reading data from " << file_name << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      }
+
+      const char *ptr = buffer.data();
+      for (std::size_t i = 0; i < chunk_size; ++i) {
+        id_type id{};
+        std::memcpy(&id, ptr, sizeof(id_type));
+        ptr += sizeof(id_type);
+        if (dims > 0) {
+          std::memcpy(point.data(), ptr, dims * sizeof(feature_element_t));
+        }
+        ptr += dims * sizeof(feature_element_t);
+
+        comm.async(point_partitioner(id), receiver, id, point);
+      }
+      remaining -= chunk_size;
+    }
+  }
+  comm.barrier();
 }
 
 /// \brief Read points (feature vectors) using multiple processes.
@@ -417,6 +563,11 @@ inline void read_points(
       detail::read_points_with_id(point_file_names, local_point_store,
                                   point_partitioner, comm, verbose);
     }
+  } else if (format == "bin-id") {
+    if (verbose)
+      comm.cout0() << "Read binary format files with IDs" << std::endl;
+    detail::read_points_binary_with_id(point_file_names, local_point_store,
+                                       point_partitioner, comm, verbose);
   } else {
     comm.cerr0() << "Unsupported point file format: " << format << std::endl;
   }

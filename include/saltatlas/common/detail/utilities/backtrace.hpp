@@ -12,9 +12,21 @@
 #include <unistd.h>
 
 inline void show_backtrace(int sig) {
-  void *array[32];
-  const size_t size = ::backtrace(array, 32);
+  constexpr int MAX_FRAMES = 100;
+  void*         array[MAX_FRAMES];
+  const size_t  size = ::backtrace(array, MAX_FRAMES);
   ::fprintf(stderr, "Error: signal %d:\n", sig);
+  ::backtrace_symbols_fd(array, size, STDERR_FILENO);
+  ::exit(1);
+}
+
+inline void show_backtrace() {
+  constexpr int MAX_FRAMES = 100;
+  void*         array[MAX_FRAMES];
+  const size_t  size = ::backtrace(array, MAX_FRAMES);
+  if (size == 0) {
+    return;
+  }
   ::backtrace_symbols_fd(array, size, STDERR_FILENO);
   ::exit(1);
 }

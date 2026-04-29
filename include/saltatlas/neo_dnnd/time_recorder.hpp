@@ -62,15 +62,24 @@ class time_recorder : public time_recorder_base {
 
   void turn_off() override { m_record = false; }
 
+  /// \brief Start a timer with the given name. If a timer with the same name
+  /// already exists, it will be reused (i.e., the elapsed time will be added
+  /// to the existing entry).
   void start(const std::string& name) override {
-    m_name_stack.push(name);
-    m_clock_stack.push(dndetail::launch_timer());
-    if (!priv_contains(name)) {
-      m_time_table.emplace_back(
-          time_entry{.name = name, .t = 0.0, .depth = m_name_stack.size() - 1});
+    if (!priv_valid_name(name)) {
+      std::cerr << "Warning: invalid timer name: " << name
+                << ". Timer names cannot contain '$' or '#' characters."
+                << std::endl;
+      return;
     }
+
+    m_clock_stack.push(dndetail::launch_timer());
+    m_name_stack.push(name);
+    priv_find_or_create(priv_get_stacked_name(name));
   }
 
+  /// \brief Stop the most recent timer and report the elapsed time.
+  /// Return the elapsed time in seconds.
   double stop() override {
     if (num_running_timers() == 0) {
       throw std::runtime_error("No running timers.");
@@ -83,8 +92,9 @@ class time_recorder : public time_recorder_base {
     const auto elapsed_sec = dndetail::elapsed_time_sec(m_clock_stack.top());
     m_clock_stack.pop();
 
-    const auto name = m_name_stack.top();
-    priv_find(name).t += elapsed_sec;
+    const auto name         = m_name_stack.top();
+    const auto stacked_name = priv_get_stacked_name(name);
+    priv_find(stacked_name).t += elapsed_sec;
     m_name_stack.pop();
 
     return elapsed_sec;
@@ -92,15 +102,21 @@ class time_recorder : public time_recorder_base {
 
   void reset() override {
     for (auto& entry : m_time_table) {
-      reset(entry.name);
+      entry.t = 0.0;
     }
   }
 
-  void reset(const std::string& name) { priv_find(name).t = 0.0; }
+  const std::string& get_current_name() const override {
+    return m_name_stack.top();
+  }
 
-  const std::string& get_current_name() const { return m_name_stack.top(); }
-
-  const std::vector<time_entry>& get_time_table() const { return m_time_table; }
+  std::vector<time_entry> get_time_table() const {
+    std::vector<time_entry> copy = m_time_table;
+    for (auto& entry : copy) {
+      entry.name = priv_get_original_name(entry.name);
+    }
+    return copy;
+  }
 
   template <typename stream_type>
   void print(stream_type& ostream) const {
@@ -108,32 +124,69 @@ class time_recorder : public time_recorder_base {
       for (std::size_t i = 0; i < entry.depth; ++i) {
         ostream << "-- ";
       }
-      ostream << entry.name << ":\t" << entry.t << std::endl;
+      ostream << priv_get_original_name(entry.name) << ":\t" << entry.t
+              << std::endl;
     }
   }
 
   std::size_t num_running_timers() const { return m_clock_stack.size(); }
 
  private:
-  bool priv_contains(const std::string& name) const {
+  // check if the name is valid (i.e., it does not contain '$' and '#', which is
+  // reserved for internal use)
+  bool priv_valid_name(const std::string& name) const {
+    if (name.find('$') != std::string::npos ||
+        name.find('#') != std::string::npos) {
+      return false;
+    }
+    return true;
+  }
+
+  std::string priv_get_stacked_name(const std::string& name) const {
+    std::string stacked_name;
+    // add all stacked name from bottom to top, separated by "->"
+    std::stack<std::string>  temp_stack = m_name_stack;
+    std::vector<std::string> names;
+    while (!temp_stack.empty()) {
+      names.push_back(temp_stack.top());
+      temp_stack.pop();
+    }
+    std::reverse(names.begin(), names.end());
+    for (const auto& n : names) {
+      stacked_name += n + "$";
+    }
+    stacked_name += '#';
+    stacked_name += name;
+    return stacked_name;
+  }
+
+  std::string priv_get_original_name(const std::string& stacked_name) const {
+    const auto pos = stacked_name.find('#');
+    if (pos == std::string::npos) {
+      return stacked_name;
+    }
+    return stacked_name.substr(pos + 1);
+  }
+
+  void priv_find_or_create(const std::string& stacked_name) {
+    if (!priv_contains(stacked_name)) {
+      m_time_table.emplace_back(time_entry{
+          .name = stacked_name, .t = 0.0, .depth = m_name_stack.size() - 1});
+    }
+  }
+
+  bool priv_contains(const std::string& stacked_name) const {
     return std::find_if(m_time_table.begin(), m_time_table.end(),
-                        [&name](const auto& entry) {
-                          return entry.name == name;
+                        [&stacked_name](const auto& entry) {
+                          return entry.name == stacked_name;
                         }) != m_time_table.end();
   }
 
-  const time_entry& priv_find(const std::string& name) const {
-    const auto itr =
-        std::find_if(m_time_table.begin(), m_time_table.end(),
-                     [&name](const auto& entry) { return entry.name == name; });
-    assert(itr != m_time_table.end());
-    return *itr;
-  }
-
-  time_entry& priv_find(const std::string& name) {
-    auto itr =
-        std::find_if(m_time_table.begin(), m_time_table.end(),
-                     [&name](const auto& entry) { return entry.name == name; });
+  time_entry& priv_find(const std::string& stacked_name) {
+    auto itr = std::find_if(m_time_table.begin(), m_time_table.end(),
+                            [&stacked_name](const auto& entry) {
+                              return entry.name == stacked_name;
+                            });
     assert(itr != m_time_table.end());
     return *itr;
   }
@@ -144,4 +197,4 @@ class time_recorder : public time_recorder_base {
   std::stack<std::string>                                    m_name_stack;
 };
 
-}  // namespace saltatlas::neo_dnnd
+}  // namespace saltatlas

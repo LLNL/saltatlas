@@ -110,6 +110,7 @@ if (SALTATLAS_USE_METALL)
     add_saltatlas_example(dnnd_advanced_get_neighbors)
     add_saltatlas_example(dnnd_advanced_query)
     add_saltatlas_example(dnnd_advanced_timeout)
+
     add_saltatlas_example(dnnd_advanced_merge_index)
 
     add_saltatlas_example_str_id(dnnd_advanced_index_build)
@@ -181,3 +182,4 @@ endif()
 
 add_subdirectory(datasets)
 #add_subdirectory(knng_shm_query)
+add_subdirectory(solanet)

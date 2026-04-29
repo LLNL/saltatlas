@@ -18,7 +18,6 @@
 #endif
 
 #include "saltatlas/common/detail/utilities/hash.hpp"
-#include "saltatlas/neo_dnnd/detail/utilities/shm_manager.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
 
 namespace saltatlas::dndetail {
@@ -29,8 +28,8 @@ namespace saltatlas::dndetail {
 template <typename id_type, typename feature_element_type>
 class pfv_replica_store {
  private:
-  using index_type = uint32_t;
-  using seg_allocator = metall::manager::allocator_type<std::byte>;
+  using index_type       = uint32_t;
+  using seg_allocator    = metall::manager::allocator_type<std::byte>;
   using index_table_type = boost::unordered::unordered_flat_map<
       id_type, index_type, saltatlas::hash<1314>, std::equal_to<>,
       typename std::allocator_traits<seg_allocator>::template rebind_alloc<
@@ -129,7 +128,7 @@ class pfv_replica_store {
     if (m_index_tables.at(bank_no)->count(id) > 0) {
       return false;
     }
-    const auto index = m_index_tables.at(bank_no)->size();
+    const auto index                    = m_index_tables.at(bank_no)->size();
     (*(m_index_tables.at(bank_no)))[id] = index;
     return true;
   }
@@ -172,15 +171,15 @@ class pfv_replica_store {
     return path.string();
   }
 
-  const size_t m_dims;
-  const size_t m_single_capacity;
-  const size_t m_num_banks;
-  const size_t m_my_bank_no;
-  const std::string m_cache_name;
-  mpi::communicator& m_comm;
+  const size_t                       m_dims;
+  const size_t                       m_single_capacity;
+  const size_t                       m_num_banks;
+  const size_t                       m_my_bank_no;
+  const std::string                  m_cache_name;
+  mpi::communicator&                 m_comm;
   std::vector<feature_element_type*> m_fv_pools;
-  std::vector<index_table_type*> m_index_tables;
-  std::vector<metall::manager*> m_segment_managers;
+  std::vector<index_table_type*>     m_index_tables;
+  std::vector<metall::manager*>      m_segment_managers;
 };
 
 }  // namespace saltatlas::dndetail

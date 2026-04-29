@@ -32,8 +32,6 @@
 #endif
 #include <boost/container/flat_set.hpp>
 
-#include "detail/pfv_replica_store.hpp"
-#include "detail/point_reader.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
 #include "saltatlas/dnnd/detail/knn_heap.hpp"
@@ -41,6 +39,8 @@
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
 #include "saltatlas/dnnd/distance.hpp"
 #include "saltatlas/neo_dnnd/compact_point_store.hpp"
+#include "saltatlas/neo_dnnd/detail/pfv_replica_store.hpp"
+#include "saltatlas/neo_dnnd/detail/point_reader.hpp"
 #include "saltatlas/neo_dnnd/detail/utilities/counter_db.hpp"
 #include "saltatlas/neo_dnnd/mpi.hpp"
 #include "saltatlas/neo_dnnd/time_recorder.hpp"

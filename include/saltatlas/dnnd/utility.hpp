@@ -6,6 +6,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <tuple>
@@ -263,7 +265,7 @@ inline void gather_neighbors(const neighbors_tbl<id_t, dist_t> &local_results,
                              ygm::comm &comm, const int root_rank = 0) {
   using nb_tbl_t = neighbors_tbl<id_t, dist_t>;
 
-  const std::size_t      num_queries = ygm::sum(local_results.size(), comm);
+  // const std::size_t      num_queries = ygm::sum(local_results.size(), comm);
   ygm::ygm_ptr<nb_tbl_t> ptr_root_results(&root_results);
   comm.cf_barrier();
 
@@ -298,7 +300,6 @@ inline void gather_queries(const std::vector<point_t> &local_queries,
                            const int root_rank = 0) {
   using query_vec_t = std::vector<point_t>;
 
-  const std::size_t         num_queries = ygm::sum(local_queries.size(), comm);
   ygm::ygm_ptr<query_vec_t> ptr_root_queries(&root_queries);
   comm.cf_barrier();
 
@@ -334,7 +335,7 @@ inline void gather_neighbor_features(
     const int root_rank = 0) {
   using ngbr_feats_t = std::vector<std::vector<point_t>>;
 
-  const std::size_t num_queries = ygm::sum(local_ngbr_features.size(), comm);
+  // const std::size_t num_queries = ygm::sum(local_ngbr_features.size(), comm);
   ygm::ygm_ptr<ngbr_feats_t> ptr_root_ngbr_features(&root_ngbr_features);
   comm.cf_barrier();
 
@@ -474,4 +475,286 @@ inline void gather_and_dump_neighbors_with_features(
 }
 #endif  // SALTATLAS_UTILITY_INCLUDED_YGM
 
+// Add comma separators to a number for better readability.
+inline std::string add_comma_separators(const size_t num) {
+  std::string num_str         = std::to_string(num);
+  int         insert_position = static_cast<int>(num_str.length()) - 3;
+  while (insert_position > 0) {
+    num_str.insert(insert_position, ",");
+    insert_position -= 3;
+  }
+  return num_str;
+}
+
+inline std::string add_comma_separators(const double num) {
+  std::string num_str         = std::to_string(num);
+  int         insert_position = static_cast<int>(num_str.find('.')) - 3;
+  while (insert_position > 0) {
+    num_str.insert(insert_position, ",");
+    insert_position -= 3;
+  }
+  return num_str;
+}
+
+/// \brief Dump a KNNG into a file.
+/// \tparam sparse_knng_type e.g., std::unordered_map<id_type,
+/// std::vector<neighbor<id_type, distance_type>>>
+/// \param knng_out_path File path to dump the KNNG file.
+/// \param knng KNNG to dump.
+/// \param dump_distance Whether to dump distances or not.
+/// \details Here is the format of the dumped KNNG file:
+///
+template <typename sparse_knng_type>
+inline void dump_knng(const std::filesystem::path &knng_out_path,
+                      const sparse_knng_type      &knng,
+                      const bool                   dump_distance = false) {
+  std::ofstream ofs(knng_out_path);
+
+  if (!ofs.is_open()) {
+    std::cerr << "Failed to create kNNG file" << std::endl;
+    return;
+  }
+
+  for (const auto &elem : knng) {
+    ofs << elem.first;
+    for (const auto &neighbor : elem.second) {
+      ofs << " " << neighbor.id;
+    }
+    ofs << "\n";
+
+    if (!dump_distance) continue;
+    ofs << "0.0";  // dummy
+    for (const auto &neighbor : elem.second) {
+      ofs << " " << neighbor.distance;
+    }
+    ofs << "\n";
+  }
+  ofs.close();
+}
+
+namespace detail {
+template <typename id_type, typename distance_type>
+inline std::tuple<bool, id_type, std::vector<neighbor<id_type, distance_type>>>
+read_neighbor_lines(const bool read_distance, std::ifstream &ifs) {
+  std::vector<neighbor<id_type, distance_type>> neighbors;
+
+  std::string line;
+  if (!std::getline(ifs, line)) {
+    return {false, id_type(), neighbors};
+  }
+  std::istringstream iss(line);
+  id_type            point_id;
+  iss >> point_id;
+  if (iss.fail()) {
+    std::cerr << "Failed to read point ID from KNNG file." << std::endl;
+    std::abort();
+  }
+
+  std::vector<id_type> neighbor_ids;
+  id_type              nid;
+  while (iss >> nid) {
+    neighbor_ids.push_back(nid);
+  }
+
+  std::vector<distance_type> dists;
+  if (read_distance) {
+    if (!std::getline(ifs, line)) {
+      std::cerr << "Failed to read distance line from KNNG file." << std::endl;
+      std::abort();
+    }
+    std::istringstream diss(line);
+    distance_type      dummy;
+    diss >> dummy;  // skip dummy
+    distance_type dist;
+    while (diss >> dist) {
+      dists.push_back(dist);
+    }
+    if (neighbor_ids.size() != dists.size()) {
+      std::cerr << "#of neighbor IDs and #of distances do not match."
+                << std::endl;
+      std::abort();
+    }
+  }
+
+  for (size_t i = 0; i < neighbor_ids.size(); ++i) {
+    if (read_distance)
+      neighbors.emplace_back(neighbor_ids[i], dists[i]);
+    else
+      neighbors.emplace_back(
+          neighbor_ids[i], 0);  // distance is set to 0 when not read from file
+  }
+
+  return {true, point_id, std::move(neighbors)};
+}
+
+}  // namespace detail
+
+/// \brief Load a kNNG file and distribute them.
+/// Read neighbors are sorted by distance in ascending order, if the KNNG file
+/// contains distances.
+/// \tparam sparse_knng_type e.g., std::unordered_map<id_type,
+/// std::vector<neighbor<id_type, distance_type>>>
+/// \param knng_path Path to a KNNG file. Expected format is the same as the
+/// output of dump_knng().
+/// \param knng KNNG to load.
+/// \param has_distance Whether the KNNG file contains distances or not.
+/// \param max_k Maximum number of neighbors to load for each point. If the
+/// number of neighbors in the file exceeds max_k, only the first max_k
+/// neighbors are loaded after sorting by distance.
+template <typename sparse_knng_type>
+inline void load_knng(const std::filesystem::path &knng_path,
+                      sparse_knng_type &knng, const bool has_distance = false,
+                      const size_t max_k = std::numeric_limits<size_t>::max()) {
+  using id_type = typename std::decay_t<sparse_knng_type>::key_type;
+  using neighbor_type =
+      typename std::decay_t<sparse_knng_type>::mapped_type::value_type;
+  using dist_type = typename neighbor_type::distance_type;
+
+  std::ifstream ifs(knng_path);
+  if (!ifs.is_open()) {
+    std::cerr << "Failed to open kNNG file: " << knng_path << std::endl;
+    return;
+  }
+
+  while (true) {
+    auto [success, point_id, neighbors] =
+        detail::read_neighbor_lines<id_type, dist_type>(has_distance, ifs);
+    if (!success) {
+      break;
+    }
+    if (knng.count(point_id) > 0) {
+      std::cerr << "Duplicate ID found: " << point_id << std::endl;
+      std::abort();
+    }
+    if (has_distance) {
+      std::sort(neighbors.begin(), neighbors.end());
+    }
+    if (neighbors.size() > max_k) {
+      neighbors.resize(max_k);
+    }
+    knng[point_id] = std::move(neighbors);
+  }
+  ifs.close();
+}
+
+#ifdef SALTATLAS_UTILITY_INCLUDED_YGM
+/// \brief load_knng() with YGM communication to distribute the loaded KNNG.
+template <typename sparse_knng_type, typename partitioner_type>
+inline void load_knng(const std::filesystem::path &knng_path,
+                      sparse_knng_type &knng, ygm::comm &comm,
+                      const partitioner_type &partitioner,
+                      const bool              has_distance = false,
+                      const size_t max_k = std::numeric_limits<size_t>::max()) {
+  ygm::ygm_ptr<sparse_knng_type> ptr_knng(&knng);
+  comm.cf_barrier();
+
+  auto file_paths = saltatlas::dndetail::find_file_paths(knng_path);
+  for (int i = 0; i < file_paths.size(); ++i) {
+    if (comm.rank() != i % comm.size()) {
+      continue;
+    }
+
+    std::ifstream ifs(file_paths[i]);
+    if (!ifs.is_open()) {
+      std::cerr << "Failed to open kNNG file: " << file_paths[i] << std::endl;
+      return;
+    }
+
+    using id_type = typename std::decay_t<decltype(knng)>::key_type;
+    using neighbor_type =
+        typename std::decay_t<decltype(knng)>::mapped_type::value_type;
+    using dist_type = typename neighbor_type::distance_type;
+
+    while (true) {
+      auto [success, point_id, neighbors] =
+          detail::read_neighbor_lines<id_type, dist_type>(has_distance, ifs);
+      if (!success) {
+        break;
+      }
+
+      if (has_distance) {
+        std::sort(neighbors.begin(), neighbors.end());
+      }
+
+      if (neighbors.size() > max_k) {
+        neighbors.resize(max_k);
+      }
+
+      const auto target_rank = partitioner(point_id);
+      comm.async(
+          target_rank,
+          [](ygm::ygm_ptr<sparse_knng_type> ptr_knng, id_type pid,
+             std::vector<neighbor_type> neighbors) {
+            if (ptr_knng->count(pid) > 0) {
+              std::cerr << "Duplicate ID found: " << pid << std::endl;
+              std::abort();
+            }
+            (*ptr_knng)[pid].clear();
+            (*ptr_knng)[pid].insert((*ptr_knng)[pid].end(), neighbors.begin(),
+                                    neighbors.end());
+          },
+          ptr_knng, point_id, std::move(neighbors));
+    }
+  }
+  comm.barrier();
+}
+
+template <typename sparse_knng_type, typename partitioner_type>
+inline void make_knng_undirected(
+    const sparse_knng_type &in_knng, ygm::comm &comm,
+    const partitioner_type &partitioner,
+    const size_t            max_degree = std::numeric_limits<size_t>::max(),
+    const bool              verbose    = false) {
+  using id_type = typename std::decay_t<sparse_knng_type>::key_type;
+  using neighbor_type =
+      typename std::decay_t<sparse_knng_type>::mapped_type::value_type;
+
+  if (verbose) {
+    comm.cout0() << "Making KNNG undirected..." << std::endl;
+  }
+
+  sparse_knng_type               out_knng;
+  ygm::ygm_ptr<sparse_knng_type> ptr_out_knng(&out_knng);
+  comm.cf_barrier();
+
+  // Make the KNNG undirected by adding reverse edges.
+  for (const auto &[id, neighbors] : in_knng) {
+    for (const auto &neighbor : neighbors) {
+      const auto target_rank = partitioner(neighbor.id);
+      comm.async(
+          target_rank,
+          [](ygm::ygm_ptr<sparse_knng_type> ptr_out_knng, id_type src_id,
+             neighbor_type neighbor) {
+            auto &neighbors = (*ptr_out_knng)[neighbor.id];
+            if (std::none_of(
+                    neighbors.begin(), neighbors.end(),
+                    [&](const neighbor_type &n) { return n.id == src_id; })) {
+              neighbors.emplace_back(src_id, neighbor.distance);
+            }
+          },
+          ptr_out_knng, id, neighbor);
+    }
+  }
+  comm.barrier();
+
+  if (verbose) {
+    comm.cout0() << "KNNG made undirected. Now sorting neighbors and keeping "
+                    "only the closest "
+                 << max_degree << " neighbors for each node..." << std::endl;
+  }
+
+  // Sort neighbors by distance and keep only the closest max_degree neighbors.
+  for (auto &[id, neighbors] : out_knng) {
+    std::sort(neighbors.begin(), neighbors.end());
+    if (neighbors.size() > max_degree) {
+      neighbors.resize(max_degree);
+    }
+  }
+  comm.cf_barrier();
+
+  if (verbose) {
+    comm.cout0() << "KNNG is now undirected." << std::endl;
+  }
+}
+#endif
 }  // namespace saltatlas::utility

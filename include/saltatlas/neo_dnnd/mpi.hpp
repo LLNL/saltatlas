@@ -15,6 +15,7 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <unordered_map>
 #include <vector>
 
 #include "saltatlas/common/detail/utilities/general.hpp"
@@ -345,6 +346,11 @@ class communicator {
     DNND2_CHECK_MPI(::MPI_Bcast(&data, 1, data_type::get<T>(), root, m_comm));
   }
 
+  // bcast, void* version
+  void bcast_bytes(void* const data, const int count, const int root) const {
+    DNND2_CHECK_MPI(::MPI_Bcast(data, count, MPI_BYTE, root, m_comm));
+  }
+
   /// \brief Send and receive data of arbitrary size to and from a pair rank.
   /// If the size of the data is larger than 'batch_size_byte',
   /// the data is sent in batches.
@@ -459,8 +465,8 @@ class communicator {
 
   void show_mpi_info() const {
     cout0() << "MPI Info" << std::endl;
-    cout0() << "  #of comm ranks: " << size() << std::endl;
-    cout0() << "  #of comp. nodes: " << num_nodes() << std::endl;
+    cout0() << "  #of ranks: " << size() << std::endl;
+    cout0() << "  #of nodes: " << num_nodes() << std::endl;
     cout0() << "  Node size: " << node_size() << std::endl;
 
     cout0() << "  Rank\tLocal rank" << std::endl;
@@ -676,7 +682,7 @@ inline std::size_t assign_tasks(const std::size_t num_local_tasks,
   return local_num_assigned_tasks;
 }
 
-void win_fence(MPI_Win& win) { DNND2_CHECK_MPI(::MPI_Win_fence(0, win)); }
+// void win_fence(MPI_Win& win) { DNND2_CHECK_MPI(::MPI_Win_fence(0, win)); }
 
 MPI_Win create_mpi_win(void* base, const std::size_t count, const int disp_unit,
                        MPI_Info info = MPI_INFO_NULL,
@@ -691,80 +697,128 @@ MPI_Win create_mpi_win(void* base, const std::size_t count, const int disp_unit,
   MPI_Win win;
   DNND2_CHECK_MPI(
       ::MPI_Win_create(base, count * disp_unit, disp_unit, info, comm, &win));
+  MPI_Barrier(comm);
+
+  DNND2_CHECK_MPI(::MPI_Win_lock_all(MPI_MODE_NOCHECK, win));
 
   return win;
 }
 
-void free_mpi_win(MPI_Win& win) { DNND2_CHECK_MPI(::MPI_Win_free(&win)); }
-
-void lock_win(const int lock_type, const int rank, MPI_Win& win) {
-  // Check win is not MPI_WIN_NULL
-  assert(win != MPI_WIN_NULL);
-  DNND2_CHECK_MPI(::MPI_Win_lock(lock_type, rank, 0, win));
+void free_mpi_win(MPI_Win& win) {
+  if (win == MPI_WIN_NULL) {
+    return;
+  }
+  DNND2_CHECK_MPI(::MPI_Win_unlock_all(win));
+  DNND2_CHECK_MPI(::MPI_Win_free(&win));
 }
 
-void unlock_win(const int rank, MPI_Win& win) {
-  DNND2_CHECK_MPI(::MPI_Win_unlock(rank, win));
+// void lock_win(const int lock_type, const int rank, MPI_Win& win) {
+//   // Check win is not MPI_WIN_NULL
+//   assert(win != MPI_WIN_NULL);
+//   DNND2_CHECK_MPI(::MPI_Win_lock(lock_type, rank, 0, win));
+// }
+
+// void unlock_win(const int rank, MPI_Win& win) {
+//   DNND2_CHECK_MPI(::MPI_Win_unlock(rank, win));
+// }
+
+// void one_sided_get(void* addr, const size_t count, MPI_Datatype data_type,
+//                    const int target_rank, const size_t target_offset,
+//                    MPI_Win& win) {
+//   DNND2_CHECK_MPI(::MPI_Get(addr, count, data_type, target_rank,
+//   target_offset,
+//                             count, data_type, win));
+// }
+
+MPI_Request one_sided_rget(void* addr, const size_t count,
+                           MPI_Datatype data_type, const int target_rank,
+                           const size_t target_offset, MPI_Win& win) {
+  MPI_Request request;
+  DNND2_CHECK_MPI(::MPI_Rget(addr, count, data_type, target_rank, target_offset,
+                             count, data_type, win, &request));
+  return request;
 }
 
-void one_sided_get(void* addr, const size_t count, MPI_Datatype data_type,
-                   const int target_rank, const size_t target_offset,
-                   MPI_Win& win) {
-  DNND2_CHECK_MPI(::MPI_Get(addr, count, data_type, target_rank, target_offset,
-                            count, data_type, win));
+void one_sided_wait(MPI_Request& request) {
+  DNND2_CHECK_MPI(::MPI_Wait(&request, MPI_STATUS_IGNORE));
 }
 
 class rdm_comm {
  public:
-  static constexpr size_t k_chunk_size = 1ULL << 28;
+  static constexpr size_t k_chunk_size = 1ULL << 26;
 
-  rdm_comm(communicator& comm, void* base, const std::size_t size,
+  rdm_comm(communicator& comm, const void* const base, const std::size_t size,
            MPI_Info info = MPI_INFO_NULL)
       : m_comm(comm) {
     priv_create(base, size, info);
   }
 
   void free() {
+    for (auto& [rank, requests] : m_requests) {
+      for (auto& request : requests) {
+        if (request != MPI_REQUEST_NULL) {
+          std::cerr << __FILE__ << ":" << __LINE__
+                    << " Warning: pending request for rank " << rank
+                    << " is not completed." << std::endl;
+          one_sided_wait(request);
+        }
+      }
+    }
+    m_requests.clear();
     for (auto& win : m_sub_wins) {
       free_mpi_win(win);
     }
+    m_sub_wins.clear();
   }
 
-  void fence() {
-    for (auto& win : m_sub_wins) {
-      win_fence(win);
-    }
-  }
+  // void fence() {
+  //   for (auto& win : m_sub_wins) {
+  //     win_fence(win);
+  //   }
+  // }
 
-  void lock(const int lock_type, const int rank) {
-    for (auto& win : m_sub_wins) {
-      lock_win(lock_type, rank, win);
-    }
-  }
+  // void lock(const int lock_type, const int rank) {
+  //   for (auto& win : m_sub_wins) {
+  //     lock_win(lock_type, rank, win);
+  //   }
+  // }
 
-  void unlock(const int rank) {
-    for (auto& win : m_sub_wins) {
-      unlock_win(rank, win);
-    }
-  }
+  // void unlock(const int rank) {
+  //   for (auto& win : m_sub_wins) {
+  //     unlock_win(rank, win);
+  //   }
+  // }
 
-  void get(void* addr, const size_t size, const int target_rank) {
+  void async_get(void* addr, const size_t size, const int target_rank) {
     size_t     offset            = 0;
     const auto num_chunks_to_get = (size + k_chunk_size - 1) / k_chunk_size;
     assert(num_chunks_to_get <= m_sub_wins.size());
+    auto& requests = m_requests[target_rank];
+    requests.assign(num_chunks_to_get, MPI_REQUEST_NULL);
     for (size_t i = 0; i < num_chunks_to_get; ++i) {
       const auto size_to_get = std::min(size - offset, k_chunk_size);
-      //      m_comm.cerr() << "get " << size_to_get << " bytes from " <<
-      //      target_rank
-      //                    << " offset " << offset << std::endl;
-      one_sided_get(static_cast<char*>(addr) + offset, size_to_get,
-                    data_type::get<std::byte>(), target_rank, 0, m_sub_wins[i]);
+      requests[i]            = one_sided_rget(static_cast<char*>(addr) + offset,
+                                              size_to_get, data_type::get<std::byte>(),
+                                              target_rank, 0, m_sub_wins[i]);
       offset += size_to_get;
     }
   }
 
+  void wait(const int target_rank) {
+    auto it = m_requests.find(target_rank);
+    if (it == m_requests.end()) {
+      std::cerr << __FILE__ << ":" << __LINE__
+                << " No pending request for rank " << target_rank << std::endl;
+      return;
+    }
+    for (auto& request : it->second) {
+      one_sided_wait(request);
+    }
+    m_requests.erase(it);
+  }
+
  private:
-  void priv_create(void* base, const std::size_t size,
+  void priv_create(const void* const base, const std::size_t size,
                    MPI_Info info = MPI_INFO_NULL) {
     m_size          = size;
     auto num_chunks = (m_size + k_chunk_size - 1) / k_chunk_size;
@@ -777,15 +831,23 @@ class rdm_comm {
         m_sub_wins[i] = create_mpi_win(nullptr, 0, 1, info, m_comm.comm());
       } else {
         const auto sub_count = std::min(m_size - offset, k_chunk_size);
-        m_sub_wins[i]        = create_mpi_win(static_cast<char*>(base) + offset,
-                                              sub_count, 1, info, m_comm.comm());
+        // DB
+        // std::cerr << "Creating MPI Window: offset=" << offset
+        //           << ", size=" << sub_count << std::endl;
+        m_sub_wins[i] =
+            create_mpi_win(static_cast<char*>(const_cast<void*>(base)) + offset,
+                           sub_count, 1, info, m_comm.comm());
+        // DB
+        // std::cerr << "Created MPI Window: offset=" << offset
+        //             << ", size=" << sub_count << std::endl;
       }
     }
   }
 
-  communicator&        m_comm;
-  size_t               m_size{0};
-  std::vector<MPI_Win> m_sub_wins;
+  communicator&                                     m_comm;
+  size_t                                            m_size{0};
+  std::vector<MPI_Win>                              m_sub_wins;
+  std::unordered_map<int, std::vector<MPI_Request>> m_requests;
 };
 
 }  // namespace saltatlas::mpi

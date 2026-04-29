@@ -10,4 +10,7 @@ scripts/*
 .DS_Store
 .idea
 .cache
+__pycache__/
+.codex
 /.vscode/
+

@@ -1,0 +1,35 @@
+// Copyright 2020-2026 Lawrence Livermore National Security, LLC and other
+// saltatlas Project Developers. See the top-level COPYRIGHT file for details.
+//
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <cassert>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#include <ygm/comm.hpp>
+
+#include "saltatlas/common/data_reader.hpp"
+#include "saltatlas/common/point_store.hpp"
+#include "saltatlas/neo_dnnd/mpi.hpp"
+
+namespace saltatlas::dn3detail {
+
+// Wrapper function to use the common read-points function
+template <typename id_type, typename fe_type>
+inline point_store<id_type, std::vector<fe_type>> read_points(
+    const std::vector<std::filesystem::path>& paths, const std::string& format,
+    const std::function<int(const id_type& id)>& partitioner,
+    const bool verbose, saltatlas::mpi::communicator& comm) {
+  point_store<id_type, std::vector<fe_type>> pstore;
+  {
+    ygm::comm ygm_comm(comm.comm());
+    saltatlas::read_points(paths, format, verbose, partitioner, pstore,
+                           ygm_comm);
+  }
+  return pstore;
+}
+}  // namespace saltatlas::dn3detail

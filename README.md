@@ -48,7 +48,7 @@ metric spaces are constructed.
 
 Within hnswlib, a memcpy is performed on data when a point is added to an HNSW. They expect to be given a C-style array
 of data points which they then copy for their own purposes. All of their built-in distance functions are working on data
-of this form. 
+of this form.
 
 Additionally, they have hard-coded an alias for their distance functions to be
 ```
@@ -92,6 +92,23 @@ mpirun -n 2 ./examples/neo_dnnd_example
 - [DNND](https://dl.acm.org/doi/abs/10.1145/3624062.3625132)
 
 - [NEO-DNND](https://ieeexplore.ieee.org/abstract/document/10820763)
+
+# SOLANET
+
+SOLANET is a GPU-based distributed neighbor graph (kNNG) construction library.
+Currently, it only works on AMD MI300A APUs with the unified memory feature enabled.
+
+## Building
+
+```shell
+mkdir build && cd build
+cmake ../ -DCMAKE_BUILD_TYPE=release -DSALTATLAS_USE_HNSWLIB=OFF -DSALTATLAS_USE_APU=ON
+# Set the following CMake options if needed.
+# ROCM_PATH
+# CMAKE_PREFIX_PATH="/path/to/installed/hipvs;/path/to/installed/raft/"
+
+make
+```
 
 # License
 saltatlas is distributed under the MIT license.

@@ -53,7 +53,7 @@ struct options {
   std::string distance_function;
   int         k{0};
   double      rho   = 0.5;
-  double      delta = 0.001;
+  double      delta = 0.0001;
   std::string knng_dump_dir;
   bool        optimize         = false;
   double      pruning_factor   = -1;
@@ -292,7 +292,8 @@ int main(int argc, char* argv[]) {
         for (const auto& entry : time_table) {
           std::vector<double> times(mpi_size);
           comm.all_gather(entry.t, times.data());
-          const auto [min, mean, max, std] = detail::get_stats(times);
+          const auto [min, mean, max, std] =
+              saltatlas::detail::get_stats(times);
           for (std::size_t i = 0; i < entry.depth; ++i) {
             comm.cout0() << "  ";
           }
@@ -308,7 +309,8 @@ int main(int argc, char* argv[]) {
           }
           std::vector<double> times(mpi_size);
           comm.all_gather(entry.t, times.data());
-          const auto [min, mean, max, std] = detail::get_stats(times);
+          const auto [min, mean, max, std] =
+              saltatlas::detail::get_stats(times);
           comm.cout0() << "KNNG build took (s):\t" << std::fixed
                        << std::setprecision(2) << max << std::endl;
         }
