@@ -7,7 +7,11 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <limits>
+#include <span>
+#include <stdexcept>
 #include <string_view>
 
 #include <saltatlas/common/detail/utilities/float.hpp>

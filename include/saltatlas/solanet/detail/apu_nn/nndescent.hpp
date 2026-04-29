@@ -1,0 +1,1038 @@
+// Copyright 2020-2026 Lawrence Livermore National Security, LLC and other
+// saltatlas Project Developers. See the top-level COPYRIGHT file for details.
+//
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <unistd.h>
+#include <cstdio>
+#ifndef SALTATLAS_SOLANET_APU_NND_PREFETCH_SRC_FV
+#define SALTATLAS_SOLANET_APU_NND_PREFETCH_SRC_FV
+#endif
+
+#ifndef SALTATLAS_SOLANET_APU_NND_TEAM_SIZE
+#define SALTATLAS_SOLANET_APU_NND_TEAM_SIZE 4
+#endif
+
+#ifndef SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES
+#define SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES 1
+#endif
+
+// #ifndef SALTATLAS_SOLANET_APU_NND_PROFILE
+// #define SALTATLAS_SOLANET_APU_NND_PROFILE
+// #endif
+
+#include <algorithm>
+#include <cassert>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <hip/hip_runtime.h>
+#include <spdlog/spdlog.h>
+
+#include "saltatlas/solanet/detail/apu_nn/algorithm.hpp"
+#include "saltatlas/solanet/detail/apu_nn/distance.hpp"
+#include "saltatlas/solanet/detail/apu_nn/hash_table.hpp"
+#include "saltatlas/solanet/detail/apu_nn/matrix.hpp"
+#include "saltatlas/solanet/detail/apu_nn/memory.hpp"
+#include "saltatlas/solanet/detail/apu_nn/utils.hpp"
+#include "saltatlas/solanet/singleton_time_recorder.hpp"
+
+namespace saltatlas::solanet::apu_nn {
+
+namespace {
+static constexpr int k_warp_size      = 64;
+static constexpr int k_nnd_block_size = 128;
+static constexpr int k_team_size      = SALTATLAS_SOLANET_APU_NND_TEAM_SIZE;
+static constexpr int k_top_candidates =
+    SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES;
+#if SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES != 0 && \
+    SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES != 1 && \
+    SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES != 2 && \
+    SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES != 4 && \
+    SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES != 8
+#warning \
+    "SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES is recommended to be 0, 1, 2, 4, or 8."
+#endif
+
+struct l2_distance_op {
+  template <typename FEType>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> operator()(
+      const FEType* a, const FEType* b, const size_t dims) const {
+    return l2(a, b, dims);
+  }
+
+  template <typename FEType, int TEAM_SIZE>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
+                                                     const FEType* b,
+                                                     const size_t  dims) const {
+    return l2_team<FEType, TEAM_SIZE>(a, b, dims);
+  }
+};
+
+struct cosine_distance_op {
+  template <typename FEType>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> operator()(
+      const FEType* a, const FEType* b, const size_t dims) const {
+    return alt_cosine(a, b, dims);
+  }
+
+  template <typename FEType, int TEAM_SIZE>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
+                                                     const FEType* b,
+                                                     const size_t  dims) const {
+    return alt_cosine_team<FEType, TEAM_SIZE>(a, b, dims);
+  }
+};
+
+struct inner_product_distance_op {
+  template <typename FEType>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> operator()(
+      const FEType* a, const FEType* b, const size_t dims) const {
+    return inner_product(a, b, dims);
+  }
+
+  template <typename FEType, int TEAM_SIZE>
+  SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
+                                                     const FEType* b,
+                                                     const size_t  dims) const {
+    return inner_product_team<FEType, TEAM_SIZE>(a, b, dims);
+  }
+};
+
+struct nnd_profile_data {
+  size_t n_updates{0};
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+  size_t n_distance_cals{0};
+#endif
+};
+
+// Profile data for neighbor checking step
+struct nbr_ck_profile_data {
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+  size_t n_unique_candidates{0};
+  size_t rm_dup_time{0};
+  size_t calc_dist_time{0};
+
+  size_t update_knng_time{0};
+  size_t update_knng_rm_dup_time{0};
+  size_t update_knng_merge_time{0};
+
+  size_t n_batches{0};
+#endif
+};
+
+// For candidates bloom filter
+// Number of bits in bloom filter for candidate checking
+// TODO: Make this configurable or calculate based on k and batch size
+// constexpr int k_n_bf_hashes = 4;
+// constexpr int k_n_bf_bits   = 8192;
+// static_assert(k_n_bf_bits % 8 == 0, "Bloom filter bits must be multiple of
+// 8");
+
+template <typename IDType, typename FEType, typename DistType, typename DistOp>
+__global__ void init_knng(const matrix_view<FEType>& pstore, const int k,
+                          const uint64_t seed, matrix_view<IDType> knng_ids,
+                          matrix_view<DistType> knng_dists) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = pstore.n_rows();
+  const size_t dims     = pstore.n_cols();
+  if (sid >= n_points) {
+    return;
+  }
+
+  const DistOp  dist_op{};
+  const FEType* svec = pstore(sid);
+  IDType*       ids  = knng_ids(sid);
+  DistType*     dsts = knng_dists(sid);
+
+  rnd_state_type state;
+  rnd_init(sid, seed, state);
+
+  for (size_t i = 0; i < k; ++i) {
+    IDType nid = static_cast<IDType>(rnd_next(state) % n_points);
+    bool   ok  = false;
+    while (!ok) {
+      ok = (nid != static_cast<IDType>(sid));
+      for (size_t j = 0; ok && j < i; ++j) {
+        ok = (clear_msb(ids[j]) != nid);
+      }
+      if (!ok) {
+        nid = static_cast<IDType>(rnd_next(state) % n_points);
+      }
+    }
+    ids[i]             = set_msb(nid);
+    const FEType* nvec = pstore(nid);
+    const auto    d    = dist_op(svec, nvec, dims);
+    dsts[i]            = static_cast<DistType>(d);
+  }
+
+  // Sort neighbors by distance
+  // Small distance first
+  sort_neighbors_single_thread(ids, dsts, k, true);
+
+#ifndef NDEBUG
+  // Check no duplicate neighbors
+  for (size_t i = 0; i < k - 1; ++i) {
+    for (size_t j = i + 1; j < k; ++j) {
+      assert(clear_msb(ids[i]) != clear_msb(ids[j]));
+    }
+  }
+#endif
+}
+
+// Prepare new and old neighbor lists
+template <typename IDType>
+__global__ void set_new_old(matrix_view<IDType> knng_ids, const int p_new,
+                            const int p_old, matrix_view<IDType> new_ng,
+                            span<int> new_counts, matrix_view<IDType> old_ng,
+                            span<int> old_counts) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = knng_ids.n_rows();
+  const size_t k        = knng_ids.n_cols();
+  if (sid >= n_points) {
+    return;
+  }
+
+  // Pick up up to p new and old neighbors
+  assert(new_ng.n_cols() >= static_cast<size_t>(p_new));
+  assert(old_ng.n_cols() >= static_cast<size_t>(p_old));
+
+  IDType* knn_ids_row = knng_ids(sid);
+  IDType* news        = new_ng(sid);
+  IDType* olds        = old_ng(sid);
+
+  // Initialize full rows with invalid values to guard reverse-neighbor scans.
+  static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
+  const int             new_cap      = static_cast<int>(new_ng.n_cols());
+  const int             old_cap      = static_cast<int>(old_ng.n_cols());
+  for (int i = 0; i < new_cap; ++i) {
+    news[i] = k_invalid_id;
+  }
+  for (int i = 0; i < old_cap; ++i) {
+    olds[i] = k_invalid_id;
+  }
+
+  int new_count = 0;
+  int old_count = 0;
+  for (size_t i = 0; i < k; ++i) {
+    const IDType nid = clear_msb(knn_ids_row[i]);
+    if (get_msb(knn_ids_row[i])) {
+      if (new_count < p_new) {
+        news[new_count] = nid;
+        // Clear the msb flag as it has been selected
+        knn_ids_row[i] = nid;
+        ++new_count;
+      }
+    } else {
+      if (old_count < p_old) {
+        olds[old_count] = nid;
+        ++old_count;
+      }
+    }
+    if (new_count >= p_new && old_count >= p_old) {
+      break;
+    }
+  }
+  new_counts[sid] = new_count;
+  old_counts[sid] = old_count;
+}
+
+// Reverse new and old neighbor lists, adding elements to original lists.
+// However, original lists are not expanded here to avoid reallocation.
+// After this kernel, 'counts_wk' will hold values that are larger than actual
+// number of neighbors.
+template <typename IDType>
+__global__ void add_reverse_neighbors(matrix_view<IDType> ng_ids,
+                                      span<int>           n_neighbors,
+                                      span<int>           counts_wk) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = ng_ids.n_rows();
+  if (sid >= n_points) {
+    return;
+  }
+  static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
+  const auto            max_capacity = static_cast<int>(ng_ids.n_cols());
+  IDType*               nbs          = ng_ids(sid);
+  const int             n            = n_neighbors[sid];
+
+  for (int i = 0; i < n; ++i) {
+    const IDType nid = nbs[i];
+    if (nid == k_invalid_id) {
+      break;
+    }
+
+    // This block is just to reduce #of writes to counts_wk
+    if (counts_wk[nid] >= max_capacity) {
+      // nid's neighbor list is full
+      continue;
+    }
+
+    // Atomically increment nid's count
+    const int pos = atomicAdd(&counts_wk[nid], 1);
+    if (pos >= max_capacity) {
+      // nid's neighbor list is full
+      continue;
+    }
+    IDType* ng_list = ng_ids(nid);
+    ng_list[pos]    = sid;
+  }
+}
+
+template <typename IDType>
+__global__ void remove_duplicate_neighbors_kernel(matrix_view<IDType> ng_ids) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = ng_ids.n_rows();
+  if (sid >= n_points) {
+    return;
+  }
+  static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
+  IDType*               ngs          = ng_ids(sid);
+
+  // Count valid neighbors
+  int count = 0;
+  for (int i = 0; i < ng_ids.n_cols() && ngs[i] != k_invalid_id; ++i) {
+    ++count;
+  }
+
+  // Sort neighbors
+  for (int i = 0; i < count - 1; ++i) {
+    for (int j = i + 1; j < count; ++j) {
+      if (ngs[i] > ngs[j]) {
+        // Swap
+        std::swap(ngs[i], ngs[j]);
+      }
+    }
+  }
+
+  // Remove duplicates
+  int unique_count = 0;
+  for (int i = 0; i < count; ++i) {
+    if (i == 0 || ngs[i] != ngs[i - 1]) {
+      ngs[unique_count] = ngs[i];
+      ++unique_count;
+    }
+  }
+  assert(unique_count <= count);
+
+#ifndef NDEBUG
+  // Check duplicates
+  for (int i = 0; i < unique_count - 1; ++i) {
+    for (int j = i + 1; j < unique_count; ++j) {
+      assert(ngs[i] != ngs[j]);
+    }
+  }
+#endif
+
+  // Randomly shuffle
+  uint64_t rnd_state = static_cast<uint64_t>(sid);
+  for (int i = unique_count - 1; i > 0; --i) {
+    const int j = static_cast<int>(lcg_rand(rnd_state, i + 1));
+    std::swap(ngs[i], ngs[j]);
+  }
+
+  // Add stopper
+  if (unique_count < ng_ids.n_cols()) {
+    ngs[unique_count] = k_invalid_id;
+  }
+}
+
+template <typename IDType, typename DistType>
+SALTATLAS_HD_GLOBAL void init_neighbor_check_data(
+    matrix_view<IDType> candidates_ids, matrix_view<DistType> candidates_dists,
+    span<int> candidates_counts) {
+  (void)candidates_ids;
+  (void)candidates_dists;
+  const size_t g_tid =
+      static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x) +
+      static_cast<size_t>(threadIdx.x);
+  const size_t g_warp_id = g_tid / warpSize;
+  const int    lane_id   = threadIdx.x % warpSize;
+  const size_t n_global_warps =
+      (static_cast<size_t>(gridDim.x) * static_cast<size_t>(blockDim.x)) /
+      static_cast<size_t>(warpSize);
+  if (n_global_warps == 0) {
+    return;
+  }
+
+  for (size_t sid = g_warp_id; sid < candidates_counts.size();
+       sid += n_global_warps) {
+    if (lane_id == 0) {
+      candidates_counts[sid] = 0;
+    }
+  }
+}
+
+// A single warp works on a pair of neighbor lists (nbs1 and nbs2) to find
+// better neighbors for points in nbs1.
+template <typename IDType, typename FEType, typename DistType, typename DistOp>
+SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
+    const IDType* const nbs1, const int n_nbs1, const IDType* const nbs2,
+    const int n_nbs2, const matrix_view<FEType>& pstore,
+    matrix_view<IDType> candidates_ids, matrix_view<DistType> candidates_dists,
+    span<int> candidates_counts, matrix_view<IDType> knng_ids,
+    matrix_view<DistType> knng_dists, IDType* shared_knng_ids) {
+  static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
+  // const int    g_tid = static_cast<int>(blockIdx.x * blockDim.x +
+  // threadIdx.x);
+  const int    lane_id       = threadIdx.x % warpSize;
+  const int    team_id       = lane_id / k_team_size;
+  const int    tl_lane_id    = lane_id % k_team_size;
+  const int    block_team_id = threadIdx.x / k_team_size;
+  const int    n_teams       = warpSize / k_team_size;
+  const DistOp dist_op{};
+  // One scratch KNNG row per team in this block:
+  // [team0 k entries][team1 k entries]...
+  IDType* const team_knng_ids =
+      shared_knng_ids + static_cast<size_t>(block_team_id) * knng_ids.n_cols();
+
+  // Each point in nbs1 is processed by a different team of threads
+  for (int i = team_id; i < n_nbs1; i += n_teams) {
+    const IDType nid1 = nbs1[i];
+    if (nid1 == k_invalid_id) {
+      continue;
+    }
+    // Cache nid1's current KNNG IDs (MSB-cleared) in shared memory so we can
+    // skip distance calculations for nid2 already present in KNNG.
+    const auto* const nid1_knng_ids = knng_ids(nid1);
+    for (int j = tl_lane_id; j < knng_ids.n_cols(); j += k_team_size) {
+      team_knng_ids[j] = clear_msb(nid1_knng_ids[j]);
+    }
+    // Skip team-level memory synchronization here
+    // because it's still okay even if team_knng_ids is not fully populated when
+    // some threads start checking neighbors.
+
+    // All points in nbs2 are processed by the same team, and the team keeps
+    // top-k_top_candidates best neighbors among them.
+    IDType   best_ids[k_top_candidates];
+    DistType best_dists[k_top_candidates];
+#pragma unroll
+    for (int b = 0; b < k_top_candidates; ++b) {
+      best_ids[b]   = k_invalid_id;
+      best_dists[b] = std::numeric_limits<DistType>::max();
+    }
+
+    for (int j = 0; j < n_nbs2; ++j) {
+      const IDType nid2 = nbs2[j];
+      if (nid2 == k_invalid_id || nid2 == nid1) {
+        continue;
+      }
+
+      // Team lanes cooperatively scan the cached nid1's KNNG list to avoid
+      // redundant distance calculations for nid2.
+      bool l_in_knng = false;
+      for (int kk = tl_lane_id; kk < knng_ids.n_cols(); kk += k_team_size) {
+        if (team_knng_ids[kk] == nid2) {
+          l_in_knng = true;
+          break;
+        }
+      }
+
+      // Reduce to a single "nid2 already in KNNG" flag within the team.
+      int           in_knng        = l_in_knng ? 1 : 0;
+      constexpr int team_lead_lane = 0;
+      // Gather the in_knng flag to the team leader lane
+#pragma unroll
+      for (int kk = 1; kk < k_team_size; ++kk) {
+        in_knng |= __shfl_down(in_knng, kk, k_team_size);
+      }
+      // Broadcast the in_knng flag from the team leader lane to all team
+      // members
+      in_knng = __shfl(in_knng, team_lead_lane, k_team_size);
+      if (in_knng) {
+        // Already connected in current KNNG; skip expensive distance op.
+        continue;
+      }
+
+      DistType dist = dist_op.template team<FEType, k_team_size>(
+          pstore(nid1), pstore(nid2), pstore.n_cols());
+      // Only the team leader update the local candidate list since it's lenght
+      // is small
+      if (tl_lane_id == 0) {
+        if constexpr (k_top_candidates == 1) {
+          if (dist < best_dists[0]) {
+            best_dists[0] = dist;
+            best_ids[0]   = nid2;
+          }
+          continue;
+        } else {
+          // only team leader lane updates the top candidates to reduce
+          // contention.
+          int      max_pos  = -1;
+          DistType max_dist = best_dists[0];
+#pragma unroll
+          for (int b = 1; b < k_top_candidates; ++b) {
+            if (best_dists[b] > max_dist) {
+              max_dist = best_dists[b];
+              max_pos  = b;
+            }
+          }
+          if (dist < max_dist) {
+            best_dists[max_pos] = dist;
+            best_ids[max_pos]   = nid2;
+          }
+        }
+      }
+    }
+    // Finished finding top candidates for nid1
+    // Update the global candidate list with the top candidates using atomic
+    // operations.
+    if (tl_lane_id == 0) {
+      // Broadcast the number of valid candidates to all team members
+#pragma unroll
+      for (int b = 0; b < k_top_candidates; ++b) {
+        if (best_ids[b] == k_invalid_id) {
+          break;
+        }
+        // Jus atomically push candidate data to the shared candidate buffer
+        // without team-level synchronization
+        const auto cid     = best_ids[b];
+        const auto cdist   = best_dists[b];
+        const auto pos_add = atomicAdd(&candidates_counts[nid1], 1);
+        if (pos_add < candidates_ids.n_cols()) {
+          candidates_ids(nid1, pos_add)   = cid;
+          candidates_dists(nid1, pos_add) = cdist;
+        } else {
+          // Global candidate list is full already,
+          // just discard this candidate, hoping it will be included in the
+          // future if it's a true nearest neighbor.
+        }
+      }
+    }
+  }
+}
+
+// Calls check_neighbors_with_global_atomic_per_warp() for each point in
+// parallel.
+template <typename IDType, typename FEType, typename DistType, typename DistOp>
+SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
+    const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
+    const matrix_view<FEType>& pstore, matrix_view<IDType> candidates_ids,
+    matrix_view<DistType> candidates_dists, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
+  extern __shared__ IDType shared_knng_ids[];
+  const size_t             g_tid =
+      static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x) +
+      static_cast<size_t>(threadIdx.x);
+  const size_t g_warp_id = g_tid / warpSize;
+  const size_t n_global_warps =
+      (static_cast<size_t>(gridDim.x) * static_cast<size_t>(blockDim.x)) /
+      static_cast<size_t>(warpSize);
+  if (n_global_warps == 0) {
+    return;
+  }
+
+  for (size_t sid = g_warp_id; sid < pstore.n_rows(); sid += n_global_warps) {
+    check_neighbors_kernel<IDType, FEType, DistType, DistOp>(
+        nbs1(sid), nbs1.n_cols(), nbs2(sid), nbs2.n_cols(), pstore,
+        candidates_ids, candidates_dists, candidates_counts, knng_ids,
+        knng_dists, shared_knng_ids);
+  }
+}
+
+// Each thread independently updates its own KNNG list using the candidates in
+// the shared buffer.
+template <typename IDType, typename FEType, typename DistType>
+SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
+    matrix_view<IDType>   candidates_ids_table,
+    matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
+    size_t* n_updates_block) {
+  const size_t g_tid =
+      static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x) +
+      static_cast<size_t>(threadIdx.x);
+  // const auto   block_id = blockIdx.x;
+  const IDType sid = static_cast<int>(g_tid);
+  if (sid >= knng_ids.n_rows()) {
+    return;
+  }
+
+  auto* const nids  = knng_ids(sid);
+  auto* const dists = knng_dists(sid);
+  const int   k     = knng_ids.n_cols();
+
+  int n_candidates =
+      std::min<int>(candidates_counts[sid], candidates_ids_table.n_cols());
+  auto* const candidate_ids   = candidates_ids_table(sid);
+  auto* const candidate_dists = candidates_dists_table(sid);
+  // Sort candidates by ID to remove duplicate IDs
+  // Sorting by distance may not adjacent duplicate IDs due to distance value's
+  // float precision problem.
+  sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                               false);
+  n_candidates = remove_duplicate_neighbors<IDType, DistType>(
+      candidate_ids, candidate_dists, n_candidates);
+  sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                               true);
+
+  // Merge candidates into KNNG list.
+  // Both input KNNG and candidates lists must be sorted by distance (ID
+  // breaks ties) and must not have duplicates.
+  int knng_idx    = 0;
+  int c_idx       = 0;
+  int knng_tail   = k - 1;
+  int l_n_updates = 0;
+  while (c_idx < n_candidates && knng_idx <= knng_tail) {
+    // const auto knng_id   = clear_msb(nids[knng_idx]);
+    const auto knng_dist = dists[knng_idx];
+    const auto cid       = candidate_ids[c_idx];
+    const auto cdist     = candidate_dists[c_idx];
+
+    // TODO: use bit-map hash table to reduce the for loop check?
+    bool duplicate = false;
+    for (int i = 0; i <= knng_tail; ++i) {
+      if (clear_msb(nids[i]) == cid) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      // candidate is already in KNNG list
+      ++c_idx;
+      continue;
+    }
+
+    if (!nearly_equal(cdist, knng_dist) && cdist < knng_dist) {
+      // Candidate is better than the current neighbor
+      // Insert as new neighbor with MSB set
+      nids[knng_tail]  = set_msb<IDType>(cid);
+      dists[knng_tail] = cdist;
+      ++l_n_updates;
+      --knng_tail;
+      ++c_idx;
+    } else {
+      // Candidate is worse than or equal to the current neighbor, move to the
+      // next neighbor in KNNG list
+      ++knng_idx;
+    }
+  }
+  sort_neighbors_single_thread(nids, dists, k);
+  if (l_n_updates > 0) {
+    atomicAdd(&n_updates_block[blockIdx.x], static_cast<size_t>(l_n_updates));
+  }
+
+#ifndef NDEBUG
+  sort_neighbors_single_thread(nids, dists, k, false);
+  if (remove_duplicate_neighbors(nids, dists, k) != k) {
+    printf("Duplicates found in KNNG list of point %d after update.\n", sid);
+    for (int i = 0; i < k; ++i) {
+      printf("%d  Neighbor %d: ID %u, distance %f\n", sid, i,
+             clear_msb(nids[i]), dists[i]);
+    }
+    assert(false && "Duplicates found in KNNG list after update.");
+  }
+  sort_neighbors_single_thread(nids, dists, k, true);
+#endif
+
+#ifndef NDEBUG
+  // Check that KNNG list is still sorted after the update
+  for (int i = 0; i < k - 1; ++i) {
+    if (dists[i] < dists[i + 1]) {
+      continue;  // good
+    }
+
+    if (nearly_equal(dists[i], dists[i + 1])) {
+      if (clear_msb(nids[i]) < clear_msb(nids[i + 1])) {
+        continue;  // good
+      }
+      printf(
+          "Distance at position %d is equal to distance at position %d but "
+          "ID is greater for point %d. ID %u and %u (distance %f and %f)\n",
+          i, i + 1, sid, clear_msb(nids[i]), clear_msb(nids[i + 1]), dists[i],
+          dists[i + 1]);
+    } else if (dists[i] > dists[i + 1]) {
+      printf(
+          "Distance at position %d is greater than distance at position %d "
+          "for point %d. Distance %f and %f\n",
+          i, i + 1, sid, dists[i], dists[i + 1]);
+    }
+
+    assert(dists[i] < dists[i + 1] ||
+           (nearly_equal(dists[i], dists[i + 1]) &&
+            clear_msb(nids[i]) < clear_msb(nids[i + 1])));
+  }
+
+  // Check that there are no duplicates in the KNNG list
+  for (int i = 0; i < k - 1; ++i) {
+    for (int j = i + 1; j < k; ++j) {
+      if (clear_msb(nids[i]) == clear_msb(nids[j])) {
+        printf(
+            "Duplicate neighbor ID %u found in KNNG list of point %d at "
+            "positions %d and %d. Distance %f and %f\n",
+            clear_msb(nids[i]), sid, i, j, dists[i], dists[j]);
+      }
+      assert(clear_msb(nids[i]) != clear_msb(nids[j]));
+    }
+  }
+#endif
+}
+
+/// \brief Set MSB of neighbors in the range [k_begin, k_end) as new neighbors.
+template <typename IDType>
+SALTATLAS_HD_GLOBAL void set_msbs(
+    matrix_view<IDType> knng_ids, const int k_begin = 0,
+    const int k_end = std::numeric_limits<int>::max()) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = knng_ids.n_rows();
+  const size_t k        = knng_ids.n_cols();
+  if (sid >= n_points) {
+    return;
+  }
+
+  IDType* ids_row = knng_ids(sid);
+  for (size_t i = std::min<int>(k_begin, k); i < std::min<int>(k_end, k); ++i) {
+    ids_row[i] = set_msb(ids_row[i]);
+  }
+}
+
+template <typename IDType>
+SALTATLAS_HD_GLOBAL void clear_msbs(matrix_view<IDType> knng_ids) {
+  const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t n_points = knng_ids.n_rows();
+  const size_t k        = knng_ids.n_cols();
+  if (sid >= n_points) {
+    return;
+  }
+
+  IDType* ids_row = knng_ids(sid);
+  for (size_t i = 0; i < k; ++i) {
+    ids_row[i] = clear_msb(ids_row[i]);
+  }
+}
+
+template <typename IDType, typename FEType, typename DistType, typename DistOp>
+void build_index_main_loop(
+    const matrix_view<FEType>& pstore, const int k, const int p_new,
+    const int p_old, const float delta, const int max_iterations,
+    const hipDeviceProp_t& device_prop, const dim3& grid_points,
+    const dim3& grid_warp_points, const dim3& block, const size_t n_blocks,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
+    matrix_view<IDType> old_ng, hip_unique_ptr<int>& old_counts,
+    matrix_view<IDType> new_ng, hip_unique_ptr<int>& new_counts,
+    hip_unique_ptr<int>& old_counts_wk, hip_unique_ptr<int>& new_counts_wk) {
+  const size_t     n_points = pstore.n_rows();
+  matrix<IDType>   candidate_ids(n_points, k);
+  matrix<DistType> candidate_dists(n_points, k);
+  auto             candidate_counts_buf = make_hip_array<int>(n_points);
+  auto candidate_counts = span<int>(candidate_counts_buf.get(), n_points);
+  auto n_updates_block  = make_hip_array<size_t>(n_blocks);
+
+  int super_step_no = 0;
+  while (super_step_no < max_iterations) {
+    spdlog::trace("Super step: {}", super_step_no);
+
+    spdlog::trace("Prepare new and old neighbor lists");
+    rec_time().start("set_new_old");
+    hipLaunchKernelGGL((set_new_old<IDType>), grid_points, block, 0, nullptr,
+                       knng_ids, p_new, p_old, new_ng,
+                       span<int>(new_counts.get(), n_points), old_ng,
+                       span<int>(old_counts.get(), n_points));
+    SALTATLAS_HIP_CHECK(hipGetLastError());
+    SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+    rec_time().stop();  // set_new_old
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+    std::cout << "#of new neighbors (pid = 0): " << new_counts(0, 0)
+              << std::endl;
+    std::cout << "#of old neighbors (pid = 0): " << old_counts(0, 0)
+              << std::endl;
+#endif
+
+    spdlog::trace("Add reverse neighbors old");
+    rec_time().start("add_rev_old");
+    SALTATLAS_HIP_CHECK(hipMemcpy(old_counts_wk.get(), old_counts.get(),
+                                  n_points * sizeof(int),
+                                  hipMemcpyDeviceToDevice));
+    hipLaunchKernelGGL((add_reverse_neighbors<IDType>), grid_points, block, 0,
+                       nullptr, old_ng, span<int>(old_counts.get(), n_points),
+                       span<int>(old_counts_wk.get(), n_points));
+    SALTATLAS_HIP_CHECK(hipGetLastError());
+    SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+    rec_time().stop();  // add_reverse_neighbors_old
+
+    spdlog::trace("Remove duplicate neighbors old");
+    rec_time().start("remove_dup_old");
+    hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>), grid_points,
+                       block, 0, nullptr, old_ng);
+    SALTATLAS_HIP_CHECK(hipGetLastError());
+    // SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+    rec_time().stop();  // remove_dup_old
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+    std::cout << "#of old neighbors after removing dups (pid = 0): "
+              << old_counts(0, 0) << std::endl;
+#endif
+
+    spdlog::trace("Add reverse neighbors new");
+    rec_time().start("add_rev_new");
+    SALTATLAS_HIP_CHECK(hipMemcpy(new_counts_wk.get(), new_counts.get(),
+                                  n_points * sizeof(int),
+                                  hipMemcpyDeviceToDevice));
+    hipLaunchKernelGGL((add_reverse_neighbors<IDType>), grid_points, block, 0,
+                       nullptr, new_ng, span<int>(new_counts.get(), n_points),
+                       span<int>(new_counts_wk.get(), n_points));
+    SALTATLAS_HIP_CHECK(hipGetLastError());
+    SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+    rec_time().stop();  // add_reverse_neighbors_new
+
+    spdlog::trace("Remove duplicate neighbors new");
+    rec_time().start("remove_dup_new");
+    hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>), grid_points,
+                       block, 0, nullptr, new_ng);
+    SALTATLAS_HIP_CHECK(hipGetLastError());
+    SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+    rec_time().stop();  // remove_dup_new
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+    std::cout << "#of new neighbors after removing dups (pid = 0): "
+              << new_counts(0, 0) << std::endl;
+#endif
+
+    spdlog::trace("Neighbor checks and KNNG updates");
+    SALTATLAS_HIP_CHECK(
+        hipMemset(n_updates_block.get(), 0, n_blocks * sizeof(size_t)));
+
+    /// Perform neighbor checks for the given pairs of neighbor lists and update
+    /// KNNG
+    auto neighbor_checker = [&](const matrix_view<IDType>& nbs1,
+                                const matrix_view<IDType>& nbs2) {
+      const size_t n_teams_per_block = block.x / k_team_size;
+      const size_t ck_shared_bytes =
+          n_teams_per_block * static_cast<size_t>(k) * sizeof(IDType);
+      if (ck_shared_bytes > device_prop.sharedMemPerBlock) {
+        throw std::runtime_error(
+            "Neighbor check shared memory exceeds device limit. Reduce k or "
+            "increase team size.");
+      }
+
+      rec_time().start("init neighbor checks");
+      SALTATLAS_HIP_CHECK(
+          hipMemset(candidate_counts_buf.get(), 0, n_points * sizeof(int)));
+      SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+      rec_time().stop();  // init neighbor checks
+
+      rec_time().start("neighbor_checks");
+      hipLaunchKernelGGL(
+          (find_new_neighbor_candidates<IDType, FEType, DistType, DistOp>),
+          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2, pstore,
+          candidate_ids.get_view(), candidate_dists.get_view(),
+          candidate_counts, knng_ids, knng_dists);
+      SALTATLAS_HIP_CHECK(hipGetLastError());
+      SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+      rec_time().stop();  // neighbor_checks
+
+      rec_time().start("knng_updates");
+      hipLaunchKernelGGL(
+          (update_knng_with_candidates<IDType, FEType, DistType>), grid_points,
+          block, 0, nullptr, candidate_ids.get_view(),
+          candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+          n_updates_block.get());
+      SALTATLAS_HIP_CHECK(hipGetLastError());
+      SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+      rec_time().stop();  // knng_updates
+    };
+
+    // Run neighor checks for (new, new), (new, old), and (old, new) neighbor
+    // pairs.
+    neighbor_checker(new_ng, new_ng);
+    neighbor_checker(new_ng, old_ng);
+    neighbor_checker(old_ng, new_ng);
+
+#ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
+    size_t total_candidates = 0;
+    for (size_t i = 0; i < n_points; ++i) {
+      total_candidates += std::min(candidate_counts[i], k);
+    }
+    std::cout << "Average #of candidates per point: "
+              << (double(total_candidates) / n_points) << std::endl;
+#endif
+
+    size_t n_updates = 0;
+    for (size_t i = 0; i < n_blocks; ++i) {
+      n_updates += n_updates_block.get()[i];
+    }
+
+    spdlog::trace("#of updates: {}", n_updates);
+    if (n_updates <= double(delta) * size_t(k) * size_t(n_points)) {
+      break;
+    }
+    ++super_step_no;
+  }
+
+  // Always erase MSB markers, including max-iteration termination.
+  hipLaunchKernelGGL((clear_msbs<IDType>), grid_points, block, 0, nullptr,
+                     knng_ids);
+  SALTATLAS_HIP_CHECK(hipGetLastError());
+  SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+}
+}  // namespace
+
+template <typename IDType, typename FEType, typename DistType>
+std::pair<matrix<IDType>, matrix<DistType>> build_index(
+    const matrix_view<FEType>& pstore, const std::string_view dist_func,
+    const int k, const float rho, const float delta,
+    const uint64_t seed = 0x12345678abcdefULL, const int max_iterations = 100) {
+  if (dist_func == "l2") {
+    return build_index<IDType, FEType, DistType, l2_distance_op>(
+        pstore, k, rho, delta, seed, max_iterations);
+  }
+
+  if (dist_func == "cosine") {
+    // hipVS does not support cosine distance.
+    assert(false);
+    return build_index<IDType, FEType, DistType, cosine_distance_op>(
+        pstore, k, rho, delta, seed, max_iterations);
+  }
+
+  if (dist_func == "inner_product" || dist_func == "ip") {
+    return build_index<IDType, FEType, DistType, inner_product_distance_op>(
+        pstore, k, rho, delta, seed, max_iterations);
+  }
+
+  throw std::invalid_argument(
+      "Only l2, cosine, and inner_product distances are supported.");
+}
+
+template <typename IDType, typename FEType, typename DistType, typename DistOp>
+std::pair<matrix<IDType>, matrix<DistType>> build_index(
+    const matrix_view<FEType>& pstore, const int k, const float rho,
+    const float delta, const uint64_t seed = 0x12345678abcdefULL,
+    const int max_iterations = 100) {
+  static_assert(sizeof(IDType) == 4, "IDType must be 32-bit.");
+  if (!pstore.data()) {
+    throw std::invalid_argument("Point store is not initialized.");
+  }
+
+  const size_t n_points = pstore.n_rows();
+  const int    dims     = pstore.n_cols();
+  if (n_points == 0 || dims == 0 || k == 0) {
+    return {};
+  }
+  if (n_points <= k) {
+    throw std::invalid_argument("Number of points must be greater than k.");
+  }
+  if (max_iterations <= 0) {
+    throw std::invalid_argument("max_iterations must be greater than 0.");
+  }
+  spdlog::trace("Build KNNG: n_points={}, dims={}, k={}, rho={}, delta={}",
+                n_points, dims, k, rho, delta);
+
+  int device_index = 0;
+  SALTATLAS_HIP_CHECK(hipGetDevice(&device_index));
+  hipDeviceProp_t device_prop{};
+  SALTATLAS_HIP_CHECK(hipGetDeviceProperties(&device_prop, device_index));
+
+  assert(device_prop.warpSize == k_warp_size);
+  const dim3 block(k_nnd_block_size);
+  if (block.x < k_warp_size) {
+    throw std::runtime_error("Block size must be at least warp size.");
+  }
+  if (block.x % k_warp_size != 0) {
+    throw std::runtime_error("Block size must be a multiple of warp size.");
+  }
+  // One point per thread.
+  const size_t n_blocks = (n_points + block.x - 1) / block.x;
+  if (n_blocks > device_prop.maxGridSize[0]) {
+    throw std::runtime_error(
+        "Grid size exceeds device limit. Reduce the number of points or "
+        "increase "
+        "the block size.");
+  }
+  // Grid for single point per thread.
+  const dim3   grid_points(n_blocks);
+  const size_t n_warps_per_block = block.x / k_warp_size;
+  const size_t n_warp_blocks =
+      (n_points + n_warps_per_block - 1) / n_warps_per_block;
+  const size_t max_warp_blocks_by_tid =
+      std::numeric_limits<uint32_t>::max() / static_cast<size_t>(block.x);
+  const size_t n_warp_blocks_launch = std::min(
+      n_warp_blocks, std::min(static_cast<size_t>(device_prop.maxGridSize[0]),
+                              max_warp_blocks_by_tid));
+  if (n_warp_blocks_launch == 0) {
+    throw std::runtime_error("Neighbor check launch grid size became zero.");
+  }
+  spdlog::trace("Device: {}, block size: {}, grid size: {}", device_prop.name,
+                block.x, grid_points.x);
+  if (n_warp_blocks_launch < n_warp_blocks) {
+    spdlog::trace(
+        "Capped neighbor-check warp grid blocks from {} to {}. Kernels will "
+        "iterate over points in warp-stride loops to stay within launch "
+        "limits.",
+        n_warp_blocks, n_warp_blocks_launch);
+  }
+
+  // Grid for single point per warp.
+  const dim3 grid_warp_points(n_warp_blocks_launch);
+
+  spdlog::trace("Initialize KNNG");
+  rec_time().start("init_knng");
+  spdlog::trace("Allocate KNNG ID");
+  matrix<IDType> knng_ids(n_points, k);
+  spdlog::trace("Allocate KNNG distance");
+  matrix<DistType> knng_dists(n_points, k);
+  hipLaunchKernelGGL((init_knng<IDType, FEType, DistType, DistOp>), grid_points,
+                     block, 0, nullptr, pstore, k, seed, knng_ids.get_view(),
+                     knng_dists.get_view());
+  SALTATLAS_HIP_CHECK(hipGetLastError());
+  SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
+  rec_time().stop();  // init_knng
+
+#ifdef NDEBUG
+#ifdef SALTATLAS_SOLANET_APU_NND_EXTRA_CHECKS
+  // Check if knng_dists are sorted
+  for (size_t i = 0; i < n_points; ++i) {
+    for (int j = 0; j < k - 1; ++j) {
+      assert(knng_dists(i, j) <= knng_dists(i, j + 1));
+    }
+  }
+#endif
+#endif
+  // matrix<bool> checked_flags(n_points, k);
+  // std::memset(checked_flags.data(), 0, n_points * k * sizeof(bool));
+
+  // NN-Descent main loop
+  rec_time().start("nnd_main_loop");
+  // #of new points to check for each point in each iteration
+  const int p_new = static_cast<int>(k * rho);
+  // #of reversed new neighbors for each point in each iteration
+  const int p_r_new = static_cast<int>(k * rho);
+  // #of old points to check for each point in each iteration
+  const int p_old = static_cast<int>(k);
+  // #of reversed old neighbors for each point in each iteration
+  const int p_r_old = static_cast<int>(p_old * rho);
+
+  spdlog::trace(
+      "p_new: {}, p_r_new: {}, p_old: {}, p_r_old: {}. Total neighbors to "
+      "check per iteration per point: {}",
+      p_new, p_r_new, p_old, p_r_old, p_new + p_r_new + p_old + p_r_old);
+  spdlog::trace("Allocate new neighbor list");
+  matrix<IDType> new_ng(n_points, p_new + p_r_new);
+  spdlog::trace("Allocate old neighbor list");
+  matrix<IDType> old_ng(n_points, p_old + p_r_old);
+  spdlog::trace("Allocate new counts array");
+  auto new_counts = make_hip_array<int>(n_points);
+  spdlog::trace("Allocate old counts array");
+  auto old_counts = make_hip_array<int>(n_points);
+  // Used to atomically add reverse neighbors
+  auto new_counts_wk = make_hip_array<int>(n_points);
+  auto old_counts_wk = make_hip_array<int>(n_points);
+
+  build_index_main_loop<IDType, FEType, DistType, DistOp>(
+      pstore, k, p_new, p_old, delta, max_iterations, device_prop, grid_points,
+      grid_warp_points, block, n_blocks, knng_ids.get_view(),
+      knng_dists.get_view(), old_ng.get_view(), old_counts, new_ng.get_view(),
+      new_counts, old_counts_wk, new_counts_wk);
+  rec_time().stop();  // nnd_main_loop
+
+  return {std::move(knng_ids), std::move(knng_dists)};
+}
+
+}  // namespace saltatlas::solanet::apu_nn

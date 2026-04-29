@@ -17,11 +17,12 @@
 #include <memory>
 #include <metall/detail/file.hpp>
 #include <metall/detail/mmap.hpp>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "../../mpi.hpp"
+#include "saltatlas/neo_dnnd/mpi.hpp"
 
 namespace saltatlas::dndetail {
 
@@ -30,47 +31,47 @@ namespace mdtl = metall::mtlldetail;
 }
 
 template <typename T>
-struct shm_unique_ptr {
+struct ipc_mem_unique_ptr {
  public:
-  shm_unique_ptr() = default;
+  ipc_mem_unique_ptr() = default;
 
-  shm_unique_ptr(const std::string& name, int fd, T* addr, size_t length,
-                 bool is_owner = false)
+  ipc_mem_unique_ptr(const std::string& name, int fd, T* addr, size_t length,
+                     bool is_owner = false)
       : m_name(name),
         m_fd(fd),
         m_addr(addr),
         m_length(length),
         m_is_owner(is_owner) {}
 
-  ~shm_unique_ptr() noexcept { priv_destroy(); }
+  ~ipc_mem_unique_ptr() noexcept { priv_destroy(); }
 
-  shm_unique_ptr(const shm_unique_ptr&) = delete;
-  shm_unique_ptr& operator=(const shm_unique_ptr&) = delete;
+  ipc_mem_unique_ptr(const ipc_mem_unique_ptr&)            = delete;
+  ipc_mem_unique_ptr& operator=(const ipc_mem_unique_ptr&) = delete;
 
-  shm_unique_ptr(shm_unique_ptr&& other) noexcept
+  ipc_mem_unique_ptr(ipc_mem_unique_ptr&& other) noexcept
       : m_name(std::move(other.m_name)),
         m_fd(other.m_fd),
         m_addr(other.m_addr),
         m_length(other.m_length),
         m_is_owner(other.m_is_owner) {
-    other.m_fd = -1;
-    other.m_addr = nullptr;
-    other.m_length = 0;
+    other.m_fd       = -1;
+    other.m_addr     = nullptr;
+    other.m_length   = 0;
     other.m_is_owner = false;
   }
 
-  shm_unique_ptr& operator=(shm_unique_ptr&& other) noexcept {
+  ipc_mem_unique_ptr& operator=(ipc_mem_unique_ptr&& other) noexcept {
     if (this != &other) {
       priv_destroy();
-      m_name = std::move(other.m_name);
-      m_fd = other.m_fd;
-      m_addr = other.m_addr;
-      m_length = other.m_length;
+      m_name     = std::move(other.m_name);
+      m_fd       = other.m_fd;
+      m_addr     = other.m_addr;
+      m_length   = other.m_length;
       m_is_owner = other.m_is_owner;
 
-      other.m_fd = -1;
-      other.m_addr = nullptr;
-      other.m_length = 0;
+      other.m_fd       = -1;
+      other.m_addr     = nullptr;
+      other.m_length   = 0;
       other.m_is_owner = false;
     }
     return *this;
@@ -91,14 +92,16 @@ struct shm_unique_ptr {
  private:
   void priv_destroy() {
     if (m_is_owner) {
-      if (!mdtl::map_with_prot_none(m_addr, m_length * sizeof(T))) {
-        std::cerr << "Failed to unmap shared memory region: " << m_name
-                  << std::endl;
-        std::abort();
+      if (m_length > 0) {
+        if (!mdtl::map_with_prot_none(m_addr, m_length * sizeof(T))) {
+          std::cerr << "Failed to unmap shared memory region: " << m_name
+                    << std::endl;
+          std::abort();
+        }
       }
     }
 
-    if (m_addr != nullptr) {
+    if (m_addr != nullptr && m_length > 0) {
       mdtl::os_munmap(m_addr, m_length * sizeof(T));
     }
 
@@ -110,26 +113,26 @@ struct shm_unique_ptr {
       shm_unlink(m_name.c_str());
     }
 
-    m_addr = nullptr;
-    m_fd = -1;
+    m_addr   = nullptr;
+    m_fd     = -1;
     m_length = 0;
     m_name.clear();
     m_is_owner = false;
   }
 
   std::string m_name{};
-  int m_fd{-1};
-  T* m_addr{nullptr};
-  size_t m_length{0};
-  bool m_is_owner{false};
+  int         m_fd{-1};
+  T*          m_addr{nullptr};
+  size_t      m_length{0};
+  bool        m_is_owner{false};
 };
 
 template <typename T>
-inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
+inline std::vector<ipc_mem_unique_ptr<T>> create_and_open_ipc_storage(
     const std::string& shm_name, const size_t length, mpi::communicator& comm) {
-  const auto node_size = comm.node_size();
-  const auto nlc_rank = comm.node_local_rank();
-  const auto mem_size = length * sizeof(T);
+  const auto          node_size = comm.node_size();
+  const auto          nlc_rank  = comm.node_local_rank();
+  const auto          mem_size  = length * sizeof(T);
   std::vector<size_t> mem_sizes;
   comm.all_gather(mem_size, mem_sizes, false);
 
@@ -142,7 +145,9 @@ inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
   {
     int fd = shm_open(shm_names[nlc_rank].c_str(), O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
-      perror("shm_open (create)");
+      std::stringstream ss;
+      ss << "shm_open (create) for " << shm_names[nlc_rank];
+      perror(ss.str().c_str());
       comm.abort();
     }
 
@@ -156,12 +161,30 @@ inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
   comm.node_local_barrier();
 
   // Open and mmap all shared memory regions
-  std::vector<shm_unique_ptr<T>> shm_regions(node_size);
+  std::vector<ipc_mem_unique_ptr<T>> shm_regions(node_size);
   for (int i = 0; i < node_size; ++i) {
+    // If the requested region size is zero, avoid mmap/munmap and create
+    // an empty descriptor instead. Some ranks may have zero-sized
+    // partitions; mapping size 0 can return implementation-defined results
+    // and cause munmap/free issues later.
+    if (mem_sizes[i] == 0) {
+      // Close any fd if present (open below) and construct a null region.
+      int flags = (i == nlc_rank) ? O_RDWR : O_RDONLY;
+      int fd    = shm_open(shm_names[i].c_str(), flags, 0666);
+      if (fd != -1) {
+        close(fd);
+      }
+      shm_regions[i] =
+          ipc_mem_unique_ptr<T>(shm_names[i], -1, nullptr, 0, i == nlc_rank);
+      continue;
+    }
+
     int flags = (i == nlc_rank) ? O_RDWR : O_RDONLY;
-    int fd = shm_open(shm_names[i].c_str(), flags, 0666);
+    int fd    = shm_open(shm_names[i].c_str(), flags, 0666);
     if (fd == -1) {
-      perror("shm_open (access)");
+      std::stringstream ss;
+      ss << "shm_open (access) for " << shm_names[i];
+      perror(ss.str().c_str());
       comm.abort();
     }
 
@@ -174,8 +197,16 @@ inline std::vector<shm_unique_ptr<T>> create_and_open_shm(
                    << std::endl;
       comm.abort();
     }
-    shm_regions[i] = shm_unique_ptr<T>(shm_names[i], fd, static_cast<T*>(addr),
-                                       mem_sizes[i] / sizeof(T), i == nlc_rank);
+    shm_regions[i] =
+        ipc_mem_unique_ptr<T>(shm_names[i], fd, static_cast<T*>(addr),
+                              mem_sizes[i] / sizeof(T), i == nlc_rank);
+
+#ifndef NDEBUG
+    // Initialize the region with zero for debug
+    if (i == nlc_rank) {
+      std::memset(shm_regions[i].get(), 0, mem_sizes[i]);
+    }
+#endif
   }
   return shm_regions;
 }

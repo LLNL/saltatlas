@@ -8,10 +8,9 @@
 #include <cassert>
 #include <cstdlib>
 #include <memory>
-
 #include <queue>
+#include <vector>
 
-#include <boost/container/vector.hpp>
 #include <boost/version.hpp>
 #if defined(BOOST_VERSION) && BOOST_VERSION >= 108700
 #include <boost/unordered/unordered_flat_map.hpp>
@@ -36,32 +35,32 @@ namespace saltatlas::dndetail {
 /// \brief Data structure to store up to k nearest neighbors without duplicate
 /// neighbor IDs. Each neighbor can have an associated value in addition to
 /// distance.
-template <typename Id, typename Distance, typename Value = std::byte,
-          typename Alloc = std::allocator<std::byte>>
+template <typename Id, typename Distance, typename Value = std::byte>
 class unique_knn_heap {
  public:
   using id_type        = Id;
   using distance_type  = Distance;
   using value_type     = Value;
-  using allocator_type = Alloc;
   using neighbor_type  = detail::neighbor<id_type, distance_type>;
 
  private:
-  using heap_type = std::priority_queue<
-      neighbor_type,
-      boost::container::vector<neighbor_type,
-                               other_allocator<allocator_type, neighbor_type>>>;
+  // Farthest neighbor on the top of the heap
+  using heap_container_type = std::vector<neighbor_type>;
+  struct heap_type : public std::priority_queue<neighbor_type> {
+    inline const heap_container_type& get_container() const { return this->c; }
+  };
 
-  using map_type = boost::unordered_flat_map<
-      id_type, value_type, std::hash<id_type>, std::equal_to<>,
-      other_allocator<allocator_type, std::pair<const id_type, value_type>>>;
+  using map_type =
+      boost::unordered_flat_map<id_type, value_type, std::hash<id_type>,
+                                std::equal_to<>>;
 
  public:
-  explicit unique_knn_heap(const std::size_t k,
-                           allocator_type    alloc = allocator_type{})
-      : m_k(k), m_knn_heap(alloc), m_map(alloc) {
-    m_map.reserve(k);
+  explicit unique_knn_heap(const std::size_t k)
+      : m_k(k), m_knn_heap(), m_map() {
+    reserve(k);
   }
+
+  void reserve(const std::size_t n) { m_map.reserve(n); }
 
   /// \brief Push a neighbor if it is closer than the current farthest neighbor
   /// and is not one of the current neighbors.
@@ -118,15 +117,11 @@ class unique_knn_heap {
   std::size_t k() const { return m_k; }
 
   /// \brief Return neighbors.
+  /// \return Vector of neighbors sorted by distance (closest first).
   std::vector<neighbor_type> extract_neighbors() const {
-    std::vector<neighbor_type> neighbors;
-    neighbors.reserve(m_knn_heap.size());
-    auto tmp = m_knn_heap;
-    while (!tmp.empty()) {
-      neighbors.emplace_back(tmp.top());
-      tmp.pop();
-    }
-    std::reverse(neighbors.begin(), neighbors.end());
+    std::vector<neighbor_type> neighbors = {m_knn_heap.get_container().begin(),
+                                            m_knn_heap.get_container().end()};
+    std::sort(neighbors.begin(), neighbors.end());
     return neighbors;
   }
 
