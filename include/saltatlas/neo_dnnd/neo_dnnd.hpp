@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -181,6 +182,7 @@ class neo_dnnd {
     if (!priv_check_mpi_rank_map()) {
       m_comm.abort();
     }
+    priv_check_omp_thread_map();
 
     if (!m_time_recorder) {
       m_time_recorder = m_default_time_recorder;
@@ -628,6 +630,25 @@ class neo_dnnd {
     m_comm.barrier();
 
     return true;
+  }
+
+  void priv_check_omp_thread_map() const {
+    OMP_DIRECTIVE(parallel) {
+      const auto n_threads           = utility::omp::get_num_threads();
+      const auto n_node_local_procs  = m_comm.node_size();
+      const auto n_available_threads = std::thread::hardware_concurrency();
+      if (n_threads * n_node_local_procs > n_available_threads) {
+        OMP_DIRECTIVE(single) {
+          m_comm.cerr0()
+              << "Warning: [#of OpenMP threads per process (" << n_threads
+              << ")] x [#of processes per node (" << n_node_local_procs
+              << ")] > [#of available max threads (" << n_available_threads
+              << ")]. This may lead to oversubscription and performance "
+                 "degradation."
+              << std::endl;
+        }
+      }
+    }
   }
 
   inline void priv_show_dram_usage() const {
