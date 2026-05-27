@@ -29,9 +29,9 @@ using pm_id_type = saltatlas::pm_str_id_type;
 
 namespace {
 
-using point_type = saltatlas::pm_feature_vector<double>;
+using point_type = saltatlas::pm_feature_vector<float>;
 using index_type =
-    saltatlas::dnnd_adv<pm_id_type, point_type, double, saltatlas::str_hash<>>;
+    saltatlas::dnnd_adv<pm_id_type, point_type, float, saltatlas::str_hash<>>;
 using neighbor_type       = typename index_type::neighbor_type;
 using neighbor_store_type = typename index_type::neighbor_store_type;
 using dataset_type        = std::vector<std::pair<pm_id_type, point_type>>;
