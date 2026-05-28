@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 
 #include <boost/version.hpp>
 #include <metall/metall.hpp>
@@ -157,10 +158,12 @@ class compact_point_store {
   inline std::size_t dims() const { return m_num_dims; }
 
   const_iterator begin() const {
-    return const_iterator(m_id_map.cbegin(), data());
+    return const_iterator(m_id_map.cbegin(), data(), dims());
   }
 
-  const_iterator end() const { return const_iterator(m_id_map.cend(), data()); }
+  const_iterator end() const {
+    return const_iterator(m_id_map.cend(), data(), dims());
+  }
 
   const_id_iterator ids_begin() const {
     return const_id_iterator(m_id_map.cbegin());
@@ -187,14 +190,16 @@ class compact_point_store<_id_type, _value_type,
                           _allocator_type>::const_iterator {
  private:
   using id_table_iterator = typename id_table_t::const_iterator;
+  using entry_type        = std::pair<id_type, std::span<const value_type>>;
 
  public:
   using iterator_category = std::forward_iterator_tag;
 
   const_iterator() = default;
 
-  explicit const_iterator(id_table_iterator itr, pointer data)
-      : m_it(itr), m_data(data) {}
+  explicit const_iterator(id_table_iterator itr, const value_type *data,
+                          std::size_t num_dims)
+      : m_it(itr), m_data(data), m_num_dims(num_dims) {}
 
   const_iterator &operator++() {
     ++m_it;
@@ -211,21 +216,26 @@ class compact_point_store<_id_type, _value_type,
 
   bool operator!=(const const_iterator &rhs) const { return m_it != rhs.m_it; }
 
-  std::pair<id_type, value_type *> operator*() const {
-    return priv_get_value();
-  }
+  entry_type operator*() const { return priv_get_value(); }
 
-  std::pair<id_type, value_type *> operator->() const { priv_get_value(); }
+  const entry_type *operator->() const {
+    m_value = priv_get_value();
+    return &m_value;
+  }
 
  private:
-  std::pair<id_type, value_type *> priv_get_value() const {
+  entry_type priv_get_value() const {
     const auto id          = m_it->first;
     const auto internal_id = m_it->second;
-    return std::make_pair(id, m_data + internal_id);
+    return std::make_pair(
+        id, std::span<const value_type>(m_data + internal_id * m_num_dims,
+                                        m_num_dims));
   }
 
-  id_table_iterator m_it;
-  pointer           m_data;
+  id_table_iterator  m_it;
+  const value_type  *m_data{nullptr};
+  std::size_t        m_num_dims{0};
+  mutable entry_type m_value{};
 };
 
 template <typename _id_type, typename _value_type, typename _allocator_type>
