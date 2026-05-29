@@ -57,7 +57,7 @@ struct options {
   std::string knng_dump_dir;
   bool        optimize         = false;
   double      pruning_factor   = -1;
-  int         num_threads      = 2;
+  int         num_threads      = -1;
   std::size_t batch_size       = 1ULL << 25;
   double      popular_fv_ratio = 0.0f;
   bool        dump_distance    = false;
@@ -85,6 +85,7 @@ struct options {
 
 template <typename ost>
 void usage(ost& os) {
+  const auto default_opt = options{};
   // Show detailed usage
   os << "Usage: neo_dnnd [options]" << std::endl;
   os << "Options:"
@@ -102,19 +103,25 @@ void usage(ost& os) {
         "\n \tor 'levenshtein' (Levenshtein distance)."
      << "\n -k [int, required] k for KNNG building."
      << "\n -r [double, optional] rho (sampling) parameter in NN-Descent. "
-        "Default: 0.5."
+     << "Default: " << default_opt.rho << "."
      << "\n -d [double, optional] delta (terminal condition) parameter in "
-        "NN-Descent. Default: 0.001."
-     << "\n -t [int, optional] Number of threads per MPI rank. Default: 2."
-     << "\n -b [int, optional] KNNG building batch size. Default: 2^25."
+        "NN-Descent. Default: "
+     << default_opt.delta << "."
+     << "\n -t [int, optional] Number of threads per MPI rank. Default: "
+     << default_opt.num_threads << " (do not set explicitly)."
+     << "\n -b [int, optional] KNNG building batch size. Default: "
+     << default_opt.batch_size << "."
      << "\n -P [double, optional] Ratio of FVs to replicate. Between 0 and "
-        "1.0. Default: 0."
+        "1.0. Default: "
+     << default_opt.popular_fv_ratio << "."
      << "\n -O [optional] Optimize KNNG after building."
      << "\n -m [double, optional] High-degree edge pruning factor for "
-        "optimization.  Default: -1 (no pruning)."
-     << "\n -G [string, optional] Directory to dump KNNG. Default: no dump."
+        "optimization.  Default: "
+     << default_opt.pruning_factor << " (no pruning)."
+
+     << "\n -G [string, optional] Directory to dump KNNG."
      << "\n -D [optional] Dump distance to output KNNG files."
-     << "\n -v [flag, optional] Verbose mode." << std::endl;
+     << "\n -v [flag, optional] Enable verbose mode." << std::endl;
 }
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
@@ -224,7 +231,9 @@ int main(int argc, char* argv[]) {
       goto EXIT_NORMAL;
     }
     opt.show(comm.cout0());
-    utility::omp::set_num_threads(opt.num_threads);
+    if (opt.num_threads > 0) {
+      utility::omp::set_num_threads(opt.num_threads);
+    }
     if (opt.verbose) {
       {
         OMP_DIRECTIVE(parallel) {

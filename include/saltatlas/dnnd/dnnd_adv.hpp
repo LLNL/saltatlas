@@ -90,7 +90,7 @@ struct open_read_only_t {};
 /// \tparam Distance Distance type.
 /// \tparam IdHash Point ID hasher for externally keyed APIs.
 template <typename Id       = uint64_t,
-          typename Point    = saltatlas::pm_feature_vector<double>,
+          typename Point    = saltatlas::pm_feature_vector<float>,
           typename Distance = double, typename IdHash = std::hash<Id>>
 class dnnd_adv {
  private:

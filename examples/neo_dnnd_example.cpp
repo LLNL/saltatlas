@@ -93,6 +93,21 @@ int main(int argc, char* argv[]) {
       }
       dnnd.add_points(ids.begin(), ids.end(), points.begin(), points.end());
 
+      // Show stored points on rank 0
+      if (comm.rank() == 0) {
+        std::cout << "#of points stored on rank 0: " << dnnd.num_local_points()
+                  << std::endl;
+        std::cout << "Stored points on rank 0:" << std::endl;
+        for (const auto& point : dnnd.local_points()) {
+          std::cout << "ID: " << point.first << ", Features: [";
+          for (const auto& elem : point.second) {
+            std::cout << elem << " ";
+          }
+          std::cout << "]" << std::endl;
+        }
+      }
+      comm.cout0() << "#of points: " << dnnd.num_points() << std::endl;
+
       dnnd.build(2);
     }
     comm.barrier();

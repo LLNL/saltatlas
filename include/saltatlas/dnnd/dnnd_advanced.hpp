@@ -10,7 +10,7 @@ namespace saltatlas {
 /// \warning This alias is deprecated and will be removed in future releases.
 /// Please use `dnnd_adv` instead.
 template <typename Id       = uint64_t,
-          typename Point    = saltatlas::pm_feature_vector<double>,
+          typename Point    = saltatlas::pm_feature_vector<float>,
           typename Distance = double, typename IdHash = std::hash<Id>>
 using dnnd = dnnd_adv<Id, Point, Distance, IdHash>;
 

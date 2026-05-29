@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -36,6 +37,7 @@
 #include "detail/point_reader.hpp"
 #include "saltatlas/common/detail/neighbor.hpp"
 #include "saltatlas/common/detail/utilities/hash.hpp"
+#include "saltatlas/common/detail/utilities/iterator_proxy.hpp"
 #include "saltatlas/dnnd/detail/knn_heap.hpp"
 #include "saltatlas/dnnd/detail/utilities/omp.hpp"
 #include "saltatlas/dnnd/detail/utilities/system.hpp"
@@ -92,17 +94,20 @@ inline int partition(const id_type id, const int comm_size) {
 template <typename _id_type, typename _fe_type, typename _distance_type>
 class neo_dnnd {
  public:
-  using id_type       = _id_type;
-  using fe_type       = _fe_type;
-  using distance_type = _distance_type;
-  using point_store   = saltatlas::compact_point_store<
-        id_type, fe_type, metall::manager::allocator_type<std::byte>>;
+  using id_type          = _id_type;
+  using fe_type          = _fe_type;
+  using distance_type    = _distance_type;
+  using point_store_type = saltatlas::compact_point_store<
+      id_type, fe_type, metall::manager::allocator_type<std::byte>>;
   using point_type = std::span<fe_type>;
   using distance_function =
       distance::distance_function_type<point_type, distance_type>;
 
   static_assert(sizeof(std::pair<id_type, id_type>) == 2 * sizeof(id_type),
                 "sizeof(std::pair<id_type, id_type>) != 2 * sizeof(id_type)");
+
+  using iterator_proxy_type =
+      detail::iterator_proxy<typename point_store_type::const_iterator>;
 
  private:
   struct __attribute__((packed)) id_pair_type {
@@ -181,6 +186,7 @@ class neo_dnnd {
     if (!priv_check_mpi_rank_map()) {
       m_comm.abort();
     }
+    priv_check_omp_thread_map();
 
     if (!m_time_recorder) {
       m_time_recorder = m_default_time_recorder;
@@ -573,6 +579,35 @@ class neo_dnnd {
     }
   }
 
+  /// \brief Returns an iterator that points to the beginning of the local
+  /// points.
+  auto local_points_begin() const {
+    const auto* pstore = m_point_stores[m_comm.node_local_rank()];
+    assert(pstore);
+    return pstore->begin();
+  };
+
+  /// \brief Returns an iterator that points to the end of the local points.
+  auto local_points_end() const {
+    const auto* pstore = m_point_stores[m_comm.node_local_rank()];
+    assert(pstore);
+    return pstore->end();
+  };
+
+  /// \brief Get the number of local points.
+  std::size_t num_local_points() const {
+    const auto* pstore = m_point_stores[m_comm.node_local_rank()];
+    assert(pstore);
+    return pstore->size();
+  };
+
+  std::size_t num_points() const { return m_num_total_points; }
+
+  /// \brief API for using 'for_each' with local points.
+  iterator_proxy_type local_points() const {
+    return iterator_proxy_type(local_points_begin(), local_points_end());
+  }
+
  private:
   inline std::ostream& priv_cout0(const bool verbose) const {
     static std::ostringstream dummy;
@@ -628,6 +663,25 @@ class neo_dnnd {
     m_comm.barrier();
 
     return true;
+  }
+
+  void priv_check_omp_thread_map() const {
+    OMP_DIRECTIVE(parallel) {
+      const auto n_threads           = utility::omp::get_num_threads();
+      const auto n_node_local_procs  = m_comm.node_size();
+      const auto n_available_threads = std::thread::hardware_concurrency();
+      if (n_threads * n_node_local_procs > n_available_threads) {
+        OMP_DIRECTIVE(single) {
+          m_comm.cerr0()
+              << "Warning: [#of OpenMP threads per process (" << n_threads
+              << ")] x [#of processes per node (" << n_node_local_procs
+              << ")] > [#of available max threads (" << n_available_threads
+              << ")]. This may lead to oversubscription and performance "
+                 "degradation."
+              << std::endl;
+        }
+      }
+    }
   }
 
   inline void priv_show_dram_usage() const {
@@ -838,7 +892,7 @@ class neo_dnnd {
 
     const std::string path = priv_get_pstore_name(m_comm.rank());
     metall::manager   manager(metall::create_only, path);
-    auto* pstore = manager.construct<point_store>(metall::unique_instance)(
+    auto* pstore = manager.construct<point_store_type>(metall::unique_instance)(
         manager.get_allocator());
     const auto dims = (ids.size() > 0) ? fvs.front().size() : 0;
     pstore->init(ids.size(), m_num_dims);
@@ -877,7 +931,7 @@ class neo_dnnd {
           new metall::manager(metall::open_read_only, path));
       assert(m_point_store_managers.back());
       auto* pstore = m_point_store_managers.back()
-                         ->find<point_store>(metall::unique_instance)
+                         ->find<point_store_type>(metall::unique_instance)
                          .first;
       assert(pstore);
       m_point_stores.emplace_back(pstore);
@@ -1833,10 +1887,10 @@ class neo_dnnd {
   std::size_t m_num_total_points{0};
 
   // Core data structures
-  knn_heap_adj_list_t             m_graph{};
-  std::vector<const point_store*> m_point_stores;
-  std::vector<metall::manager*>   m_point_store_managers;
-  std::unique_ptr<pfv_store_t>    m_pfv_store;
+  knn_heap_adj_list_t                  m_graph{};
+  std::vector<const point_store_type*> m_point_stores;
+  std::vector<metall::manager*>        m_point_store_managers;
+  std::unique_ptr<pfv_store_t>         m_pfv_store;
 
   std::size_t m_num_dims{0};
   std::size_t m_super_step_no{0};
