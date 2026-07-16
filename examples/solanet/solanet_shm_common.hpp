@@ -13,7 +13,7 @@ using fe_type = SALTATLAS_FEATURE_ELEMENT_TYPE;
 #else
 using fe_type = float;
 #endif
-using dist_type = float;
+using dist_type       = float;
 using e2i_id_map_type = std::unordered_map<id_type, id_type>;
 
 inline void show_index_score(const dist_type* dists, const size_t n_points,
@@ -38,11 +38,10 @@ inline void show_index_score(const dist_type* dists, const size_t n_points,
   }
 }
 
-inline void dump_knng(
-    const saltatlas::solanet::apu_nn::matrix_view<id_type>&   knn_ids,
-    const saltatlas::solanet::apu_nn::matrix_view<dist_type>& knn_dists,
-    const std::filesystem::path&                              output_path,
-    const bool dump_distance = false) {
+template <typename IdView, typename DistView>
+inline void dump_knng(const IdView& knn_ids, const DistView& knn_dists,
+                      const std::filesystem::path& output_path,
+                      const bool                   dump_distance = false) {
   std::ofstream ofs(output_path);
   if (!ofs) {
     throw std::runtime_error("Failed to open output file: " +
@@ -78,7 +77,7 @@ inline void dump_knng(
 
 inline void print_time_table() {
   if (saltatlas::rec_time().num_running_timers() > 0) {
-    spdlog::error("Some timers are still running.");
+    std::cerr << "Some timers are still running." << std::endl;
   } else {
     std::cout << "\n====================" << std::endl;
     std::cout << "Time table (seconds):" << std::endl;

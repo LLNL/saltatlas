@@ -138,16 +138,11 @@ function(setup_mpi_target target_name)
 endfunction()
 
 # CUDA
-# -DCMAKE_PREFIX_PATH="/p/vast1/iwabuchi/raft/cpp/build/install/;/p/vast1/iwabuchi/cuvs/cpp/build/install/"
 option(SALTATLAS_USE_CUVS "Use CUDA" OFF)
 if (SALTATLAS_USE_CUVS)
     find_package(CUDAToolkit REQUIRED)
     if (NOT CMAKE_CUDA_ARCHITECTURES)
-        if (ON_LASSEN)
-            set(CMAKE_CUDA_ARCHITECTURES 70) # Lassen is 70
-        else ()
-            set(CMAKE_CUDA_ARCHITECTURES 90) # Matrix is 90
-        endif ()
+        set(CMAKE_CUDA_ARCHITECTURES 90) # Matrix is 90
     endif ()
     enable_language(CUDA)
 
@@ -164,9 +159,6 @@ if (SALTATLAS_USE_CUVS)
 endif ()
 
 function(setup_cuvs_target target_name)
-    include_directories(/p/vast1/iwabuchi/nccl/build/include)
-    find_library(NCCL_LIBRARY nccl HINTS /p/vast1/iwabuchi/nccl/build/lib/)
-
     target_include_directories(
             ${target_name} PUBLIC ${CUDAToolkit_INCLUDE_DIRS}
     )

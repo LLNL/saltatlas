@@ -21,3 +21,11 @@ if (SALTATLAS_USE_APU)
     setup_hip_target(${target_name})
     setup_hipvs_target(${target_name})
 endif()
+
+if (SALTATLAS_USE_CUVS)
+    add_fe_typed_exe(run_cuvs_single_gpu_nndescent float)
+    setup_cuvs_target(${target_name})
+
+    add_fe_typed_exe(run_cuvs_single_gpu_nndescent uint8_t)
+    setup_cuvs_target(${target_name})
+endif()

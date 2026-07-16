@@ -24,14 +24,10 @@
 #include <raft/core/pinned_mdarray.hpp>
 #include <raft/core/resources.hpp>
 #include <raft/util/cudart_utils.hpp>
-#include <rmm/mr/device/device_memory_resource.hpp>
-#include <rmm/mr/device/pool_memory_resource.hpp>
 
 #include "saltatlas/solanet/detail/cuvs_nn/utils.hpp"
 
 namespace saltatlas::solanet::cuvs_nn {
-using rmm_mem_pool_type =
-    rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource>;
 
 using raft_index_t = int64_t;
 template <typename T>
@@ -151,7 +147,7 @@ inline auto copy_to_dev(MatrixViewT             h_matrix_view,
              h_matrix_view.size(), stream);
   raft::resource::sync_stream(dev_res, stream);
 
-  std::cout << "Copy to device done." << std::endl;
+  // std::cout << "Copy to device done." << std::endl;
 
   return d_matrix;
 }
