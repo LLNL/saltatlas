@@ -38,7 +38,9 @@
 #include <utility>
 #include <vector>
 
+#if !defined(__CUDACC__)
 #include <hip/hip_runtime.h>
+#endif
 #include <spdlog/spdlog.h>
 
 #include "saltatlas/solanet/detail/apu_nn/algorithm.hpp"
@@ -52,7 +54,7 @@
 namespace saltatlas::solanet::apu_nn {
 
 namespace {
-static constexpr int k_warp_size      = 64;
+static constexpr int k_warp_size      = k_native_warp_size;
 static constexpr int k_nnd_block_size = 128;
 static constexpr int k_team_size      = SALTATLAS_SOLANET_APU_NND_TEAM_SIZE;
 static constexpr int k_top_candidates =
@@ -141,8 +143,11 @@ struct nbr_ck_profile_data {
 // static_assert(k_n_bf_bits % 8 == 0, "Bloom filter bits must be multiple of
 // 8");
 
+// Note: kernel parameters are passed by value. Reference parameters would
+// make the device dereference a host stack address, which only works on
+// unified-memory APUs and crashes on discrete GPUs.
 template <typename IDType, typename FEType, typename DistType, typename DistOp>
-__global__ void init_knng(const matrix_view<FEType>& pstore, const int k,
+__global__ void init_knng(const matrix_view<FEType> pstore, const int k,
                           const uint64_t seed, matrix_view<IDType> knng_ids,
                           matrix_view<DistType> knng_dists) {
   const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
@@ -445,11 +450,11 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
       // Gather the in_knng flag to the team leader lane
 #pragma unroll
       for (int kk = 1; kk < k_team_size; ++kk) {
-        in_knng |= __shfl_down(in_knng, kk, k_team_size);
+        in_knng |= shfl_down(in_knng, kk, k_team_size);
       }
       // Broadcast the in_knng flag from the team leader lane to all team
       // members
-      in_knng = __shfl(in_knng, team_lead_lane, k_team_size);
+      in_knng = shfl_bcast(in_knng, team_lead_lane, k_team_size);
       if (in_knng) {
         // Already connected in current KNNG; skip expensive distance op.
         continue;
@@ -518,7 +523,7 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 template <typename IDType, typename FEType, typename DistType, typename DistOp>
 SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
-    const matrix_view<FEType>& pstore, matrix_view<IDType> candidates_ids,
+    const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
   extern __shared__ IDType shared_knng_ids[];
@@ -619,7 +624,8 @@ SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
   }
   sort_neighbors_single_thread(nids, dists, k);
   if (l_n_updates > 0) {
-    atomicAdd(&n_updates_block[blockIdx.x], static_cast<size_t>(l_n_updates));
+    atomic_add_u64(&n_updates_block[blockIdx.x],
+                   static_cast<size_t>(l_n_updates));
   }
 
 #ifndef NDEBUG
@@ -679,10 +685,10 @@ SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
 }
 
 /// \brief Set MSB of neighbors in the range [k_begin, k_end) as new neighbors.
+/// (No default arguments: CUDA does not allow them on __global__ functions.)
 template <typename IDType>
-SALTATLAS_HD_GLOBAL void set_msbs(
-    matrix_view<IDType> knng_ids, const int k_begin = 0,
-    const int k_end = std::numeric_limits<int>::max()) {
+SALTATLAS_HD_GLOBAL void set_msbs(matrix_view<IDType> knng_ids,
+                                  const int k_begin, const int k_end) {
   const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
   const size_t n_points = knng_ids.n_rows();
   const size_t k        = knng_ids.n_cols();
@@ -855,9 +861,16 @@ void build_index_main_loop(
               << (double(total_candidates) / n_points) << std::endl;
 #endif
 
+    // Copy the per-block update counters to the host explicitly. Reading
+    // device memory directly from the host only works on unified-memory APUs.
+    std::vector<size_t> h_n_updates_block(n_blocks);
+    SALTATLAS_HIP_CHECK(hipMemcpy(h_n_updates_block.data(),
+                                  n_updates_block.get(),
+                                  n_blocks * sizeof(size_t),
+                                  hipMemcpyDeviceToHost));
     size_t n_updates = 0;
     for (size_t i = 0; i < n_blocks; ++i) {
-      n_updates += n_updates_block.get()[i];
+      n_updates += h_n_updates_block[i];
     }
 
     spdlog::trace("#of updates: {}", n_updates);

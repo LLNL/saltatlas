@@ -21,8 +21,10 @@
 #include <string_view>
 #include <type_traits>
 
+#if !defined(__CUDACC__)
 #include <hip/hip_runtime.h>
 #include <rocprim/block/block_reduce.hpp>
+#endif
 
 #include "saltatlas/solanet/detail/apu_nn/utils.hpp"
 
@@ -139,7 +141,7 @@ __host__ __device__ inline acc_type_t<T> inner_product_simd(const T*     a,
 template <typename T>
 __host__ __device__ inline acc_type_t<T> l2(const T* a, const T* b,
                                             const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   return l2_simd(a, b, dims);
 #else
   acc_type_t<T> sum = acc_type_t<T>(0);
@@ -155,7 +157,7 @@ __host__ __device__ inline acc_type_t<T> l2(const T* a, const T* b,
 template <typename T>
 __host__ __device__ inline acc_type_t<T> alt_cosine(const T* a, const T* b,
                                                     const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   return alt_cosine_simd(a, b, dims);
 #else
   using acc_t = acc_type_t<T>;
@@ -190,7 +192,7 @@ __host__ __device__ inline acc_type_t<T> alt_cosine(const T* a, const T* b,
 template <typename T>
 __host__ __device__ inline acc_type_t<T> inner_product(const T* a, const T* b,
                                                        const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   return inner_product_simd(a, b, dims);
 #else
   acc_type_t<T> dot = acc_type_t<T>(0);
@@ -210,7 +212,7 @@ __host__ __device__ inline acc_type_t<T> inner_product(const T* a, const T* b,
 template <typename T, int TEAM_SIZE = 8>
 __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
                                                          const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   static_assert(TEAM_SIZE > 0, "TEAM_SIZE must be positive.");
   static_assert((TEAM_SIZE & (TEAM_SIZE - 1)) == 0,
                 "TEAM_SIZE must be a power of two.");
@@ -228,9 +230,9 @@ __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {
-    n0 += __shfl_down(n0, offset, TEAM_SIZE);
-    n1 += __shfl_down(n1, offset, TEAM_SIZE);
-    dot += __shfl_down(dot, offset, TEAM_SIZE);
+    n0 += shfl_down(n0, offset, TEAM_SIZE);
+    n1 += shfl_down(n1, offset, TEAM_SIZE);
+    dot += shfl_down(dot, offset, TEAM_SIZE);
   }
 
   if (nearly_equal<acc_t>(n0, acc_t(0)) && nearly_equal<acc_t>(n1, acc_t(0)))
@@ -259,7 +261,7 @@ __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
 template <typename T, int TEAM_SIZE = 8>
 __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
                                                  const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   static_assert(TEAM_SIZE > 0, "TEAM_SIZE must be positive.");
   static_assert((TEAM_SIZE & (TEAM_SIZE - 1)) == 0,
                 "TEAM_SIZE must be a power of two.");
@@ -272,7 +274,7 @@ __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {
-    sum += __shfl_down(sum, offset, TEAM_SIZE);
+    sum += shfl_down(sum, offset, TEAM_SIZE);
   }
 #else
   acc_type_t<T> sum = acc_type_t<T>(0);
@@ -299,7 +301,7 @@ template <typename T, int TEAM_SIZE = 8>
 __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
                                                             const T*     b,
                                                             const size_t dims) {
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
   static_assert(TEAM_SIZE > 0, "TEAM_SIZE must be positive.");
   static_assert((TEAM_SIZE & (TEAM_SIZE - 1)) == 0,
                 "TEAM_SIZE must be a power of two.");
@@ -311,7 +313,7 @@ __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {
-    dot += __shfl_down(dot, offset, TEAM_SIZE);
+    dot += shfl_down(dot, offset, TEAM_SIZE);
   }
   // Keep the same min-close convention as other IP distance paths.
   return -dot;

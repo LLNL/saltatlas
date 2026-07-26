@@ -13,7 +13,9 @@
 #include <type_traits>
 #include <utility>
 
+#if !defined(__CUDACC__)
 #include <hip/hip_runtime.h>
+#endif
 
 #include "saltatlas/solanet/detail/apu_nn/utils.hpp"
 
@@ -72,7 +74,7 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void warp_compare_exchange(
   }
 }
 
-template <typename KeyT, typename ValT, int M, int WARP = 64>
+template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size>
 SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys, ValT* vals,
                                                   int n) {
   constexpr int NMAX = WARP * M;
@@ -109,7 +111,7 @@ SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys, ValT* vals,
   }
 }
 
-template <typename KeyT, typename ValT, int M, int WARP = 64>
+template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size>
 SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys,
                                                   ValT* vals = nullptr) {
   constexpr int N = WARP * M;
@@ -295,7 +297,7 @@ SALTATLAS_HD_DEVICE inline int merge_path_partition(const KeyT* A, int nA,
  * @param tmpA   Temporary buffer of size nA.
  * @param A_out  Output buffer (can be same as A).
  */
-template <typename KeyT, typename ValueT, int kWarpSize = 64>
+template <typename KeyT, typename ValueT, int kWarpSize = k_native_warp_size>
 SALTATLAS_HD_DEVICE inline void merge_and_keep_best(
     const KeyT* A_key, const ValueT* A_val, int nA, const KeyT* B_key,
     const ValueT* B_val, int nB, KeyT* tmp_key, ValueT* tmp_val,
