@@ -27,6 +27,9 @@
 #include <vector>
 
 #include <cuda_runtime.h>
+#include <rmm/cuda_device.hpp>
+#include <rmm/mr/per_device_resource.hpp>
+#include <rmm/mr/pool_memory_resource.hpp>
 
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
 #include <saltatlas/shm_knng_query/data_reader.hpp>
@@ -93,6 +96,7 @@ struct options {
   double                rho{0.5};
   double                delta{0.0001};
   int                   max_iterations{100};
+  double                rmm_pool_size_gb{-1};
   std::filesystem::path output_path{};
   bool                  dump_distance{false};
   bool                  verbose{false};
@@ -106,6 +110,7 @@ struct options {
     std::cout << "rho: " << rho << std::endl;
     std::cout << "delta: " << delta << std::endl;
     std::cout << "max_iterations: " << max_iterations << std::endl;
+    std::cout << "rmm_pool_size_gb: " << rmm_pool_size_gb << std::endl;
     std::cout << "output_path: " << output_path << std::endl;
     std::cout << "dump_distance: " << dump_distance << std::endl;
     std::cout << "verbose: " << verbose << std::endl;
@@ -114,7 +119,7 @@ struct options {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:G:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:G:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.point_files_path = std::filesystem::path(optarg);
@@ -136,6 +141,9 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'm':
         opt.max_iterations = std::stoi(optarg);
+        break;
+      case 'M':
+        opt.rmm_pool_size_gb = std::stod(optarg);
         break;
       case 'G':
         opt.output_path = optarg;
@@ -198,6 +206,10 @@ void show_usage(const char* prog_name) {
       << "  -m <max_iterations>: Maximum iterations for nn-descent (default: "
          "100)"
       << std::endl;
+  std::cout
+      << "  -M <rmm_pool_size_gb>: RMM pool size in GB (default: use all free "
+         "memory with some margin)"
+      << std::endl;
   std::cout << "  -G <output_path>: If specified, dump the KNNG to the given "
                "path. Distance will be dumped if -D is also specified."
             << std::endl;
@@ -242,6 +254,21 @@ int main(int argc, char* argv[]) {
               << " (" << static_cast<double>(prop.totalGlobalMem) / (1ULL << 30)
               << " GB)" << std::endl;
   }
+
+  double pool_size = 0.0;
+  if (opt.rmm_pool_size_gb > 0) {
+    pool_size = opt.rmm_pool_size_gb * (1ULL << 30);
+  } else {
+    pool_size = rmm::percent_of_free_device_memory(80);
+  }
+  if (opt.verbose) {
+    std::cout << "RMM pool size (GB): "
+              << pool_size / static_cast<double>(1ULL << 30) << std::endl;
+  }
+  rmm::mr::pool_memory_resource rmm_pool(
+      rmm::mr::get_current_device_resource_ref(),
+      static_cast<std::size_t>(pool_size));
+  rmm::mr::set_current_device_resource(rmm_pool);
 
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
