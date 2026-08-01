@@ -85,7 +85,12 @@ struct options {
   double delta{0.0001};
   int    max_iterations{100};
   double rmm_pool_size_gb{-1};
-  bool   optimize{false};
+  // Distance-compute dtype: auto | fp32 | fp16.
+  // cuVS defaults to AUTO, which selects the fp16 tensor-core kernel
+  // (local_join_kernel_wmma) whenever dim > 16. fp32 forces the scalar
+  // kernel (local_join_kernel_simt), which is what SOLANET uses.
+  std::string dist_dtype{"auto"};
+  bool        optimize{false};
   std::filesystem::path output_path{};
   bool                  dump_distance{false};
   bool                  verbose{false};
@@ -101,6 +106,7 @@ struct options {
     std::cout << "delta: " << delta << std::endl;
     std::cout << "max_iterations: " << max_iterations << std::endl;
     std::cout << "rmm_pool_size_gb: " << rmm_pool_size_gb << std::endl;
+    std::cout << "dist_dtype: " << dist_dtype << std::endl;
     std::cout << "optimize: " << optimize << std::endl;
     std::cout << "output_path: " << output_path << std::endl;
     std::cout << "dump_distance: " << dump_distance << std::endl;
@@ -110,7 +116,7 @@ struct options {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:oG:N:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:T:oG:N:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.point_files_path = std::filesystem::path(optarg);
@@ -138,6 +144,9 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'M':
         opt.rmm_pool_size_gb = std::stod(optarg);
+        break;
+      case 'T':
+        opt.dist_dtype = optarg;
         break;
       case 'o':
         opt.optimize = true;
@@ -205,6 +214,10 @@ void show_usage(const char* prog_name) {
   std::cout
       << "  -M <rmm_pool_size_gb>: RMM pool size in GB (default: use all free "
          "memory with some margin)"
+      << std::endl;
+  std::cout
+      << "  -T <auto|fp32|fp16>: dtype for distance computation (default: "
+         "auto, which uses fp16 tensor cores when dim > 16)"
       << std::endl;
   std::cout
       << "  -o: Optimize the kNNG by pruning high-degree points and keeping "
@@ -322,6 +335,13 @@ int main(int argc, char* argv[]) {
   nnd_params.return_distances          = true;
   nnd_params.max_iterations            = opt.max_iterations;
   nnd_params.termination_threshold     = opt.delta;
+
+  using DCT = cuvs::neighbors::nn_descent::DIST_COMP_DTYPE;
+  if (opt.dist_dtype == "fp32") {
+    nnd_params.dist_comp_dtype = DCT::FP32;  // -> local_join_kernel_simt
+  } else if (opt.dist_dtype == "fp16") {
+    nnd_params.dist_comp_dtype = DCT::FP16;  // -> local_join_kernel_wmma
+  }  // "auto" keeps the cuVS default
 
   saltatlas::rec_time().start("Copy-pstore-to-dev");
   auto d_pstore = copy_to_dev(make_host_matrix_view(h_dataset), dev_res);
