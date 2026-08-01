@@ -27,9 +27,21 @@
 #include <vector>
 
 #include <cuda_runtime.h>
+
+// RMM pool setup mirrors run_cuvs_single_gpu_nndescent.cpp. RMM moved these
+// headers (rmm/mr/device/... -> rmm/mr/...) and switched to the *_ref resource
+// API, so enable the pool only when the newer layout is present; older stacks
+// (e.g. the RMM bundled with cuVS 25.10) simply build without it.
+// Note: SOLANET allocates its handful of large buffers directly through
+// apu_nn/memory.hpp (cudaMalloc), so the pool is for parity and future use,
+// not a performance factor for this driver.
+#if __has_include(<rmm/mr/pool_memory_resource.hpp>) && \
+    __has_include(<rmm/mr/per_device_resource.hpp>)
+#define SALTATLAS_SOLANET_USE_RMM 1
 #include <rmm/cuda_device.hpp>
 #include <rmm/mr/per_device_resource.hpp>
 #include <rmm/mr/pool_memory_resource.hpp>
+#endif
 
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
 #include <saltatlas/shm_knng_query/data_reader.hpp>
@@ -255,6 +267,7 @@ int main(int argc, char* argv[]) {
               << " GB)" << std::endl;
   }
 
+#ifdef SALTATLAS_SOLANET_USE_RMM
   double pool_size = 0.0;
   if (opt.rmm_pool_size_gb > 0) {
     pool_size = opt.rmm_pool_size_gb * (1ULL << 30);
@@ -269,6 +282,13 @@ int main(int argc, char* argv[]) {
       rmm::mr::get_current_device_resource_ref(),
       static_cast<std::size_t>(pool_size));
   rmm::mr::set_current_device_resource(rmm_pool);
+#else
+  if (opt.verbose) {
+    std::cout << "RMM pool: disabled (installed RMM predates the current "
+                 "header/resource API; SOLANET allocates via cudaMalloc)"
+              << std::endl;
+  }
+#endif
 
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
