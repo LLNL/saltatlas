@@ -28,14 +28,20 @@
 
 #include <cuda_runtime.h>
 
-// RMM pool setup mirrors run_cuvs_single_gpu_nndescent.cpp. RMM moved these
-// headers (rmm/mr/device/... -> rmm/mr/...) and switched to the *_ref resource
-// API, so enable the pool only when the newer layout is present; older stacks
-// (e.g. the RMM bundled with cuVS 25.10) simply build without it.
-// Note: SOLANET allocates its handful of large buffers directly through
-// apu_nn/memory.hpp (cudaMalloc), so the pool is for parity and future use,
-// not a performance factor for this driver.
-#if __has_include(<rmm/mr/pool_memory_resource.hpp>) && \
+// Optional RMM pool, mirroring run_cuvs_single_gpu_nndescent.cpp.
+//
+// OFF by default, deliberately. SOLANET allocates its dozen large buffers
+// directly through apu_nn/memory.hpp (cudaMalloc) and never asks RMM for
+// anything, so the pool cannot speed this driver up; it exists only for
+// stylistic parity with the cuVS driver. Meanwhile RMM's pool API is a moving
+// target across versions (headers moved rmm/mr/device/... -> rmm/mr/..., and
+// the constructor went from <Upstream>+pointer to CTAD+device_async_resource_ref),
+// which has broken this build against both cuVS 25.10 and 26.02.
+//
+// Enable explicitly if you route apu_nn's allocator through RMM later:
+//   -DSALTATLAS_SOLANET_ENABLE_RMM_POOL
+#if defined(SALTATLAS_SOLANET_ENABLE_RMM_POOL) &&        \
+    __has_include(<rmm/mr/pool_memory_resource.hpp>) &&  \
     __has_include(<rmm/mr/per_device_resource.hpp>)
 #define SALTATLAS_SOLANET_USE_RMM 1
 #include <rmm/cuda_device.hpp>
@@ -283,9 +289,10 @@ int main(int argc, char* argv[]) {
       static_cast<std::size_t>(pool_size));
   rmm::mr::set_current_device_resource(rmm_pool);
 #else
+  (void)opt.rmm_pool_size_gb;
   if (opt.verbose) {
-    std::cout << "RMM pool: disabled (installed RMM predates the current "
-                 "header/resource API; SOLANET allocates via cudaMalloc)"
+    std::cout << "RMM pool: disabled (SOLANET allocates via cudaMalloc; "
+                 "build with -DSALTATLAS_SOLANET_ENABLE_RMM_POOL to enable)"
               << std::endl;
   }
 #endif
