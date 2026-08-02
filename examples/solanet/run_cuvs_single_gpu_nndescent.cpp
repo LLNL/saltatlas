@@ -287,7 +287,8 @@ int main(int argc, char* argv[]) {
   rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource> rmm_pool(
       rmm::mr::get_current_device_resource_ref(),
       static_cast<std::size_t>(pool_size));
-  rmm::mr::set_current_device_resource(rmm_pool);
+  // RMM 26.02 takes a pointer here (newer RMM added a reference overload).
+  rmm::mr::set_current_device_resource(&rmm_pool);
 
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
