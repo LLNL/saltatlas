@@ -13,6 +13,7 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <cuda_runtime.h>
@@ -279,7 +280,11 @@ int main(int argc, char* argv[]) {
     std::cout << "RMM pool size (GB): "
               << pool_size / static_cast<double>(1ULL << 30) << std::endl;
   }
-  rmm::mr::pool_memory_resource rmm_pool(
+  // RMM's pool constructor that takes a device_async_resource_ref is a
+  // template whose Upstream parameter cannot be deduced from the ref, so name
+  // it explicitly. (Class template argument deduction works only with the
+  // Upstream* overload.)
+  rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource> rmm_pool(
       rmm::mr::get_current_device_resource_ref(),
       static_cast<std::size_t>(pool_size));
   rmm::mr::set_current_device_resource(rmm_pool);
@@ -336,12 +341,21 @@ int main(int argc, char* argv[]) {
   nnd_params.max_iterations            = opt.max_iterations;
   nnd_params.termination_threshold     = opt.delta;
 
-  using DCT = cuvs::neighbors::nn_descent::DIST_COMP_DTYPE;
-  if (opt.dist_dtype == "fp32") {
-    nnd_params.dist_comp_dtype = DCT::FP32;  // -> local_join_kernel_simt
-  } else if (opt.dist_dtype == "fp16") {
-    nnd_params.dist_comp_dtype = DCT::FP16;  // -> local_join_kernel_wmma
-  }  // "auto" keeps the cuVS default
+  // Distance dtype selection. cuVS gained `dist_comp_dtype` after v25.10, so
+  // detect it at compile time and degrade gracefully on older installs
+  // (25.10 has only the fp16 WMMA local-join kernel; there is no fp32 path).
+  if constexpr (requires { nnd_params.dist_comp_dtype; }) {
+    using DCT = std::decay_t<decltype(nnd_params.dist_comp_dtype)>;
+    if (opt.dist_dtype == "fp32") {
+      nnd_params.dist_comp_dtype = DCT::FP32;  // -> local_join_kernel_simt
+    } else if (opt.dist_dtype == "fp16") {
+      nnd_params.dist_comp_dtype = DCT::FP16;  // -> local_join_kernel_wmma
+    }  // "auto" keeps the cuVS default
+  } else if (opt.dist_dtype != "auto") {
+    std::cerr << "WARNING: installed cuVS has no dist_comp_dtype; -T ignored. "
+                 "Distances are computed in fp16 on tensor cores."
+              << std::endl;
+  }
 
   saltatlas::rec_time().start("Copy-pstore-to-dev");
   auto d_pstore = copy_to_dev(make_host_matrix_view(h_dataset), dev_res);
