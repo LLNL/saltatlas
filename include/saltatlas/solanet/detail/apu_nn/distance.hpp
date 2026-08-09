@@ -209,7 +209,8 @@ __host__ __device__ inline acc_type_t<T> inner_product(const T* a, const T* b,
 // All threads are in the same block, and team threads are contiguous.
 // Warning : only the first lane in the team returns the correct distance, and
 // other lanes may return intermediate values.
-template <typename T, int TEAM_SIZE = 8>
+// See l2_team for what kNarrowIdx does and why it matters.
+template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false>
 __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
                                                          const size_t dims) {
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
@@ -221,12 +222,23 @@ __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
   acc_t     n0   = acc_t(0);
   acc_t     n1   = acc_t(0);
   acc_t     dot  = acc_t(0);
-  for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
-    const acc_t va = static_cast<acc_t>(a[i]);
-    const acc_t vb = static_cast<acc_t>(b[i]);
-    n0 += va * va;
-    n1 += vb * vb;
-    dot += va * vb;
+  if constexpr (kNarrowIdx) {
+    const int n = static_cast<int>(dims);
+    for (int i = lane; i < n; i += TEAM_SIZE) {
+      const acc_t va = static_cast<acc_t>(a[i]);
+      const acc_t vb = static_cast<acc_t>(b[i]);
+      n0 += va * va;
+      n1 += vb * vb;
+      dot += va * vb;
+    }
+  } else {
+    for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
+      const acc_t va = static_cast<acc_t>(a[i]);
+      const acc_t vb = static_cast<acc_t>(b[i]);
+      n0 += va * va;
+      n1 += vb * vb;
+      dot += va * vb;
+    }
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {
@@ -258,7 +270,23 @@ __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
 // All threads are in the same block, and team threads are contiguous.
 // Warning : only the first lane in the team returns the correct distance, and
 // other lanes may return intermediate values.
-template <typename T, int TEAM_SIZE = 8>
+// kNarrowIdx selects a 32-bit induction variable. `dims` is the feature
+// dimensionality, so it is always small, but a size_t index makes the compiler
+// emit 64-bit address arithmetic for a[i] and b[i], which on NVIDIA hardware is
+// synthesised from several 32-bit operations. Profiling shows ALU is the
+// busiest pipeline in the neighbour-check kernel, so those extra integer
+// instructions are not free. The default is false, which reproduces the
+// original loop exactly.
+// kVecLoad issues 128-bit loads instead of 32-bit ones, so one instruction
+// moves four elements and the loop issues a quarter as many load operations for
+// the same bytes. The neighbour-check kernel is limited by L1/TEX throughput,
+// which counts operations rather than bytes, so this is the lever that matters
+// there. It requires float data, a multiple-of-four dimensionality, and
+// 16-byte aligned rows; all three are checked at run time and fall back to the
+// scalar loop otherwise. The check is uniform across a team, so it does not
+// diverge.
+template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false,
+          bool kVecLoad = false>
 __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
                                                  const size_t dims) {
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
@@ -267,10 +295,44 @@ __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
                 "TEAM_SIZE must be a power of two.");
   const int     lane = threadIdx.x & (TEAM_SIZE - 1);
   acc_type_t<T> sum  = acc_type_t<T>(0);
-  for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
-    const acc_type_t<T> diff =
-        static_cast<acc_type_t<T>>(a[i]) - static_cast<acc_type_t<T>>(b[i]);
-    sum += diff * diff;
+  if constexpr (kVecLoad && std::is_same_v<T, float>) {
+    const int  n = static_cast<int>(dims);
+    const bool can_vec = (n % 4 == 0) &&
+                         ((reinterpret_cast<size_t>(a) & size_t{0xF}) == 0) &&
+                         ((reinterpret_cast<size_t>(b) & size_t{0xF}) == 0);
+    if (can_vec) {
+      const float4* const a4 = reinterpret_cast<const float4*>(a);
+      const float4* const b4 = reinterpret_cast<const float4*>(b);
+      const int           n4 = n / 4;
+      for (int i = lane; i < n4; i += TEAM_SIZE) {
+        const float4 va = a4[i];
+        const float4 vb = b4[i];
+        const float  d0 = va.x - vb.x;
+        const float  d1 = va.y - vb.y;
+        const float  d2 = va.z - vb.z;
+        const float  d3 = va.w - vb.w;
+        sum += d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3;
+      }
+    } else {
+      for (int i = lane; i < n; i += TEAM_SIZE) {
+        const acc_type_t<T> diff =
+            static_cast<acc_type_t<T>>(a[i]) - static_cast<acc_type_t<T>>(b[i]);
+        sum += diff * diff;
+      }
+    }
+  } else if constexpr (kNarrowIdx) {
+    const int n = static_cast<int>(dims);
+    for (int i = lane; i < n; i += TEAM_SIZE) {
+      const acc_type_t<T> diff =
+          static_cast<acc_type_t<T>>(a[i]) - static_cast<acc_type_t<T>>(b[i]);
+      sum += diff * diff;
+    }
+  } else {
+    for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
+      const acc_type_t<T> diff =
+          static_cast<acc_type_t<T>>(a[i]) - static_cast<acc_type_t<T>>(b[i]);
+      sum += diff * diff;
+    }
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {
@@ -297,7 +359,8 @@ __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
 // All threads are in the same block, and team threads are contiguous.
 // Warning : only the first lane in the team returns the correct distance, and
 // other lanes may return intermediate values.
-template <typename T, int TEAM_SIZE = 8>
+// See l2_team for what kNarrowIdx does and why it matters.
+template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false>
 __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
                                                             const T*     b,
                                                             const size_t dims) {
@@ -308,8 +371,15 @@ __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
   using acc_t    = acc_type_t<T>;
   const int lane = threadIdx.x & (TEAM_SIZE - 1);
   acc_t     dot  = acc_t(0);
-  for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
-    dot += static_cast<acc_t>(a[i]) * static_cast<acc_t>(b[i]);
+  if constexpr (kNarrowIdx) {
+    const int n = static_cast<int>(dims);
+    for (int i = lane; i < n; i += TEAM_SIZE) {
+      dot += static_cast<acc_t>(a[i]) * static_cast<acc_t>(b[i]);
+    }
+  } else {
+    for (size_t i = static_cast<size_t>(lane); i < dims; i += TEAM_SIZE) {
+      dot += static_cast<acc_t>(a[i]) * static_cast<acc_t>(b[i]);
+    }
   }
 #pragma unroll
   for (int offset = TEAM_SIZE / 2; offset > 0; offset >>= 1) {

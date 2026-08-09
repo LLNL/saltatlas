@@ -268,6 +268,69 @@ shfl_bcast(T v, int src_lane, int width = k_native_warp_size) {
 #endif
 }
 
+// Team-wide logical OR: "does any lane in my team satisfy this predicate?".
+// The hardware has a dedicated vote instruction for reducing a predicate, so
+// this replaces a chain of shfl_down calls followed by a broadcast. Every lane
+// receives the answer, so no broadcast is needed afterwards.
+//
+// `width` must be a power of two no larger than the native warp width, and a
+// team's lanes must be contiguous, which is how check_neighbors_kernel assigns
+// them. Unlike the shfl_* helpers above this uses an explicit team mask rather
+// than __activemask(), because a vote must not reach across team boundaries.
+#if defined(__CUDACC__)
+using team_mask_t = unsigned int;
+#else
+using team_mask_t = unsigned long long;
+#endif
+
+// Mask of the lanes belonging to this thread's team.
+//
+// This depends only on threadIdx.x, so compute it ONCE per thread and keep it
+// in a register. Calling it inside an inner loop costs several integer
+// instructions per iteration and can cancel out the saving it exists to
+// enable.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE team_mask_t
+team_mask(int width = k_native_warp_size) {
+  const int lane = static_cast<int>(threadIdx.x) & (k_native_warp_size - 1);
+  const int base = lane - (lane % width);
+  if (width >= k_native_warp_size) {
+    return ~static_cast<team_mask_t>(0);
+  }
+  return ((static_cast<team_mask_t>(1) << width) -
+          static_cast<team_mask_t>(1))
+         << base;
+}
+
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE bool team_any(bool       pred,
+                                                           team_mask_t mask) {
+#if defined(__CUDACC__)
+  return __any_sync(mask, pred);
+#else
+  // HIP's __any() spans the whole wavefront, so mask the ballot down to the
+  // team instead.
+  return (static_cast<team_mask_t>(__ballot(pred)) & mask) != 0ull;
+#endif
+}
+
+// Convenience overload that derives the mask on the spot. Prefer the two-step
+// form in hot loops.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE bool team_any(
+    bool pred, int width = k_native_warp_size) {
+  return team_any(pred, team_mask(width));
+}
+
+// Barrier across a team's lanes. Needed whenever one lane must observe another
+// lane's shared-memory writes: CUDA's independent thread scheduling does not
+// guarantee that contiguous lanes stay in lockstep. AMD wavefronts do execute
+// in lockstep, so this is a no-op there.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void team_sync(team_mask_t mask) {
+#if defined(__CUDACC__)
+  __syncwarp(mask);
+#else
+  (void)mask;
+#endif
+}
+
 // 64-bit atomic add usable on both backends. CUDA's atomicAdd has no
 // size_t/unsigned long overload, only unsigned long long.
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE size_t
