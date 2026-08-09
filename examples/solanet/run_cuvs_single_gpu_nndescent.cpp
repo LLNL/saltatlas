@@ -284,11 +284,20 @@ int main(int argc, char* argv[]) {
   // template whose Upstream parameter cannot be deduced from the ref, so name
   // it explicitly. (Class template argument deduction works only with the
   // Upstream* overload.)
-  rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource> rmm_pool(
-      rmm::mr::get_current_device_resource_ref(),
-      static_cast<std::size_t>(pool_size));
+  //
+  // The pool is allocated with `new` and deliberately never deleted. cuVS and
+  // RAFT release device memory from static destructors, which run *after*
+  // main's locals are gone. A stack-allocated pool would be destroyed while
+  // still registered as the current device resource, leaving that resource
+  // dangling and hanging the process at exit (after all output has been
+  // printed, so it looks like a mid-run hang). The OS reclaims the pool at
+  // process exit, so leaking it is the cheap, correct fix here.
+  auto* rmm_pool =
+      new rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource>(
+          rmm::mr::get_current_device_resource_ref(),
+          static_cast<std::size_t>(pool_size));
   // RMM 26.02 takes a pointer here (newer RMM added a reference overload).
-  rmm::mr::set_current_device_resource(&rmm_pool);
+  rmm::mr::set_current_device_resource(rmm_pool);
 
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
