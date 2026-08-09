@@ -209,8 +209,9 @@ __host__ __device__ inline acc_type_t<T> inner_product(const T* a, const T* b,
 // All threads are in the same block, and team threads are contiguous.
 // Warning : only the first lane in the team returns the correct distance, and
 // other lanes may return intermediate values.
-// See l2_team for what kNarrowIdx does and why it matters.
-template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false>
+// See l2_team for what kNarrowIdx and kVecLoad do and why they matter.
+template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false,
+          bool kVecLoad = false>
 __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
                                                          const size_t dims) {
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
@@ -222,7 +223,32 @@ __host__ __device__ inline acc_type_t<T> alt_cosine_team(const T* a, const T* b,
   acc_t     n0   = acc_t(0);
   acc_t     n1   = acc_t(0);
   acc_t     dot  = acc_t(0);
-  if constexpr (kNarrowIdx) {
+  if constexpr (kVecLoad && std::is_same_v<T, float>) {
+    const int  n = static_cast<int>(dims);
+    const bool can_vec = (n % 4 == 0) &&
+                         ((reinterpret_cast<size_t>(a) & size_t{0xF}) == 0) &&
+                         ((reinterpret_cast<size_t>(b) & size_t{0xF}) == 0);
+    if (can_vec) {
+      const float4* const a4 = reinterpret_cast<const float4*>(a);
+      const float4* const b4 = reinterpret_cast<const float4*>(b);
+      const int           n4 = n / 4;
+      for (int i = lane; i < n4; i += TEAM_SIZE) {
+        const float4 va = a4[i];
+        const float4 vb = b4[i];
+        n0 += va.x * va.x + va.y * va.y + va.z * va.z + va.w * va.w;
+        n1 += vb.x * vb.x + vb.y * vb.y + vb.z * vb.z + vb.w * vb.w;
+        dot += va.x * vb.x + va.y * vb.y + va.z * vb.z + va.w * vb.w;
+      }
+    } else {
+      for (int i = lane; i < n; i += TEAM_SIZE) {
+        const acc_t va = static_cast<acc_t>(a[i]);
+        const acc_t vb = static_cast<acc_t>(b[i]);
+        n0 += va * va;
+        n1 += vb * vb;
+        dot += va * vb;
+      }
+    }
+  } else if constexpr (kNarrowIdx) {
     const int n = static_cast<int>(dims);
     for (int i = lane; i < n; i += TEAM_SIZE) {
       const acc_t va = static_cast<acc_t>(a[i]);
@@ -359,8 +385,9 @@ __host__ __device__ inline acc_type_t<T> l2_team(const T* a, const T* b,
 // All threads are in the same block, and team threads are contiguous.
 // Warning : only the first lane in the team returns the correct distance, and
 // other lanes may return intermediate values.
-// See l2_team for what kNarrowIdx does and why it matters.
-template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false>
+// See l2_team for what kNarrowIdx and kVecLoad do and why they matter.
+template <typename T, int TEAM_SIZE = 8, bool kNarrowIdx = false,
+          bool kVecLoad = false>
 __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
                                                             const T*     b,
                                                             const size_t dims) {
@@ -371,7 +398,26 @@ __host__ __device__ inline acc_type_t<T> inner_product_team(const T*     a,
   using acc_t    = acc_type_t<T>;
   const int lane = threadIdx.x & (TEAM_SIZE - 1);
   acc_t     dot  = acc_t(0);
-  if constexpr (kNarrowIdx) {
+  if constexpr (kVecLoad && std::is_same_v<T, float>) {
+    const int  n = static_cast<int>(dims);
+    const bool can_vec = (n % 4 == 0) &&
+                         ((reinterpret_cast<size_t>(a) & size_t{0xF}) == 0) &&
+                         ((reinterpret_cast<size_t>(b) & size_t{0xF}) == 0);
+    if (can_vec) {
+      const float4* const a4 = reinterpret_cast<const float4*>(a);
+      const float4* const b4 = reinterpret_cast<const float4*>(b);
+      const int           n4 = n / 4;
+      for (int i = lane; i < n4; i += TEAM_SIZE) {
+        const float4 va = a4[i];
+        const float4 vb = b4[i];
+        dot += va.x * vb.x + va.y * vb.y + va.z * vb.z + va.w * vb.w;
+      }
+    } else {
+      for (int i = lane; i < n; i += TEAM_SIZE) {
+        dot += static_cast<acc_t>(a[i]) * static_cast<acc_t>(b[i]);
+      }
+    }
+  } else if constexpr (kNarrowIdx) {
     const int n = static_cast<int>(dims);
     for (int i = lane; i < n; i += TEAM_SIZE) {
       dot += static_cast<acc_t>(a[i]) * static_cast<acc_t>(b[i]);

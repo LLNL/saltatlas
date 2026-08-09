@@ -15,6 +15,31 @@
 #define SALTATLAS_SOLANET_APU_NND_TEAM_SIZE 4
 #endif
 
+// Minimum blocks per SM requested from the compiler at kOptLevel >= 5.
+// Registers otherwise limit find_new_neighbor_candidates to 9 blocks (about 57
+// registers per thread), and its dominant stall is waiting on L1TEX, which more
+// resident warps would hide. Capping registers trades spills for occupancy, so
+// the useful value is empirical: raise it until local-memory spilling appears.
+// The useful cap falls as dimensionality rises, because the vectorised distance
+// loop keeps proportionally more float4s live. Measured on H100, whole-index
+// build time:
+//
+//                  uncapped   12 blocks   10 blocks   9 blocks
+//   sift    (128d)   3.05 s      2.96 s      3.14 s     3.07 s
+//   nytimes (256d)   1.68 s      1.94 s      1.65 s     1.52 s
+//
+// so the cap is selected at launch from the feature dimensionality. Two data
+// points on one GPU; the fallback at any size is the uncapped level 4 path.
+#ifndef SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM
+#define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM 12
+#endif
+#ifndef SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM
+#define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM 9
+#endif
+#ifndef SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD
+#define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD 128
+#endif
+
 #ifndef SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES
 #define SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES 1
 #endif
@@ -100,7 +125,7 @@ struct cosine_distance_op {
   SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
                                                      const FEType* b,
                                                      const size_t  dims) const {
-    return alt_cosine_team<FEType, TEAM_SIZE, kNarrowIdx>(a, b, dims);
+    return alt_cosine_team<FEType, TEAM_SIZE, kNarrowIdx, kVecLoad>(a, b, dims);
   }
 };
 
@@ -119,7 +144,8 @@ struct inner_product_distance_op {
   SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
                                                      const FEType* b,
                                                      const size_t  dims) const {
-    return inner_product_team<FEType, TEAM_SIZE, kNarrowIdx>(a, b, dims);
+    return inner_product_team<FEType, TEAM_SIZE, kNarrowIdx, kVecLoad>(a, b,
+                                                                      dims);
   }
 };
 
@@ -571,9 +597,16 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 //
 // kOptLevel is forwarded to check_neighbors_kernel; 0 reproduces the baseline
 // exactly.
+//
+// The body lives in a device function so that two entry points can share it.
+// __launch_bounds__ cannot be conditionally absent within a single template,
+// and it is not neutral when present: stating (1024, 1) changed register
+// allocation measurably at both level 0 and level 4, in opposite directions.
+// Keeping the attribute off the ordinary entry point is what preserves level 0
+// as the exact baseline.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel = 0>
-SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
+          int kOptLevel>
+SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
@@ -607,6 +640,37 @@ SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
         candidates_ids, candidates_dists, candidates_counts, knng_ids,
         knng_dists, shared_knng_ids, shared_vecs);
   }
+}
+
+// Ordinary entry point, levels 0-4. No launch bound, so codegen matches what
+// the kernel produced before any of this parameterisation existed.
+template <typename IDType, typename FEType, typename DistType, typename DistOp,
+          int kOptLevel = 0>
+SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
+    const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
+    const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
+    matrix_view<DistType> candidates_dists, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
+  find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
+                                    kOptLevel>(
+      nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
+      knng_ids, knng_dists);
+}
+
+// Level 5 entry point: same body, with registers capped so more blocks fit per
+// SM. The dominant stall is waiting on L1TEX, which resident warps hide.
+template <typename IDType, typename FEType, typename DistType, typename DistOp,
+          int kOptLevel, int kMinBlocks>
+SALTATLAS_HD_GLOBAL __launch_bounds__(k_nnd_block_size, kMinBlocks) void
+find_new_neighbor_candidates_capped(
+    const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
+    const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
+    matrix_view<DistType> candidates_dists, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
+  find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
+                                    kOptLevel>(
+      nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
+      knng_ids, knng_dists);
 }
 
 // Each thread independently updates its own KNNG list using the candidates in
@@ -879,6 +943,7 @@ void build_index_main_loop(
     ///       loads does not relieve it); kept only for reference. NOT
     ///       included in level 4.
     ///   4 : level 2 plus 128-bit vector loads in the distance loop
+    ///   5 : level 4 plus a register cap, trading spills for occupancy
     static const int nnd_opt_level = [] {
       const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
       return (env != nullptr) ? std::atoi(env) : 0;
@@ -922,21 +987,50 @@ void build_index_main_loop(
       // One instantiation per optimization level. Keeping them as distinct
       // template arguments means level 0 compiles to exactly the original
       // kernel, so the baseline stays available for comparison.
-#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(LEVEL)                             \
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(KERNEL, LEVEL)                     \
   hipLaunchKernelGGL(                                                      \
-      (find_new_neighbor_candidates<IDType, FEType, DistType, DistOp,      \
-                                    (LEVEL)>),                             \
+      (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL)>),                 \
       grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,       \
       pstore, candidate_ids.get_view(), candidate_dists.get_view(),        \
       candidate_counts, knng_ids, knng_dists)
 
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(LEVEL, MIN_BLOCKS)           \
+  hipLaunchKernelGGL(                                                       \
+      (find_new_neighbor_candidates_capped<IDType, FEType, DistType,        \
+                                           DistOp, (LEVEL), (MIN_BLOCKS)>), \
+      grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,        \
+      pstore, candidate_ids.get_view(), candidate_dists.get_view(),         \
+      candidate_counts, knng_ids, knng_dists)
+
+      // Level 5 is level 4's body behind the register-capped entry point.
       switch (effective_opt) {
-        case 0: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(0); break;
-        case 1: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(1); break;
-        case 2: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(2); break;
-        case 3: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(3); break;
-        default: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(4); break;
+        case 0:
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 0);
+          break;
+        case 1:
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 1);
+          break;
+        case 2:
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 2);
+          break;
+        case 3:
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 3);
+          break;
+        case 4:
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 4);
+          break;
+        default:
+          if (pstore.n_cols() <=
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
+          } else {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
+          }
+          break;
       }
+#undef SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED
 #undef SALTATLAS_LAUNCH_NEIGHBOR_CHECK
       SALTATLAS_HIP_CHECK(hipGetLastError());
       SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
