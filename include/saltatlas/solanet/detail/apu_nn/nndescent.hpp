@@ -75,11 +75,14 @@ struct l2_distance_op {
     return l2(a, b, dims);
   }
 
-  template <typename FEType, int TEAM_SIZE>
+  // kNarrowIdx forwards to l2_team; see the comment there. false is the
+  // original behaviour.
+  template <typename FEType, int TEAM_SIZE, bool kNarrowIdx = false,
+            bool kVecLoad = false>
   SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
                                                      const FEType* b,
                                                      const size_t  dims) const {
-    return l2_team<FEType, TEAM_SIZE>(a, b, dims);
+    return l2_team<FEType, TEAM_SIZE, kNarrowIdx, kVecLoad>(a, b, dims);
   }
 };
 
@@ -90,11 +93,14 @@ struct cosine_distance_op {
     return alt_cosine(a, b, dims);
   }
 
-  template <typename FEType, int TEAM_SIZE>
+  // kNarrowIdx is accepted for interface parity with l2_distance_op but is not
+  // yet honoured here; alt_cosine_team still uses a size_t induction variable.
+  template <typename FEType, int TEAM_SIZE, bool kNarrowIdx = false,
+            bool kVecLoad = false>
   SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
                                                      const FEType* b,
                                                      const size_t  dims) const {
-    return alt_cosine_team<FEType, TEAM_SIZE>(a, b, dims);
+    return alt_cosine_team<FEType, TEAM_SIZE, kNarrowIdx>(a, b, dims);
   }
 };
 
@@ -105,11 +111,15 @@ struct inner_product_distance_op {
     return inner_product(a, b, dims);
   }
 
-  template <typename FEType, int TEAM_SIZE>
+  // kNarrowIdx is accepted for interface parity with l2_distance_op but is not
+  // yet honoured here; inner_product_team still uses a size_t induction
+  // variable.
+  template <typename FEType, int TEAM_SIZE, bool kNarrowIdx = false,
+            bool kVecLoad = false>
   SALTATLAS_HD_DEVICE inline acc_type_t<FEType> team(const FEType* a,
                                                      const FEType* b,
                                                      const size_t  dims) const {
-    return inner_product_team<FEType, TEAM_SIZE>(a, b, dims);
+    return inner_product_team<FEType, TEAM_SIZE, kNarrowIdx>(a, b, dims);
   }
 };
 
@@ -381,13 +391,21 @@ SALTATLAS_HD_GLOBAL void init_neighbor_check_data(
 
 // A single warp works on a pair of neighbor lists (nbs1 and nbs2) to find
 // better neighbors for points in nbs1.
-template <typename IDType, typename FEType, typename DistType, typename DistOp>
+//
+// kOptLevel selects cumulative optimizations. 0 is the unmodified baseline;
+// each level includes every lower one.
+//   1 : team_any() vote in place of the shfl_down chain + broadcast
+//   2 : 32-bit induction variable in the distance loop
+//   3 : nid1's feature vector staged in shared memory (needs shared_vecs)
+template <typename IDType, typename FEType, typename DistType, typename DistOp,
+          int kOptLevel = 0>
 SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
     const IDType* const nbs1, const int n_nbs1, const IDType* const nbs2,
     const int n_nbs2, const matrix_view<FEType>& pstore,
     matrix_view<IDType> candidates_ids, matrix_view<DistType> candidates_dists,
     span<int> candidates_counts, matrix_view<IDType> knng_ids,
-    matrix_view<DistType> knng_dists, IDType* shared_knng_ids) {
+    matrix_view<DistType> knng_dists, IDType* shared_knng_ids,
+    FEType* shared_vecs) {
   static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
   // const int    g_tid = static_cast<int>(blockIdx.x * blockDim.x +
   // threadIdx.x);
@@ -397,6 +415,8 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
   const int    block_team_id = threadIdx.x / k_team_size;
   const int    n_teams       = warpSize / k_team_size;
   const DistOp dist_op{};
+  // Depends only on threadIdx.x, so hoist it out of the pair loop below.
+  const team_mask_t t_mask = team_mask(k_team_size);
   // One scratch KNNG row per team in this block:
   // [team0 k entries][team1 k entries]...
   IDType* const team_knng_ids =
@@ -417,6 +437,23 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
     // Skip team-level memory synchronization here
     // because it's still okay even if team_knng_ids is not fully populated when
     // some threads start checking neighbors.
+
+    // Stage nid1's feature vector in shared memory. It is re-read once per
+    // candidate in the loop below, so one cooperative copy here replaces
+    // n_nbs2 global reads of the same bytes. Unlike team_knng_ids above this
+    // does need a team barrier: a partially written vector would produce a
+    // wrong distance rather than merely a missed skip.
+    const FEType* nid1_vec = pstore(nid1);
+    if constexpr (kOptLevel == 3) {
+      const int     n_dims = static_cast<int>(pstore.n_cols());
+      FEType* const team_vec =
+          shared_vecs + static_cast<size_t>(block_team_id) * pstore.n_cols();
+      for (int d = tl_lane_id; d < n_dims; d += k_team_size) {
+        team_vec[d] = nid1_vec[d];
+      }
+      team_sync(t_mask);
+      nid1_vec = team_vec;
+    }
 
     // All points in nbs2 are processed by the same team, and the team keeps
     // top-k_top_candidates best neighbors among them.
@@ -445,23 +482,34 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
       }
 
       // Reduce to a single "nid2 already in KNNG" flag within the team.
-      int           in_knng        = l_in_knng ? 1 : 0;
-      constexpr int team_lead_lane = 0;
-      // Gather the in_knng flag to the team leader lane
+      bool in_knng;
+      if constexpr (kOptLevel >= 1) {
+        // Step 1: one vote instruction in place of (k_team_size - 1)
+        // shfl_down calls plus a broadcast. The result already lands in every
+        // lane, so nothing has to be broadcast back.
+        in_knng = team_any(l_in_knng, t_mask);
+      } else {
+        int           in_knng_flag  = l_in_knng ? 1 : 0;
+        constexpr int team_lead_lane = 0;
+        // Gather the in_knng flag to the team leader lane
 #pragma unroll
-      for (int kk = 1; kk < k_team_size; ++kk) {
-        in_knng |= shfl_down(in_knng, kk, k_team_size);
+        for (int kk = 1; kk < k_team_size; ++kk) {
+          in_knng_flag |= shfl_down(in_knng_flag, kk, k_team_size);
+        }
+        // Broadcast the in_knng flag from the team leader lane to all team
+        // members
+        in_knng_flag = shfl_bcast(in_knng_flag, team_lead_lane, k_team_size);
+        in_knng      = (in_knng_flag != 0);
       }
-      // Broadcast the in_knng flag from the team leader lane to all team
-      // members
-      in_knng = shfl_bcast(in_knng, team_lead_lane, k_team_size);
       if (in_knng) {
         // Already connected in current KNNG; skip expensive distance op.
         continue;
       }
 
-      DistType dist = dist_op.template team<FEType, k_team_size>(
-          pstore(nid1), pstore(nid2), pstore.n_cols());
+      DistType dist =
+          dist_op.template team<FEType, k_team_size, (kOptLevel >= 2),
+                                (kOptLevel >= 4)>(nid1_vec, pstore(nid2),
+                                                  pstore.n_cols());
       // Only the team leader update the local candidate list since it's lenght
       // is small
       if (tl_lane_id == 0) {
@@ -520,13 +568,28 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 
 // Calls check_neighbors_with_global_atomic_per_warp() for each point in
 // parallel.
-template <typename IDType, typename FEType, typename DistType, typename DistOp>
+//
+// kOptLevel is forwarded to check_neighbors_kernel; 0 reproduces the baseline
+// exactly.
+template <typename IDType, typename FEType, typename DistType, typename DistOp,
+          int kOptLevel = 0>
 SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
+  // Dynamic shared memory holds the per-team KNNG id scratch, followed (at
+  // kOptLevel >= 3) by one staged feature vector per team. The launcher sizes
+  // the allocation to match.
   extern __shared__ IDType shared_knng_ids[];
+  FEType*                  shared_vecs = nullptr;
+  if constexpr (kOptLevel == 3) {
+    const size_t n_teams_per_block =
+        static_cast<size_t>(blockDim.x) / static_cast<size_t>(k_team_size);
+    shared_vecs = reinterpret_cast<FEType*>(shared_knng_ids +
+                                            n_teams_per_block *
+                                                knng_ids.n_cols());
+  }
   const size_t             g_tid =
       static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x) +
       static_cast<size_t>(threadIdx.x);
@@ -539,10 +602,10 @@ SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
   }
 
   for (size_t sid = g_warp_id; sid < pstore.n_rows(); sid += n_global_warps) {
-    check_neighbors_kernel<IDType, FEType, DistType, DistOp>(
+    check_neighbors_kernel<IDType, FEType, DistType, DistOp, kOptLevel>(
         nbs1(sid), nbs1.n_cols(), nbs2(sid), nbs2.n_cols(), pstore,
         candidates_ids, candidates_dists, candidates_counts, knng_ids,
-        knng_dists, shared_knng_ids);
+        knng_dists, shared_knng_ids, shared_vecs);
   }
 }
 
@@ -806,17 +869,47 @@ void build_index_main_loop(
     SALTATLAS_HIP_CHECK(
         hipMemset(n_updates_block.get(), 0, n_blocks * sizeof(size_t)));
 
+    /// Optimization level for the neighbor-check kernel, selected at run time
+    /// so that one binary can reproduce the baseline and every optimized
+    /// variant without a rebuild. 0 (the default) is the unmodified baseline.
+    ///   1 : team_any() vote in place of the shfl_down chain + broadcast
+    ///   2 : 32-bit induction variable in the distance loop
+    ///   3 : stage nid1's feature vector in shared memory. Measured slower
+    ///       than level 2 (shared and L1 are the same unit, so relocating
+    ///       loads does not relieve it); kept only for reference. NOT
+    ///       included in level 4.
+    ///   4 : level 2 plus 128-bit vector loads in the distance loop
+    static const int nnd_opt_level = [] {
+      const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
+      return (env != nullptr) ? std::atoi(env) : 0;
+    }();
+
     /// Perform neighbor checks for the given pairs of neighbor lists and update
     /// KNNG
     auto neighbor_checker = [&](const matrix_view<IDType>& nbs1,
                                 const matrix_view<IDType>& nbs2) {
       const size_t n_teams_per_block = block.x / k_team_size;
-      const size_t ck_shared_bytes =
+      size_t       ck_shared_bytes =
           n_teams_per_block * static_cast<size_t>(k) * sizeof(IDType);
       if (ck_shared_bytes > device_prop.sharedMemPerBlock) {
         throw std::runtime_error(
             "Neighbor check shared memory exceeds device limit. Reduce k or "
             "increase team size.");
+      }
+
+      // Level 3 stages one feature vector per team alongside the id scratch.
+      // High-dimensional data can push that past the per-block limit, in which
+      // case fall back to level 2 rather than failing: the staging is an
+      // optimization, not a requirement.
+      int effective_opt = nnd_opt_level;
+      if (effective_opt == 3) {
+        const size_t vec_bytes =
+            n_teams_per_block * pstore.n_cols() * sizeof(FEType);
+        if (ck_shared_bytes + vec_bytes <= device_prop.sharedMemPerBlock) {
+          ck_shared_bytes += vec_bytes;
+        } else {
+          effective_opt = 2;
+        }
       }
 
       rec_time().start("init neighbor checks");
@@ -826,11 +919,25 @@ void build_index_main_loop(
       rec_time().stop();  // init neighbor checks
 
       rec_time().start("neighbor_checks");
-      hipLaunchKernelGGL(
-          (find_new_neighbor_candidates<IDType, FEType, DistType, DistOp>),
-          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2, pstore,
-          candidate_ids.get_view(), candidate_dists.get_view(),
-          candidate_counts, knng_ids, knng_dists);
+      // One instantiation per optimization level. Keeping them as distinct
+      // template arguments means level 0 compiles to exactly the original
+      // kernel, so the baseline stays available for comparison.
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(LEVEL)                             \
+  hipLaunchKernelGGL(                                                      \
+      (find_new_neighbor_candidates<IDType, FEType, DistType, DistOp,      \
+                                    (LEVEL)>),                             \
+      grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,       \
+      pstore, candidate_ids.get_view(), candidate_dists.get_view(),        \
+      candidate_counts, knng_ids, knng_dists)
+
+      switch (effective_opt) {
+        case 0: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(0); break;
+        case 1: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(1); break;
+        case 2: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(2); break;
+        case 3: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(3); break;
+        default: SALTATLAS_LAUNCH_NEIGHBOR_CHECK(4); break;
+      }
+#undef SALTATLAS_LAUNCH_NEIGHBOR_CHECK
       SALTATLAS_HIP_CHECK(hipGetLastError());
       SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
       rec_time().stop();  // neighbor_checks
