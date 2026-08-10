@@ -45,6 +45,15 @@
 #define SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN 1
 #endif
 
+// Blocks per SM requested for update_knng_with_candidates at level >= 8. That
+// kernel is latency-bound: on the launches that dominate, compute sits near 4%
+// and memory near 52% with nothing saturated, because each thread runs a serial
+// O(k^2) selection sort. More resident warps is the only lever that does not
+// require restructuring it.
+#ifndef SALTATLAS_SOLANET_APU_NND_UPDATE_MIN_BLOCKS_PER_SM
+#define SALTATLAS_SOLANET_APU_NND_UPDATE_MIN_BLOCKS_PER_SM 16
+#endif
+
 #ifndef SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM
 #define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM 12
 #endif
@@ -729,8 +738,9 @@ find_new_neighbor_candidates_capped(
 
 // Each thread independently updates its own KNNG list using the candidates in
 // the shared buffer.
+// Body shared by the plain and register-capped entry points below.
 template <typename IDType, typename FEType, typename DistType>
-SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
+SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
     matrix_view<IDType>   candidates_ids_table,
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
@@ -863,6 +873,33 @@ SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
     }
   }
 #endif
+}
+
+// Ordinary entry point. No launch bound, so codegen matches the original.
+template <typename IDType, typename FEType, typename DistType>
+SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
+    matrix_view<IDType>   candidates_ids_table,
+    matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
+    size_t* n_updates_block) {
+  update_knng_with_candidates_impl<IDType, FEType, DistType>(
+      candidates_ids_table, candidates_dists_table, candidates_counts, knng_ids,
+      knng_dists, n_updates_block);
+}
+
+// Register-capped entry point, used from level 8.
+template <typename IDType, typename FEType, typename DistType>
+SALTATLAS_HD_GLOBAL __launch_bounds__(
+    k_nnd_block_size,
+    SALTATLAS_SOLANET_APU_NND_UPDATE_MIN_BLOCKS_PER_SM) void
+update_knng_with_candidates_capped(
+    matrix_view<IDType>   candidates_ids_table,
+    matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
+    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
+    size_t* n_updates_block) {
+  update_knng_with_candidates_impl<IDType, FEType, DistType>(
+      candidates_ids_table, candidates_dists_table, candidates_counts, knng_ids,
+      knng_dists, n_updates_block);
 }
 
 /// \brief Set MSB of neighbors in the range [k_begin, k_end) as new neighbors.
@@ -1108,6 +1145,20 @@ void build_index_main_loop(
         case 4:
           SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 4);
           break;
+        case 5:
+          // Level 5 is level 4's kernel behind the register-capped entry point.
+          // It must not pick up level 6's reverse push: the launcher still runs
+          // the (old,new) pass at this level, and the two together would
+          // double-count candidates.
+          if (pstore.n_cols() <=
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
+          } else {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
+          }
+          break;
         case 6:
           if (pstore.n_cols() <=
               SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
@@ -1128,14 +1179,19 @@ void build_index_main_loop(
                 7, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
           }
           break;
+        case 8:
         default:
+          // Levels >= 8 change update_knng only, so the neighbour check runs
+          // exactly as at level 6. Never fall through to a lower level here:
+          // the launcher has already dropped the (old,new) pass, so a kernel
+          // without the reverse push silently produces a worse graph.
           if (pstore.n_cols() <=
               SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
             SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
+                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
           } else {
             SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
+                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
           }
           break;
       }
@@ -1146,11 +1202,19 @@ void build_index_main_loop(
       rec_time().stop();  // neighbor_checks
 
       rec_time().start("knng_updates");
-      hipLaunchKernelGGL(
-          (update_knng_with_candidates<IDType, FEType, DistType>), grid_points,
-          block, 0, nullptr, candidate_ids.get_view(),
-          candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
-          n_updates_block.get());
+      if (nnd_opt_level >= 8) {
+        hipLaunchKernelGGL(
+            (update_knng_with_candidates_capped<IDType, FEType, DistType>),
+            grid_points, block, 0, nullptr, candidate_ids.get_view(),
+            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+            n_updates_block.get());
+      } else {
+        hipLaunchKernelGGL(
+            (update_knng_with_candidates<IDType, FEType, DistType>),
+            grid_points, block, 0, nullptr, candidate_ids.get_view(),
+            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+            n_updates_block.get());
+      }
       SALTATLAS_HIP_CHECK(hipGetLastError());
       SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
       rec_time().stop();  // knng_updates
