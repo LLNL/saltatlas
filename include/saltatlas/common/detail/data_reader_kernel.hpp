@@ -117,9 +117,11 @@ parse_feature_vector_with_id(const std::string &input, const char delimiter) {
 template <typename id_type, typename distance_type>
 inline bool read_neighbors_kernel(
     const std::filesystem::path                                &file_path,
-    std::vector<std::vector<neighbor<id_type, distance_type>>> &store) {
+    std::vector<std::vector<neighbor<id_type, distance_type>>> &store,
+    const bool may_file_be_missing = false) {
   std::ifstream ifs(file_path);
   if (!ifs.is_open()) {
+    if (may_file_be_missing) return true;
     std::cerr << "Failed to open: " << file_path << std::endl;
     return false;
   }
