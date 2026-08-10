@@ -30,6 +30,21 @@
 //
 // so the cap is selected at launch from the feature dimensionality. Two data
 // points on one GPU; the fallback at any size is the uncapped level 4 path.
+// From level 6 the neighbour check pushes each distance to both endpoints'
+// candidate lists within a single pass, where the old scheme spread them over
+// two passes with a buffer reset in between. The per-point buffer therefore has
+// to hold roughly twice as many entries, and overflow is discarded silently by
+// whoever loses the atomic race, which costs recall rather than time.
+// Expressed as a fraction of k, because the useful value sits between 1 (recall
+// collapses to 97.34%) and 2 (the extra single-threaded sorting in
+// update_knng_with_candidates eats most of the speedup).
+#ifndef SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_NUM
+#define SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_NUM 2
+#endif
+#ifndef SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN
+#define SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN 1
+#endif
+
 #ifndef SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM
 #define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM 12
 #endif
@@ -423,8 +438,14 @@ SALTATLAS_HD_GLOBAL void init_neighbor_check_data(
 //   1 : team_any() vote in place of the shfl_down chain + broadcast
 //   2 : 32-bit induction variable in the distance loop
 //   3 : nid1's feature vector staged in shared memory (needs shared_vecs)
+//   4 : level 2 plus 128-bit vector loads in the distance loop
+//   6 : reverse push on the asymmetric pass, so (old,new) can be dropped
+//   7 : level 6 plus the upper-triangle loop on the symmetric pass
+//
+// kSymmetricPass says whether nbs1 and nbs2 are the same list. The launcher
+// knows this and the kernel cannot cheaply detect it.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel = 0>
+          int kOptLevel = 0, bool kSymmetricPass = false>
 SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
     const IDType* const nbs1, const int n_nbs1, const IDType* const nbs2,
     const int n_nbs2, const matrix_view<FEType>& pstore,
@@ -447,6 +468,15 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
   // [team0 k entries][team1 k entries]...
   IDType* const team_knng_ids =
       shared_knng_ids + static_cast<size_t>(block_team_id) * knng_ids.n_cols();
+
+  // A distance is symmetric, so on a symmetric pass the lower triangle repeats
+  // the upper one. Skipping it halves the work, but then each computed distance
+  // has to update both endpoints' candidate lists rather than just nid1's.
+  constexpr bool k_triangle = (kOptLevel >= 7) && kSymmetricPass;
+  // Push each distance to nid2's candidate list as well as nid1's. On the
+  // asymmetric pass this replaces the separate (old,new) launch entirely.
+  constexpr bool k_reverse_push =
+      k_triangle || ((kOptLevel >= 6) && !kSymmetricPass);
 
   // Each point in nbs1 is processed by a different team of threads
   for (int i = team_id; i < n_nbs1; i += n_teams) {
@@ -491,7 +521,7 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
       best_dists[b] = std::numeric_limits<DistType>::max();
     }
 
-    for (int j = 0; j < n_nbs2; ++j) {
+    for (int j = k_triangle ? i + 1 : 0; j < n_nbs2; ++j) {
       const IDType nid2 = nbs2[j];
       if (nid2 == k_invalid_id || nid2 == nid1) {
         continue;
@@ -536,6 +566,29 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
           dist_op.template team<FEType, k_team_size, (kOptLevel >= 2),
                                 (kOptLevel >= 4)>(nid1_vec, pstore(nid2),
                                                   pstore.n_cols());
+      // This distance is a candidate for nid2 just as much as for nid1, and on
+      // a symmetric or merged pass nobody else will compute it. There is no
+      // per-nid2 accumulator in this loop shape, so filter by distance against
+      // nid2's current worst neighbour instead of by rank: it approximates the
+      // column-minimum a materialised matrix would give, and keeps the
+      // fixed-width candidate buffer from filling with entries that could never
+      // survive. Assumes each KNNG row is kept in ascending distance order, so
+      // the last column is the worst; recall is the check on that.
+      //
+      // Only the team leader holds a valid dist (see the warning on l2_team).
+      if constexpr (k_reverse_push) {
+        if (tl_lane_id == 0) {
+          const auto* const nid2_dists = knng_dists(nid2);
+          if (dist < nid2_dists[knng_dists.n_cols() - 1]) {
+            const auto pos_rev = atomicAdd(&candidates_counts[nid2], 1);
+            if (pos_rev < candidates_ids.n_cols()) {
+              candidates_ids(nid2, pos_rev)   = nid1;
+              candidates_dists(nid2, pos_rev) = dist;
+            }
+          }
+        }
+      }
+
       // Only the team leader update the local candidate list since it's lenght
       // is small
       if (tl_lane_id == 0) {
@@ -605,7 +658,7 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 // Keeping the attribute off the ordinary entry point is what preserves level 0
 // as the exact baseline.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel>
+          int kOptLevel, bool kSymmetricPass>
 SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
@@ -635,7 +688,8 @@ SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
   }
 
   for (size_t sid = g_warp_id; sid < pstore.n_rows(); sid += n_global_warps) {
-    check_neighbors_kernel<IDType, FEType, DistType, DistOp, kOptLevel>(
+    check_neighbors_kernel<IDType, FEType, DistType, DistOp, kOptLevel,
+                           kSymmetricPass>(
         nbs1(sid), nbs1.n_cols(), nbs2(sid), nbs2.n_cols(), pstore,
         candidates_ids, candidates_dists, candidates_counts, knng_ids,
         knng_dists, shared_knng_ids, shared_vecs);
@@ -645,14 +699,14 @@ SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
 // Ordinary entry point, levels 0-4. No launch bound, so codegen matches what
 // the kernel produced before any of this parameterisation existed.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel = 0>
+          int kOptLevel = 0, bool kSymmetricPass = false>
 SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
   find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
-                                    kOptLevel>(
+                                    kOptLevel, kSymmetricPass>(
       nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
       knng_ids, knng_dists);
 }
@@ -660,7 +714,7 @@ SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
 // Level 5 entry point: same body, with registers capped so more blocks fit per
 // SM. The dominant stall is waiting on L1TEX, which resident warps hide.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel, int kMinBlocks>
+          int kOptLevel, int kMinBlocks, bool kSymmetricPass>
 SALTATLAS_HD_GLOBAL __launch_bounds__(k_nnd_block_size, kMinBlocks) void
 find_new_neighbor_candidates_capped(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
@@ -668,7 +722,7 @@ find_new_neighbor_candidates_capped(
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
   find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
-                                    kOptLevel>(
+                                    kOptLevel, kSymmetricPass>(
       nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
       knng_ids, knng_dists);
 }
@@ -854,9 +908,20 @@ void build_index_main_loop(
     matrix_view<IDType> old_ng, hip_unique_ptr<int>& old_counts,
     matrix_view<IDType> new_ng, hip_unique_ptr<int>& new_counts,
     hip_unique_ptr<int>& old_counts_wk, hip_unique_ptr<int>& new_counts_wk) {
-  const size_t     n_points = pstore.n_rows();
-  matrix<IDType>   candidate_ids(n_points, k);
-  matrix<DistType> candidate_dists(n_points, k);
+  const size_t n_points = pstore.n_rows();
+  // Read here as well as further down, because the candidate buffers are
+  // allocated before that declaration is in scope.
+  static const int nnd_opt_level_for_alloc = [] {
+    const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
+    return (env != nullptr) ? std::atoi(env) : 0;
+  }();
+  const int candidate_width =
+      (nnd_opt_level_for_alloc >= 6)
+          ? (k * SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_NUM) /
+                SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN
+          : k;
+  matrix<IDType>   candidate_ids(n_points, candidate_width);
+  matrix<DistType> candidate_dists(n_points, candidate_width);
   auto             candidate_counts_buf = make_hip_array<int>(n_points);
   auto candidate_counts = span<int>(candidate_counts_buf.get(), n_points);
   auto n_updates_block  = make_hip_array<size_t>(n_blocks);
@@ -952,7 +1017,8 @@ void build_index_main_loop(
     /// Perform neighbor checks for the given pairs of neighbor lists and update
     /// KNNG
     auto neighbor_checker = [&](const matrix_view<IDType>& nbs1,
-                                const matrix_view<IDType>& nbs2) {
+                                const matrix_view<IDType>& nbs2,
+                                const bool                 symmetric_pass) {
       const size_t n_teams_per_block = block.x / k_team_size;
       size_t       ck_shared_bytes =
           n_teams_per_block * static_cast<size_t>(k) * sizeof(IDType);
@@ -987,20 +1053,43 @@ void build_index_main_loop(
       // One instantiation per optimization level. Keeping them as distinct
       // template arguments means level 0 compiles to exactly the original
       // kernel, so the baseline stays available for comparison.
-#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(KERNEL, LEVEL)                     \
-  hipLaunchKernelGGL(                                                      \
-      (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL)>),                 \
-      grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,       \
-      pstore, candidate_ids.get_view(), candidate_dists.get_view(),        \
-      candidate_counts, knng_ids, knng_dists)
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(KERNEL, LEVEL)                    \
+  do {                                                                    \
+    if (symmetric_pass) {                                                 \
+      hipLaunchKernelGGL(                                                 \
+          (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL), true>),      \
+          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
+          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
+          candidate_counts, knng_ids, knng_dists);                        \
+    } else {                                                              \
+      hipLaunchKernelGGL(                                                 \
+          (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL), false>),     \
+          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
+          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
+          candidate_counts, knng_ids, knng_dists);                        \
+    }                                                                     \
+  } while (0)
 
-#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(LEVEL, MIN_BLOCKS)           \
-  hipLaunchKernelGGL(                                                       \
-      (find_new_neighbor_candidates_capped<IDType, FEType, DistType,        \
-                                           DistOp, (LEVEL), (MIN_BLOCKS)>), \
-      grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,        \
-      pstore, candidate_ids.get_view(), candidate_dists.get_view(),         \
-      candidate_counts, knng_ids, knng_dists)
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(LEVEL, MIN_BLOCKS)         \
+  do {                                                                    \
+    if (symmetric_pass) {                                                 \
+      hipLaunchKernelGGL(                                                 \
+          (find_new_neighbor_candidates_capped<                           \
+              IDType, FEType, DistType, DistOp, (LEVEL), (MIN_BLOCKS),    \
+              true>),                                                     \
+          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
+          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
+          candidate_counts, knng_ids, knng_dists);                        \
+    } else {                                                              \
+      hipLaunchKernelGGL(                                                 \
+          (find_new_neighbor_candidates_capped<                           \
+              IDType, FEType, DistType, DistOp, (LEVEL), (MIN_BLOCKS),    \
+              false>),                                                    \
+          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
+          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
+          candidate_counts, knng_ids, knng_dists);                        \
+    }                                                                     \
+  } while (0)
 
       // Level 5 is level 4's body behind the register-capped entry point.
       switch (effective_opt) {
@@ -1018,6 +1107,26 @@ void build_index_main_loop(
           break;
         case 4:
           SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 4);
+          break;
+        case 6:
+          if (pstore.n_cols() <=
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
+          } else {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
+          }
+          break;
+        case 7:
+          if (pstore.n_cols() <=
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                7, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
+          } else {
+            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
+                7, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
+          }
           break;
         default:
           if (pstore.n_cols() <=
@@ -1049,9 +1158,16 @@ void build_index_main_loop(
 
     // Run neighor checks for (new, new), (new, old), and (old, new) neighbor
     // pairs.
-    neighbor_checker(new_ng, new_ng);
-    neighbor_checker(new_ng, old_ng);
-    neighbor_checker(old_ng, new_ng);
+    // (old, new) computes no distance that (new, old) has not already
+    // computed: the metric is symmetric. It exists only because the kernel
+    // writes results to nid1's list and never to nid2's. From level 6 the
+    // kernel pushes both directions on the asymmetric pass, so the third launch
+    // is redundant and its update_knng_with_candidates launch goes with it.
+    neighbor_checker(new_ng, new_ng, /*symmetric_pass=*/true);
+    neighbor_checker(new_ng, old_ng, /*symmetric_pass=*/false);
+    if (nnd_opt_level < 6) {
+      neighbor_checker(old_ng, new_ng, /*symmetric_pass=*/false);
+    }
 
 #ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
     size_t total_candidates = 0;
