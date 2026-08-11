@@ -64,6 +64,28 @@
 #define SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD 128
 #endif
 
+// The register cap is a CUDA-only optimization for now.
+//
+// __launch_bounds__ takes the same two arguments on both backends but they do
+// not mean the same thing. On CUDA the second is minBlocksPerMultiprocessor; on
+// HIP it is MIN_WARPS_PER_EXECUTION_UNIT, whose useful range on CDNA is roughly
+// 1 to 8. The values above were tuned as blocks per SM on an H100, so on AMD
+// they would either be rejected or silently request something unrelated to what
+// was measured.
+//
+// Rather than guess at an AMD equivalent, the capped entry points carry no
+// launch bound there, which makes them identical to the ordinary ones, so the
+// launcher needs no backend-specific branch. Levels 5 to 8 therefore mean "the
+// same body without the register cap" on AMD. Every other optimization in the
+// ladder stays identical across the two vendors, and the cap becomes a separate
+// question to be measured on CDNA in its own right.
+#if defined(__CUDACC__)
+#define SALTATLAS_SOLANET_NND_LAUNCH_CAP(min_blocks) \
+  __launch_bounds__(k_nnd_block_size, min_blocks)
+#else
+#define SALTATLAS_SOLANET_NND_LAUNCH_CAP(min_blocks)
+#endif
+
 #ifndef SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES
 #define SALTATLAS_SOLANET_APU_NND_TOP_CANDIDATES 1
 #endif
@@ -724,7 +746,7 @@ SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
 // SM. The dominant stall is waiting on L1TEX, which resident warps hide.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
           int kOptLevel, int kMinBlocks, bool kSymmetricPass>
-SALTATLAS_HD_GLOBAL __launch_bounds__(k_nnd_block_size, kMinBlocks) void
+SALTATLAS_HD_GLOBAL SALTATLAS_SOLANET_NND_LAUNCH_CAP(kMinBlocks) void
 find_new_neighbor_candidates_capped(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
@@ -889,8 +911,7 @@ SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
 
 // Register-capped entry point, used from level 8.
 template <typename IDType, typename FEType, typename DistType>
-SALTATLAS_HD_GLOBAL __launch_bounds__(
-    k_nnd_block_size,
+SALTATLAS_HD_GLOBAL SALTATLAS_SOLANET_NND_LAUNCH_CAP(
     SALTATLAS_SOLANET_APU_NND_UPDATE_MIN_BLOCKS_PER_SM) void
 update_knng_with_candidates_capped(
     matrix_view<IDType>   candidates_ids_table,
