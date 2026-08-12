@@ -761,7 +761,21 @@ find_new_neighbor_candidates_capped(
 // Each thread independently updates its own KNNG list using the candidates in
 // the shared buffer.
 // Body shared by the plain and register-capped entry points below.
-template <typename IDType, typename FEType, typename DistType>
+// kDiagSkip is a temporary diagnostic, not an optimization. It removes phases
+// from the end of the kernel backwards so that consecutive wall-clock
+// differences attribute cost per phase. Run with a fixed -m so the iteration
+// count cannot change underneath the comparison. Results are wrong for every
+// value except 0; see levels 90+ in the launcher.
+//
+//   0 : the real kernel
+//   1 : skip the final KNNG re-sort
+//   2 : also skip the merge loop
+//   3 : also skip the sort by distance
+//   4 : also skip the hoisted duplicate check
+//   5 : also skip the sort by ID and the dedup (kernel reads and returns)
+template <typename IDType, typename FEType, typename DistType,
+          bool kHoistDupCheck = false, bool kSkipCleanResort = false,
+          bool kMergeResort = false, int kDiagSkip = 0>
 SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
     matrix_view<IDType>   candidates_ids_table,
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
@@ -787,12 +801,74 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
   // Sort candidates by ID to remove duplicate IDs
   // Sorting by distance may not adjacent duplicate IDs due to distance value's
   // float precision problem.
-  sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
-                               false);
-  n_candidates = remove_duplicate_neighbors<IDType, DistType>(
-      candidate_ids, candidate_dists, n_candidates);
-  sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
-                               true);
+  if constexpr (kDiagSkip < 5) {
+    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                                 false);
+    n_candidates = remove_duplicate_neighbors<IDType, DistType>(
+        candidate_ids, candidate_dists, n_candidates);
+  }
+
+  // Level 9: drop candidates that are already neighbours, here rather than
+  // inside the merge below.
+  //
+  // The merge re-scans the whole KNNG row for every candidate it examines,
+  // which is O((n_candidates + k) * k): about 3k comparisons at k=32 and 12k at
+  // k=64, and the dominant cost of this kernel. The candidates are already
+  // sorted by ID at this point, so the same question can be answered by walking
+  // the KNNG row once and binary-searching the candidates, which is
+  // O(k log n_candidates), around 190 comparisons at k=32.
+  //
+  // This also checks against the whole KNNG row, where the merge only ever
+  // scanned the part it had not yet overwritten, so it can drop a candidate the
+  // merge would have inserted as a duplicate. It can never keep one the merge
+  // would have dropped.
+  if constexpr (kHoistDupCheck && kDiagSkip < 4) {
+    // Hits are recorded in a bitmask rather than written into the array. The
+    // search needs the candidates to stay sorted by ID, and overwriting a slot
+    // with a sentinel breaks that for every search that follows it.
+    //
+    // The buffer is candidate_width wide, which is 2k at this level, so four
+    // 64-bit words cover any k up to 128. The KNNG row is held per thread, so
+    // larger k is not a configuration this kernel supports.
+    constexpr int      k_dead_words = 4;
+    unsigned long long dead[k_dead_words] = {0ull, 0ull, 0ull, 0ull};
+    assert(n_candidates <= 64 * k_dead_words &&
+           "hoisted duplicate check: candidate buffer wider than the bitmask");
+
+    for (int i = 0; i < k; ++i) {
+      const IDType kid = clear_msb(nids[i]);
+      int          lo = 0, hi = n_candidates - 1;
+      while (lo <= hi) {
+        const int    mid = lo + ((hi - lo) >> 1);
+        const IDType cid = candidate_ids[mid];
+        if (cid == kid) {
+          dead[mid >> 6] |= (1ull << (mid & 63));
+          break;
+        }
+        if (cid < kid) {
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+    }
+
+    // Compact in place, preserving ascending ID order.
+    int w = 0;
+    for (int r = 0; r < n_candidates; ++r) {
+      if (((dead[r >> 6] >> (r & 63)) & 1ull) == 0ull) {
+        candidate_ids[w]   = candidate_ids[r];
+        candidate_dists[w] = candidate_dists[r];
+        ++w;
+      }
+    }
+    n_candidates = w;
+  }
+
+  if constexpr (kDiagSkip < 3) {
+    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                                 true);
+  }
 
   // Merge candidates into KNNG list.
   // Both input KNNG and candidates lists must be sorted by distance (ID
@@ -801,24 +877,27 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
   int c_idx       = 0;
   int knng_tail   = k - 1;
   int l_n_updates = 0;
-  while (c_idx < n_candidates && knng_idx <= knng_tail) {
+  while (kDiagSkip < 2 && c_idx < n_candidates && knng_idx <= knng_tail) {
     // const auto knng_id   = clear_msb(nids[knng_idx]);
     const auto knng_dist = dists[knng_idx];
     const auto cid       = candidate_ids[c_idx];
     const auto cdist     = candidate_dists[c_idx];
 
-    // TODO: use bit-map hash table to reduce the for loop check?
-    bool duplicate = false;
-    for (int i = 0; i <= knng_tail; ++i) {
-      if (clear_msb(nids[i]) == cid) {
-        duplicate = true;
-        break;
+    // At level 9 this was answered before the loop; see the hoisted check above.
+    if constexpr (!kHoistDupCheck) {
+      // TODO: use bit-map hash table to reduce the for loop check?
+      bool duplicate = false;
+      for (int i = 0; i <= knng_tail; ++i) {
+        if (clear_msb(nids[i]) == cid) {
+          duplicate = true;
+          break;
+        }
       }
-    }
-    if (duplicate) {
-      // candidate is already in KNNG list
-      ++c_idx;
-      continue;
+      if (duplicate) {
+        // candidate is already in KNNG list
+        ++c_idx;
+        continue;
+      }
     }
 
     if (!nearly_equal(cdist, knng_dist) && cdist < knng_dist) {
@@ -835,7 +914,66 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
       ++knng_idx;
     }
   }
-  sort_neighbors_single_thread(nids, dists, k);
+  if constexpr (kDiagSkip < 1) {
+    if constexpr (kMergeResort) {
+      // Level 11: the merge already leaves two sorted runs, so combine them in
+      // O(k) instead of re-sorting the whole row in O(k^2).
+      //
+      //   [0 .. knng_tail]      untouched prefix, still ascending
+      //   [knng_tail+1 .. k-1]  the insertions, DESCENDING: the best candidate
+      //                         was written first, at the highest index, and
+      //                         each later one at a lower index
+      //
+      // The full re-sort was 34% of this kernel at three iterations. Level 10
+      // tried to skip it when nothing was written, which bought nothing: with
+      // one thread per point, a warp takes the branch if any of its 32 threads
+      // has an update, so the test almost never skips. This wins per thread
+      // regardless of what the rest of the warp is doing.
+      constexpr int k_tmp_max = 64;
+      const int     n_ins     = k - 1 - knng_tail;
+      if (n_ins > 0 && n_ins <= k_tmp_max) {
+        IDType   t_ids[k_tmp_max];
+        DistType t_dists[k_tmp_max];
+        // Reverse the insertions into the temp so both runs run ascending.
+        for (int j = 0; j < n_ins; ++j) {
+          t_ids[j]   = nids[k - 1 - j];
+          t_dists[j] = dists[k - 1 - j];
+        }
+        // Merge from the back. w is always >= i, so writing at w never
+        // clobbers a prefix element still to be read.
+        int i = knng_tail;
+        int j = n_ins - 1;
+        int w = k - 1;
+        while (j >= 0) {
+          bool take_prefix = false;
+          if (i >= 0) {
+            // Match sort_neighbors_single_thread: ascending distance, ties
+            // broken by ascending ID.
+            take_prefix = nearly_equal(dists[i], t_dists[j])
+                              ? (clear_msb(nids[i]) > clear_msb(t_ids[j]))
+                              : (dists[i] > t_dists[j]);
+          }
+          if (take_prefix) {
+            nids[w]  = nids[i];
+            dists[w] = dists[i];
+            --i;
+          } else {
+            nids[w]  = t_ids[j];
+            dists[w] = t_dists[j];
+            --j;
+          }
+          --w;
+        }
+      } else if (n_ins > k_tmp_max) {
+        sort_neighbors_single_thread(nids, dists, k);
+      }
+    } else if (!kSkipCleanResort || l_n_updates > 0) {
+      // Level 10, kept as a documented negative result: skipping the re-sort
+      // for an untouched row measured neutral, because the branch is per
+      // thread and the warp is not.
+      sort_neighbors_single_thread(nids, dists, k);
+    }
+  }
   if (l_n_updates > 0) {
     atomic_add_u64(&n_updates_block[blockIdx.x],
                    static_cast<size_t>(l_n_updates));
@@ -898,19 +1036,23 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
 }
 
 // Ordinary entry point. No launch bound, so codegen matches the original.
-template <typename IDType, typename FEType, typename DistType>
+template <typename IDType, typename FEType, typename DistType,
+          bool kHoistDupCheck = false, bool kSkipCleanResort = false,
+          bool kMergeResort = false, int kDiagSkip = 0>
 SALTATLAS_HD_GLOBAL void update_knng_with_candidates(
     matrix_view<IDType>   candidates_ids_table,
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
     size_t* n_updates_block) {
-  update_knng_with_candidates_impl<IDType, FEType, DistType>(
+  update_knng_with_candidates_impl<IDType, FEType, DistType, kHoistDupCheck,
+                                   kSkipCleanResort, kMergeResort, kDiagSkip>(
       candidates_ids_table, candidates_dists_table, candidates_counts, knng_ids,
       knng_dists, n_updates_block);
 }
 
 // Register-capped entry point, used from level 8.
-template <typename IDType, typename FEType, typename DistType>
+template <typename IDType, typename FEType, typename DistType,
+          bool kHoistDupCheck = false>
 SALTATLAS_HD_GLOBAL SALTATLAS_SOLANET_NND_LAUNCH_CAP(
     SALTATLAS_SOLANET_APU_NND_UPDATE_MIN_BLOCKS_PER_SM) void
 update_knng_with_candidates_capped(
@@ -918,7 +1060,7 @@ update_knng_with_candidates_capped(
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
     size_t* n_updates_block) {
-  update_knng_with_candidates_impl<IDType, FEType, DistType>(
+  update_knng_with_candidates_impl<IDType, FEType, DistType, kHoistDupCheck>(
       candidates_ids_table, candidates_dists_table, candidates_counts, knng_ids,
       knng_dists, n_updates_block);
 }
@@ -1067,6 +1209,14 @@ void build_index_main_loop(
     ///       included in level 4.
     ///   4 : level 2 plus 128-bit vector loads in the distance loop
     ///   5 : level 4 plus a register cap, trading spills for occupancy
+    ///       (a no-op on AMD; see SALTATLAS_SOLANET_NND_LAUNCH_CAP)
+    ///   6 : reverse push on the (new, old) pass; (old, new) is not launched
+    ///   7 : level 6 plus the upper-triangle loop on the (new, new) pass
+    ///       (measured 2x slower than level 6; kept as a negative result)
+    ///   8 : level 6 plus a register cap on update_knng_with_candidates
+    ///       (measured neutral; not inherited by level 9)
+    ///   9 : level 6 with the duplicate check hoisted out of the merge in
+    ///       update_knng_with_candidates
     static const int nnd_opt_level = [] {
       const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
       return (env != nullptr) ? std::atoi(env) : 0;
@@ -1201,6 +1351,9 @@ void build_index_main_loop(
           }
           break;
         case 8:
+        case 9:
+        case 10:
+        case 11:
         default:
           // Levels >= 8 change update_knng only, so the neighbour check runs
           // exactly as at level 6. Never fall through to a lower level here:
@@ -1223,7 +1376,47 @@ void build_index_main_loop(
       rec_time().stop();  // neighbor_checks
 
       rec_time().start("knng_updates");
-      if (nnd_opt_level >= 8) {
+      // Level 9 hoists the duplicate check out of the merge; it is otherwise
+      // level 6's update kernel. Level 8's register cap is not inherited,
+      // having measured neutral.
+      // Levels 90+ are the phase-attribution diagnostic; see kDiagSkip.
+      // They produce a wrong graph and exist only to be timed with a fixed -m.
+#define SALTATLAS_LAUNCH_UPDATE_DIAG(SKIP)                                \
+  hipLaunchKernelGGL(                                                     \
+      (update_knng_with_candidates<IDType, FEType, DistType, true, false, \
+                                   false, (SKIP)>),                       \
+      grid_points, block, 0, nullptr, candidate_ids.get_view(),           \
+      candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists, \
+      n_updates_block.get())
+      if (nnd_opt_level >= 90) {  // diagnostic only
+        switch (nnd_opt_level - 90) {
+          case 1:  SALTATLAS_LAUNCH_UPDATE_DIAG(1); break;
+          case 2:  SALTATLAS_LAUNCH_UPDATE_DIAG(2); break;
+          case 3:  SALTATLAS_LAUNCH_UPDATE_DIAG(3); break;
+          case 4:  SALTATLAS_LAUNCH_UPDATE_DIAG(4); break;
+          case 5:  SALTATLAS_LAUNCH_UPDATE_DIAG(5); break;
+          default: SALTATLAS_LAUNCH_UPDATE_DIAG(0); break;
+        }
+      } else if (nnd_opt_level >= 11) {
+        hipLaunchKernelGGL(
+            (update_knng_with_candidates<IDType, FEType, DistType, true, false,
+                                         true>),
+            grid_points, block, 0, nullptr, candidate_ids.get_view(),
+            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+            n_updates_block.get());
+      } else if (nnd_opt_level >= 10) {
+        hipLaunchKernelGGL(
+            (update_knng_with_candidates<IDType, FEType, DistType, true, true>),
+            grid_points, block, 0, nullptr, candidate_ids.get_view(),
+            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+            n_updates_block.get());
+      } else if (nnd_opt_level >= 9) {
+        hipLaunchKernelGGL(
+            (update_knng_with_candidates<IDType, FEType, DistType, true>),
+            grid_points, block, 0, nullptr, candidate_ids.get_view(),
+            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
+            n_updates_block.get());
+      } else if (nnd_opt_level == 8) {
         hipLaunchKernelGGL(
             (update_knng_with_candidates_capped<IDType, FEType, DistType>),
             grid_points, block, 0, nullptr, candidate_ids.get_view(),
