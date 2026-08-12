@@ -15,6 +15,7 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -42,6 +43,12 @@ struct options {
                     // other implementations.
   double                delta{0.0001};
   int                   max_iterations{100};
+  // Distance-compute dtype: auto | fp32 | fp16. Mirrors the cuVS driver so the
+  // two vendors can be compared at the same precision. hipVS inherits cuVS's
+  // AUTO, which picks the fp16 matrix-core local-join kernel whenever dim > 16,
+  // and that is not a like-for-like comparison against SOLANET's fp32 scalar
+  // path.
+  std::string           dist_dtype{"auto"};
   double                rmm_pool_size_gb{-1};
   bool                  optimize{false};
   std::filesystem::path output_path{};
@@ -58,6 +65,7 @@ struct options {
     std::cout << "rho: " << rho << std::endl;
     std::cout << "delta: " << delta << std::endl;
     std::cout << "max_iterations: " << max_iterations << std::endl;
+    std::cout << "dist_dtype: " << dist_dtype << std::endl;
     std::cout << "rmm_pool_size_gb: " << rmm_pool_size_gb << std::endl;
     std::cout << "optimize: " << optimize << std::endl;
     std::cout << "output_path: " << output_path << std::endl;
@@ -68,7 +76,7 @@ struct options {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:oG:N:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:T:oG:N:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.point_files_path = std::filesystem::path(optarg);
@@ -96,6 +104,9 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'M':
         opt.rmm_pool_size_gb = std::stod(optarg);
+        break;
+      case 'T':
+        opt.dist_dtype = optarg;
         break;
       case 'o':
         opt.optimize = true;
@@ -126,6 +137,12 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   if (opt.distance_function != "l2" && opt.distance_function != "ip") {
     std::cerr << "Error: Unsupported distance function: "
               << opt.distance_function << std::endl;
+    return false;
+  }
+  if (opt.dist_dtype != "auto" && opt.dist_dtype != "fp32" &&
+      opt.dist_dtype != "fp16") {
+    std::cerr << "Error: Unsupported dist dtype: " << opt.dist_dtype
+              << std::endl;
     return false;
   }
   return true;
@@ -165,6 +182,10 @@ void show_usage(const char* prog_name) {
          "memory with some margin)"
       << std::endl;
   std::cout
+      << "  -T <auto|fp32|fp16>: dtype for distance computation (default: "
+         "auto, which uses fp16 matrix cores when dim > 16)"
+      << std::endl;
+  std::cout
       << "  -o: Optimize the kNNG by pruning high-degree points and keeping "
          "only the closest neighbors (default: false)"
       << std::endl;
@@ -179,6 +200,29 @@ void show_usage(const char* prog_name) {
       << std::endl;
   std::cout << "  -v: Verbose output (default: false)" << std::endl;
   std::cout << "  -h: Show this help message and exit" << std::endl;
+}
+
+// Select the dtype the local join computes distances in.
+//
+// hipVS gained `dist_comp_dtype` after the rocmds-25.10 release, so the field
+// may not exist. The detection has to live in a template: inside an ordinary
+// function the parameter type is concrete, `if constexpr` does not stop the
+// discarded branch from being checked, and the build fails on installs that
+// lack the field. Making the parameter dependent is what defers the check.
+template <typename ParamsT>
+void set_dist_comp_dtype(ParamsT& params, const std::string& dtype) {
+  if constexpr (requires { params.dist_comp_dtype; }) {
+    using DCT = std::decay_t<decltype(params.dist_comp_dtype)>;
+    if (dtype == "fp32") {
+      params.dist_comp_dtype = DCT::FP32;
+    } else if (dtype == "fp16") {
+      params.dist_comp_dtype = DCT::FP16;
+    }  // "auto" keeps the hipVS default
+  } else if (dtype != "auto") {
+    std::cerr << "WARNING: installed hipVS has no dist_comp_dtype; -T ignored. "
+                 "Distances are computed in fp16 on matrix cores."
+              << std::endl;
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -261,6 +305,11 @@ int main(int argc, char* argv[]) {
   nnd_params.return_distances          = true;
   nnd_params.max_iterations            = opt.max_iterations;
   nnd_params.termination_threshold     = opt.delta;
+
+  // Without an fp32 path the local join runs in fp16 on the matrix cores, which
+  // is the AMD counterpart of the NVIDIA fp16 kernel and not comparable with
+  // SOLANET's fp32 arithmetic.
+  set_dist_comp_dtype(nnd_params, opt.dist_dtype);
 
   auto d_pstore_view = make_dev_matrix_view(points.data(), n_points, n_dims);
 
