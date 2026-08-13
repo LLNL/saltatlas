@@ -391,17 +391,26 @@ __global__ void add_reverse_neighbors(matrix_view<IDType> ng_ids,
 // one row rather than 32 threads reading 32 different rows. The sort itself is
 // still lane 0's serial loop; parallelising it is a later step, and level 12
 // showed placement matters far more than the division of work here.
-template <typename IDType>
+template <typename IDType, bool kBitonicSort = false>
 __global__ void remove_duplicate_neighbors_warp_kernel(
     matrix_view<IDType> ng_ids) {
+  // Elements per lane for the bitonic network at level 14. warp_bitonic_sort
+  // supports 1..8, so the largest power-of-two run it can sort is
+  // 8 * warp width: 256 on NVIDIA, 512 on AMD. Longer lists fall back to the
+  // serial sort.
+  constexpr int k_bitonic_m = 8;
   extern __shared__ char smem_dedup[];
   static constexpr auto  k_invalid_id = std::numeric_limits<IDType>::max();
 
   const int lane            = static_cast<int>(threadIdx.x) % warpSize;
   const int warp_in_block   = static_cast<int>(threadIdx.x) / warpSize;
   const int width           = static_cast<int>(ng_ids.n_cols());
+  int       s_capacity      = 1;
+  while (s_capacity < width) {
+    s_capacity <<= 1;
+  }
   IDType* const s_ng =
-      reinterpret_cast<IDType*>(smem_dedup) + warp_in_block * width;
+      reinterpret_cast<IDType*>(smem_dedup) + warp_in_block * s_capacity;
 
   const size_t g_warp =
       (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) / warpSize;
@@ -441,12 +450,39 @@ __global__ void remove_duplicate_neighbors_warp_kernel(
     }
     sync_warp();
 
+    // Level 14: sort the whole warp instead of lane 0.
+    //
+    // This sort exists only to make equal IDs adjacent for the dedup below, so
+    // the relative order of equal keys does not matter and the missing
+    // tie-break in warp_bitonic_sort is irrelevant here. Padding uses
+    // k_invalid_id, which is the maximum value, so the padding sorts to the end
+    // and the valid entries stay in [0, count).
+    bool sorted_by_warp = false;
+    if constexpr (kBitonicSort) {
+      int n_pad = 1;
+      while (n_pad < count) {
+        n_pad <<= 1;
+      }
+      if (n_pad <= k_native_warp_size * k_bitonic_m && n_pad <= s_capacity) {
+        for (int i = count + lane; i < n_pad; i += warpSize) {
+          s_ng[i] = k_invalid_id;
+        }
+        sync_warp();
+        warp_bitonic_sort<IDType, void, k_bitonic_m, k_native_warp_size>(
+            s_ng, nullptr, n_pad);
+        sync_warp();
+        sorted_by_warp = true;
+      }
+    }
+
     int unique_count = 0;
     if (lane == 0) {
-      for (int i = 0; i < count - 1; ++i) {
-        for (int j = i + 1; j < count; ++j) {
-          if (s_ng[i] > s_ng[j]) {
-            swap_values(s_ng[i], s_ng[j]);
+      if (!sorted_by_warp) {
+        for (int i = 0; i < count - 1; ++i) {
+          for (int j = i + 1; j < count; ++j) {
+            if (s_ng[i] > s_ng[j]) {
+              swap_values(s_ng[i], s_ng[j]);
+            }
           }
         }
       }
@@ -1393,10 +1429,20 @@ void build_index_main_loop(
     // same variable and is in scope here.
     if (nnd_opt_level_for_alloc >= 13) {
       const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
-      const size_t dd_bytes =
-          dd_warps * static_cast<size_t>(old_ng.n_cols()) * sizeof(IDType);
-      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
-                         grid_warp_points, block, dd_bytes, nullptr, old_ng);
+      // Rounded up to a power of two so level 14 can pad the run it sorts.
+      size_t dd_cap = 1;
+      while (dd_cap < old_ng.n_cols()) {
+        dd_cap <<= 1;
+      }
+      const size_t dd_bytes = dd_warps * dd_cap * sizeof(IDType);
+      if (nnd_opt_level_for_alloc >= 14) {
+        hipLaunchKernelGGL(
+            (remove_duplicate_neighbors_warp_kernel<IDType, true>),
+            grid_warp_points, block, dd_bytes, nullptr, old_ng);
+      } else {
+        hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
+                           grid_warp_points, block, dd_bytes, nullptr, old_ng);
+      }
     } else {
       hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
                          grid_points, block, 0, nullptr, old_ng);
@@ -1427,10 +1473,20 @@ void build_index_main_loop(
     // same variable and is in scope here.
     if (nnd_opt_level_for_alloc >= 13) {
       const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
-      const size_t dd_bytes =
-          dd_warps * static_cast<size_t>(new_ng.n_cols()) * sizeof(IDType);
-      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
-                         grid_warp_points, block, dd_bytes, nullptr, new_ng);
+      // Rounded up to a power of two so level 14 can pad the run it sorts.
+      size_t dd_cap = 1;
+      while (dd_cap < new_ng.n_cols()) {
+        dd_cap <<= 1;
+      }
+      const size_t dd_bytes = dd_warps * dd_cap * sizeof(IDType);
+      if (nnd_opt_level_for_alloc >= 14) {
+        hipLaunchKernelGGL(
+            (remove_duplicate_neighbors_warp_kernel<IDType, true>),
+            grid_warp_points, block, dd_bytes, nullptr, new_ng);
+      } else {
+        hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
+                           grid_warp_points, block, dd_bytes, nullptr, new_ng);
+      }
     } else {
       hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
                          grid_points, block, 0, nullptr, new_ng);
@@ -1605,6 +1661,7 @@ void build_index_main_loop(
         case 11:
         case 12:
         case 13:
+        case 14:
         default:
           // Levels >= 8 change update_knng only, so the neighbour check runs
           // exactly as at level 6. Never fall through to a lower level here:
