@@ -21,11 +21,23 @@
 
 namespace saltatlas::solanet::apu_nn {
 
+// std::swap is only callable from device code under C++20 plus
+// --expt-relaxed-constexpr, and these helpers are reached from __device__
+// functions that nvcc checks strictly. They had never been instantiated by any
+// compiler (every caller sat behind #if 0), so the dependency went unnoticed.
+// A hand-rolled swap has no such requirement on either backend.
+template <typename T>
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void swap_values(T& a, T& b) {
+  const T tmp = a;
+  a           = b;
+  b           = tmp;
+}
+
 template <typename KeyT>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void swap_if_greater(KeyT& a,
                                                                   KeyT& b) {
   if (a > b) {
-    std::swap(a, b);
+    swap_values(a, b);
   }
 }
 
@@ -35,8 +47,8 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void swap_if_greater(KeyT& a,
                                                                   KeyT& b,
                                                                   ValT& bv) {
   if (a > b) {
-    std::swap(a, b);
-    std::swap(av, bv);
+    swap_values(a, b);
+    swap_values(av, bv);
   }
 }
 
