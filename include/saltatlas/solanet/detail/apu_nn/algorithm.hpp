@@ -52,7 +52,30 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void swap_if_greater(KeyT& a,
   }
 }
 
-template <typename KeyT, typename ValT>
+// kTieBreakByVal orders equal keys by ascending value.
+//
+// The comparison is EXACT, not nearly_equal. sort_neighbors_single_thread uses
+// nearly_equal, which is fine for a selection sort that compares every pair,
+// but nearly_equal is not transitive: a~b and b~c does not imply a~c. A bitonic
+// network needs a strict weak ordering to sort at all, so feeding it a
+// non-transitive comparator can leave the result unsorted rather than merely
+// ordered differently.
+template <typename KeyT, typename ValT, bool kTieBreakByVal>
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void swap_if_greater_tb(
+    KeyT& a, ValT& av, KeyT& b, ValT& bv) {
+  bool greater;
+  if constexpr (kTieBreakByVal) {
+    greater = (a > b) || (!(b > a) && av > bv);
+  } else {
+    greater = (a > b);
+  }
+  if (greater) {
+    swap_values(a, b);
+    swap_values(av, bv);
+  }
+}
+
+template <typename KeyT, typename ValT, bool kTieBreakByVal = false>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void warp_compare_exchange(
     KeyT* keys, ValT* vals, int i, int j, bool ascending) {
   if constexpr (std::is_same<ValT, void>::value) {
@@ -74,9 +97,9 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void warp_compare_exchange(
     ValT vj = vals[j];
 
     if (ascending) {
-      swap_if_greater(ki, vi, kj, vj);
+      swap_if_greater_tb<KeyT, ValT, kTieBreakByVal>(ki, vi, kj, vj);
     } else {
-      swap_if_greater(kj, vj, ki, vi);
+      swap_if_greater_tb<KeyT, ValT, kTieBreakByVal>(kj, vj, ki, vi);
     }
 
     keys[i] = ki;
@@ -86,7 +109,8 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void warp_compare_exchange(
   }
 }
 
-template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size>
+template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size,
+          bool kTieBreakByVal = false>
 SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys, ValT* vals,
                                                   int n) {
   constexpr int NMAX = WARP * M;
@@ -115,7 +139,8 @@ SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys, ValT* vals,
         const int ixj = i ^ j;
         if (ixj > i && ixj < n) {
           const bool ascending = ((i & k) == 0);
-          warp_compare_exchange(keys, vals, i, ixj, ascending);
+          warp_compare_exchange<KeyT, ValT, kTieBreakByVal>(keys, vals, i, ixj,
+                                                            ascending);
         }
       }
       sync_warp();
@@ -123,12 +148,13 @@ SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys, ValT* vals,
   }
 }
 
-template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size>
+template <typename KeyT, typename ValT, int M, int WARP = k_native_warp_size,
+          bool kTieBreakByVal = false>
 SALTATLAS_HD_DEVICE inline void warp_bitonic_sort(KeyT* keys,
                                                   ValT* vals = nullptr) {
   constexpr int N = WARP * M;
   static_assert((N & (N - 1)) == 0, "N must be power of two");
-  warp_bitonic_sort<KeyT, ValT, M, WARP>(keys, vals, N);
+  warp_bitonic_sort<KeyT, ValT, M, WARP, kTieBreakByVal>(keys, vals, N);
 }
 
 /// \brief Simple Key-value pair sort.
