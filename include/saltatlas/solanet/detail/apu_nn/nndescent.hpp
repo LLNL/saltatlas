@@ -377,6 +377,112 @@ __global__ void add_reverse_neighbors(matrix_view<IDType> ng_ids,
   }
 }
 
+// Level 13: one warp per point, list staged in shared memory.
+//
+// The kernel above is the same shape update_knng_with_candidates had before
+// level 12: one thread per point running an O(n^2) selection sort with random
+// access straight into global memory. It is 14.7% of the build at level 12,
+// second only to the two local-join passes and the update kernel, and it is
+// pure bookkeeping.
+//
+// The fix that worked there works here. Staging the list into shared memory
+// moves the sort's working set to a latency roughly twenty times lower, and the
+// load and store become coalesced because 32 lanes read consecutive elements of
+// one row rather than 32 threads reading 32 different rows. The sort itself is
+// still lane 0's serial loop; parallelising it is a later step, and level 12
+// showed placement matters far more than the division of work here.
+template <typename IDType>
+__global__ void remove_duplicate_neighbors_warp_kernel(
+    matrix_view<IDType> ng_ids) {
+  extern __shared__ char smem_dedup[];
+  static constexpr auto  k_invalid_id = std::numeric_limits<IDType>::max();
+
+  const int lane            = static_cast<int>(threadIdx.x) % warpSize;
+  const int warp_in_block   = static_cast<int>(threadIdx.x) / warpSize;
+  const int width           = static_cast<int>(ng_ids.n_cols());
+  IDType* const s_ng =
+      reinterpret_cast<IDType*>(smem_dedup) + warp_in_block * width;
+
+  const size_t g_warp =
+      (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) / warpSize;
+  const size_t n_warps =
+      (static_cast<size_t>(gridDim.x) * blockDim.x) / warpSize;
+  if (n_warps == 0) {
+    return;
+  }
+
+  for (size_t sid = g_warp; sid < ng_ids.n_rows(); sid += n_warps) {
+    IDType* const g_ng = ng_ids(sid);
+
+    // Find the first invalid ID cooperatively, and stage only the valid prefix.
+    // These lists are allocated for the worst case after reverse edges, so the
+    // width is usually far larger than the number of valid entries; copying the
+    // whole row in and out costs more than the sort it saves. Each lane reports
+    // the smallest invalid index it owns and the warp takes the minimum, which
+    // is the first invalid overall because every position past it is invalid.
+    int local_first = width;
+    for (int i = lane; i < width; i += warpSize) {
+      if (g_ng[i] == k_invalid_id) {
+        local_first = i;
+        break;
+      }
+    }
+#pragma unroll
+    for (int off = warpSize / 2; off > 0; off >>= 1) {
+      const int other = shfl_down(local_first, off, warpSize);
+      if (other < local_first) {
+        local_first = other;
+      }
+    }
+    const int count = shfl_bcast(local_first, 0, warpSize);
+
+    for (int i = lane; i < count; i += warpSize) {
+      s_ng[i] = g_ng[i];
+    }
+    sync_warp();
+
+    int unique_count = 0;
+    if (lane == 0) {
+      for (int i = 0; i < count - 1; ++i) {
+        for (int j = i + 1; j < count; ++j) {
+          if (s_ng[i] > s_ng[j]) {
+            swap_values(s_ng[i], s_ng[j]);
+          }
+        }
+      }
+      for (int i = 0; i < count; ++i) {
+        if (i == 0 || s_ng[i] != s_ng[i - 1]) {
+          s_ng[unique_count] = s_ng[i];
+          ++unique_count;
+        }
+      }
+
+      // The shuffle is not cosmetic. The local join samples from these lists,
+      // which is what rho controls, so the order decides which neighbours get
+      // used. Leaving them sorted by ID biases the sampling and changes the
+      // graph. Same seed and same sequence as the original kernel.
+      uint64_t rnd_state = static_cast<uint64_t>(sid);
+      for (int i = unique_count - 1; i > 0; --i) {
+        const int j = static_cast<int>(lcg_rand(rnd_state, i + 1));
+        swap_values(s_ng[i], s_ng[j]);
+      }
+
+    }
+    unique_count = shfl_bcast(unique_count, 0, warpSize);
+    sync_warp();
+
+    // Only [0, unique_count) changed, and the stopper marks the end. Anything
+    // past it is never read, exactly as in the original kernel.
+    for (int i = lane; i < unique_count; i += warpSize) {
+      g_ng[i] = s_ng[i];
+    }
+    if (lane == 0 && unique_count < width) {
+      g_ng[unique_count] = k_invalid_id;
+    }
+    sync_warp();
+  }
+}
+
 template <typename IDType>
 __global__ void remove_duplicate_neighbors_kernel(matrix_view<IDType> ng_ids) {
   const size_t sid      = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1283,8 +1389,18 @@ void build_index_main_loop(
 
     spdlog::trace("Remove duplicate neighbors old");
     rec_time().start("remove_dup_old");
-    hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>), grid_points,
-                       block, 0, nullptr, old_ng);
+    // nnd_opt_level is declared further down; nnd_opt_level_for_alloc reads the
+    // same variable and is in scope here.
+    if (nnd_opt_level_for_alloc >= 13) {
+      const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
+      const size_t dd_bytes =
+          dd_warps * static_cast<size_t>(old_ng.n_cols()) * sizeof(IDType);
+      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
+                         grid_warp_points, block, dd_bytes, nullptr, old_ng);
+    } else {
+      hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
+                         grid_points, block, 0, nullptr, old_ng);
+    }
     SALTATLAS_HIP_CHECK(hipGetLastError());
     // SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
     rec_time().stop();  // remove_dup_old
@@ -1307,8 +1423,18 @@ void build_index_main_loop(
 
     spdlog::trace("Remove duplicate neighbors new");
     rec_time().start("remove_dup_new");
-    hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>), grid_points,
-                       block, 0, nullptr, new_ng);
+    // nnd_opt_level is declared further down; nnd_opt_level_for_alloc reads the
+    // same variable and is in scope here.
+    if (nnd_opt_level_for_alloc >= 13) {
+      const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
+      const size_t dd_bytes =
+          dd_warps * static_cast<size_t>(new_ng.n_cols()) * sizeof(IDType);
+      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
+                         grid_warp_points, block, dd_bytes, nullptr, new_ng);
+    } else {
+      hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
+                         grid_points, block, 0, nullptr, new_ng);
+    }
     SALTATLAS_HIP_CHECK(hipGetLastError());
     SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
     rec_time().stop();  // remove_dup_new
@@ -1478,6 +1604,7 @@ void build_index_main_loop(
         case 10:
         case 11:
         case 12:
+        case 13:
         default:
           // Levels >= 8 change update_knng only, so the neighbour check runs
           // exactly as at level 6. Never fall through to a lower level here:
