@@ -915,22 +915,20 @@ find_new_neighbor_candidates_capped(
 //   3 : also skip the sort by distance
 //   4 : also skip the hoisted duplicate check
 //   5 : also skip the sort by ID and the dedup (kernel reads and returns)
-template <typename IDType, typename FEType, typename DistType,
-          bool kHoistDupCheck = false, bool kSkipCleanResort = false,
-          bool kMergeResort = false, int kDiagSkip = 0>
-SALTATLAS_HD_DEVICE inline int update_one_point(
+// Dedup the candidates and drop any that are already neighbours.
+//
+// Split out of update_one_point so the warp-collective path can run the two
+// sorts across all lanes and call only these serial phases on lane 0.
+// Assumes the candidates are sorted by ID on entry. Returns the new count.
+template <typename IDType, typename DistType, bool kHoistDupCheck,
+          int kDiagSkip>
+SALTATLAS_HD_DEVICE inline int update_dedup_filter(
     IDType* const candidate_ids, DistType* const candidate_dists,
-    int n_candidates, IDType* const nids, DistType* const dists, const int k) {
-  // Sort candidates by ID to remove duplicate IDs
-  // Sorting by distance may not adjacent duplicate IDs due to distance value's
-  // float precision problem.
+    int n_candidates, const IDType* const nids, const int k) {
   if constexpr (kDiagSkip < 5) {
-    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
-                                 false);
     n_candidates = remove_duplicate_neighbors<IDType, DistType>(
         candidate_ids, candidate_dists, n_candidates);
   }
-
   // Level 9: drop candidates that are already neighbours, here rather than
   // inside the merge below.
   //
@@ -988,11 +986,22 @@ SALTATLAS_HD_DEVICE inline int update_one_point(
     n_candidates = w;
   }
 
-  if constexpr (kDiagSkip < 3) {
-    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
-                                 true);
-  }
 
+  return n_candidates;
+}
+
+// Merge the candidates into the KNNG row and return how many were installed.
+//
+// Split out of update_one_point so the warp-collective path can run the two
+// sorts across all lanes and call only the serial phases on lane 0. Assumes
+// the candidates are sorted by distance on entry.
+template <typename IDType, typename FEType, typename DistType,
+          bool kHoistDupCheck, bool kSkipCleanResort, bool kMergeResort,
+          int kDiagSkip>
+SALTATLAS_HD_DEVICE inline int update_merge_row(
+    IDType* const candidate_ids, DistType* const candidate_dists,
+    const int n_candidates, IDType* const nids, DistType* const dists,
+    const int k) {
   // Merge candidates into KNNG list.
   // Both input KNNG and candidates lists must be sorted by distance (ID
   // breaks ties) and must not have duplicates.
@@ -1098,6 +1107,34 @@ SALTATLAS_HD_DEVICE inline int update_one_point(
     }
   }
   return l_n_updates;
+}
+
+
+template <typename IDType, typename FEType, typename DistType,
+          bool kHoistDupCheck = false, bool kSkipCleanResort = false,
+          bool kMergeResort = false, int kDiagSkip = 0>
+SALTATLAS_HD_DEVICE inline int update_one_point(
+    IDType* const candidate_ids, DistType* const candidate_dists,
+    int n_candidates, IDType* const nids, DistType* const dists, const int k) {
+  // Sort candidates by ID to remove duplicate IDs
+  // Sorting by distance may not adjacent duplicate IDs due to distance value's
+  // float precision problem.
+  if constexpr (kDiagSkip < 5) {
+    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                                 false);
+  }
+  n_candidates = update_dedup_filter<IDType, DistType, kHoistDupCheck,
+                                     kDiagSkip>(candidate_ids, candidate_dists,
+                                                n_candidates, nids, k);
+
+  if constexpr (kDiagSkip < 3) {
+    sort_neighbors_single_thread(candidate_ids, candidate_dists, n_candidates,
+                                 true);
+  }
+
+  return update_merge_row<IDType, FEType, DistType, kHoistDupCheck,
+                         kSkipCleanResort, kMergeResort, kDiagSkip>(
+      candidate_ids, candidate_dists, n_candidates, nids, dists, k);
 }
 
 // One thread per point. The original launch shape, unchanged.
@@ -1209,7 +1246,8 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_impl(
 // Shared memory per warp: (candidate_width + k) ids and the same number of
 // distances. The launcher sizes the dynamic allocation to match.
 template <typename IDType, typename FEType, typename DistType,
-          bool kHoistDupCheck = false, bool kMergeResort = false>
+          bool kHoistDupCheck = false, bool kMergeResort = false,
+          bool kWarpSort = false>
 SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
     matrix_view<IDType>   candidates_ids_table,
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
@@ -1223,16 +1261,24 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
 
   const int cw = static_cast<int>(candidates_ids_table.n_cols());
   const int k  = static_cast<int>(knng_ids.n_cols());
-  const int n_slots = cw + k;
+  // Level 15 pads the candidate run to a power of two for the bitonic network,
+  // so the candidate region is allocated at that size.
+  int cap = 1;
+  while (cap < cw) {
+    cap <<= 1;
+  }
+  const int cand_slots = kWarpSort ? cap : cw;
+  const int n_slots    = cand_slots + k;
+  constexpr int k_sort_m = 8;
 
   IDType* const   s_id_base = reinterpret_cast<IDType*>(smem_upd);
   DistType* const s_ds_base = reinterpret_cast<DistType*>(
       s_id_base + static_cast<size_t>(warps_per_block) * n_slots);
 
   IDType* const   s_cid   = s_id_base + warp_in_block * n_slots;
-  IDType* const   s_nid   = s_cid + cw;
+  IDType* const   s_nid   = s_cid + cand_slots;
   DistType* const s_cdist = s_ds_base + warp_in_block * n_slots;
-  DistType* const s_ndist = s_cdist + cw;
+  DistType* const s_ndist = s_cdist + cand_slots;
 
   const size_t g_warp =
       (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) / warpSize;
@@ -1262,7 +1308,63 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
     sync_warp();
 
     int l_n_updates = 0;
-    if (lane == 0) {
+    if constexpr (kWarpSort) {
+      // Level 15: the two candidate sorts run across the whole warp; only the
+      // dedup, the duplicate filter and the merge stay on lane 0.
+      int n_pad = 1;
+      while (n_pad < n_cand) {
+        n_pad <<= 1;
+      }
+      const bool fits = (n_pad <= k_native_warp_size * k_sort_m) &&
+                        (n_pad <= cand_slots);
+      if (fits) {
+        // Sort by ID, ties by distance, so the dedup below deterministically
+        // keeps the nearest of each duplicate group. The serial path never did
+        // that: it sorted by ID alone and kept whichever landed first.
+        for (int i = n_cand + lane; i < n_pad; i += warpSize) {
+          s_cid[i]   = std::numeric_limits<IDType>::max();
+          s_cdist[i] = std::numeric_limits<DistType>::max();
+        }
+        sync_warp();
+        warp_bitonic_sort<IDType, DistType, k_sort_m, k_native_warp_size, true>(
+            s_cid, s_cdist, n_pad);
+        sync_warp();
+
+        int n_kept = 0;
+        if (lane == 0) {
+          n_kept = update_dedup_filter<IDType, DistType, kHoistDupCheck, 0>(
+              s_cid, s_cdist, n_cand, s_nid, k);
+        }
+        n_kept = shfl_bcast(n_kept, 0, warpSize);
+        sync_warp();
+
+        // Sort by distance, ties by ID: the ordering the KNNG row requires and
+        // the debug build asserts on.
+        int m_pad = 1;
+        while (m_pad < n_kept) {
+          m_pad <<= 1;
+        }
+        for (int i = n_kept + lane; i < m_pad; i += warpSize) {
+          s_cdist[i] = std::numeric_limits<DistType>::max();
+          s_cid[i]   = std::numeric_limits<IDType>::max();
+        }
+        sync_warp();
+        warp_bitonic_sort<DistType, IDType, k_sort_m, k_native_warp_size, true>(
+            s_cdist, s_cid, m_pad);
+        sync_warp();
+
+        if (lane == 0) {
+          l_n_updates =
+              update_merge_row<IDType, FEType, DistType, kHoistDupCheck, false,
+                               kMergeResort, 0>(s_cid, s_cdist, n_kept, s_nid,
+                                                s_ndist, k);
+        }
+      } else if (lane == 0) {
+        l_n_updates = update_one_point<IDType, FEType, DistType, kHoistDupCheck,
+                                       false, kMergeResort, 0>(
+            s_cid, s_cdist, n_cand, s_nid, s_ndist, k);
+      }
+    } else if (lane == 0) {
       l_n_updates = update_one_point<IDType, FEType, DistType, kHoistDupCheck,
                                      false, kMergeResort, 0>(
           s_cid, s_cdist, n_cand, s_nid, s_ndist, k);
@@ -1288,14 +1390,16 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
 }
 
 template <typename IDType, typename FEType, typename DistType,
-          bool kHoistDupCheck = false, bool kMergeResort = false>
+          bool kHoistDupCheck = false, bool kMergeResort = false,
+          bool kWarpSort = false>
 SALTATLAS_HD_GLOBAL void update_knng_with_candidates_warp(
     matrix_view<IDType>   candidates_ids_table,
     matrix_view<DistType> candidates_dists_table, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists,
     size_t* n_updates_block, size_t n_update_slots) {
   update_knng_with_candidates_warp_impl<IDType, FEType, DistType,
-                                        kHoistDupCheck, kMergeResort>(
+                                        kHoistDupCheck, kMergeResort,
+                                        kWarpSort>(
       candidates_ids_table, candidates_dists_table, candidates_counts, knng_ids,
       knng_dists, n_updates_block, n_update_slots);
 }
@@ -1662,6 +1766,7 @@ void build_index_main_loop(
         case 12:
         case 13:
         case 14:
+        case 15:
         default:
           // Levels >= 8 change update_knng only, so the neighbour check runs
           // exactly as at level 6. Never fall through to a lower level here:
@@ -1711,18 +1816,34 @@ void build_index_main_loop(
         // buffer and the KNNG row as ids then distances.
         const size_t upd_warps_per_block =
             static_cast<size_t>(block.x) / device_prop.warpSize;
+        size_t upd_cap = 1;
+        while (upd_cap < static_cast<size_t>(candidate_width)) {
+          upd_cap <<= 1;
+        }
         const size_t upd_slots =
-            static_cast<size_t>(candidate_width) + static_cast<size_t>(k);
+            (nnd_opt_level >= 15 ? upd_cap
+                                 : static_cast<size_t>(candidate_width)) +
+            static_cast<size_t>(k);
         const size_t upd_shared_bytes =
             upd_warps_per_block * upd_slots *
             (sizeof(IDType) + sizeof(DistType));
-        hipLaunchKernelGGL(
-            (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
-                                              true>),
-            grid_warp_points, block, upd_shared_bytes, nullptr,
-            candidate_ids.get_view(), candidate_dists.get_view(),
-            candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
-            n_blocks);
+        if (nnd_opt_level >= 15) {
+          hipLaunchKernelGGL(
+              (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
+                                                true, true>),
+              grid_warp_points, block, upd_shared_bytes, nullptr,
+              candidate_ids.get_view(), candidate_dists.get_view(),
+              candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
+              n_blocks);
+        } else {
+          hipLaunchKernelGGL(
+              (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
+                                                true, false>),
+              grid_warp_points, block, upd_shared_bytes, nullptr,
+              candidate_ids.get_view(), candidate_dists.get_view(),
+              candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
+              n_blocks);
+        }
       } else if (nnd_opt_level >= 11) {
         hipLaunchKernelGGL(
             (update_knng_with_candidates<IDType, FEType, DistType, true, false,
