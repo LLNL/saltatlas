@@ -78,6 +78,10 @@ Recall agrees between vendors to within 0.01 pp at matched configuration. The
 optimizations are worth more on MI300A than on H100 (3.92x against 2.78x on
 sift-128), which narrows the gap between the two from 1.68x to 1.19x.
 
+The ordering reverses with dimensionality. On GIST at 960 dimensions, where the
+local join is 98% of runtime and the kernel is bandwidth-bound, MI300A finishes
+in 40.8 s against H100's 56.8 s at identical settings.
+
 ## Known limitations
 
 **Recall per unit k.** SOLANET needs roughly double the build degree to reach
