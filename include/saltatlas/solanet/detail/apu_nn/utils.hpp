@@ -14,10 +14,15 @@
 #include <memory>
 #include <type_traits>
 
+#if defined(__CUDACC__)
+#include <cuda_runtime.h>
+#include <curand_kernel.h>
+#else
 #include <hip/hip_runtime.h>
 #include <rocrand/rocrand_kernel.h>
+#endif
 
-#if defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__CUDACC__)
 #define SALTATLAS_HD_HOST __host__
 #define SALTATLAS_HD_DEVICE __device__
 #define SALTATLAS_HD_HD __host__ __device__
@@ -34,17 +39,51 @@
 #define SALTATLAS_HD_FORCEINLINE inline
 #endif
 
+#if defined(__CUDACC__)
+// CUDA backend: map the HIP runtime API used in apu_nn to the CUDA runtime so
+// the same sources compile with nvcc. Kept to exactly the calls apu_nn uses.
+#define hipError_t cudaError_t
+#define hipSuccess cudaSuccess
+#define hipGetErrorString cudaGetErrorString
+#define hipMalloc cudaMalloc
+#define hipFree cudaFree
+#define hipMemcpy cudaMemcpy
+#define hipMemcpyHostToDevice cudaMemcpyHostToDevice
+#define hipMemcpyDeviceToHost cudaMemcpyDeviceToHost
+#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
+#define hipMemcpyDefault cudaMemcpyDefault
+#define hipMemset cudaMemset
+#define hipGetLastError cudaGetLastError
+#define hipDeviceSynchronize cudaDeviceSynchronize
+#define hipGetDevice cudaGetDevice
+#define hipSetDevice cudaSetDevice
+#define hipGetDeviceProperties cudaGetDeviceProperties
+#define hipDeviceProp_t cudaDeviceProp
+#define hipMallocManaged cudaMallocManaged
+#define hipMemAttachGlobal cudaMemAttachGlobal
+#define hipLaunchKernelGGL(kernel, grid, block, shmem, stream, ...) \
+  kernel<<<grid, block, shmem, stream>>>(__VA_ARGS__)
+#endif
+
 #define SALTATLAS_HIP_CHECK(call)                                       \
   do {                                                                  \
     hipError_t err = (call);                                            \
     if (err != hipSuccess) {                                            \
-      std::fprintf(stderr, "HIP error %s:%d: %s\n", __FILE__, __LINE__, \
+      std::fprintf(stderr, "GPU error %s:%d: %s\n", __FILE__, __LINE__, \
                    hipGetErrorString(err));                             \
       std::exit(1);                                                     \
     }                                                                   \
   } while (0)
 
 namespace saltatlas::solanet::apu_nn {
+
+// Native SIMT width of the target backend: 64-lane wavefronts on AMD
+// (MI300A), 32-lane warps on NVIDIA.
+#if defined(__CUDACC__)
+inline constexpr int k_native_warp_size = 32;
+#else
+inline constexpr int k_native_warp_size = 64;
+#endif
 
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int get_global_thread_id() {
   return blockIdx.x * blockDim.x + threadIdx.x;
@@ -54,25 +93,24 @@ SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int get_global_thread_count() {
   return gridDim.x * blockDim.x;
 }
 
-template <int kWarpSize = 64>
+template <int kWarpSize = k_native_warp_size>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int get_global_warp_id() {
-  return get_global_thread_id() /
-         kWarpSize;  // Assuming warp size of 64 for MI300A
+  return get_global_thread_id() / kWarpSize;
 }
 
-template <int kWarpSize = 64>
+template <int kWarpSize = k_native_warp_size>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int get_local_warp_id() {
   return threadIdx.x / kWarpSize;
 }
 
-template <int kWarpSize = 64>
+template <int kWarpSize = k_native_warp_size>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int get_lane_id() {
   if constexpr (kWarpSize == 32) {
     return threadIdx.x & 31;
   } else if constexpr (kWarpSize == 64) {
     return threadIdx.x & 63;
   }
-  return threadIdx.x % kWarpSize;  // Assuming warp size of 64 for MI300A
+  return threadIdx.x % kWarpSize;
 }
 
 template <typename T>
@@ -86,7 +124,9 @@ SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE bool nearly_equal(
 }
 
 SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE void sync_warp() {
-#ifdef __HIPCC__
+#if defined(__CUDA_ARCH__)
+  __syncwarp();
+#elif defined(__HIPCC__)
   // TODO: make sure if this is actually needed for ROCM
   __threadfence_block();
   // __syncwarp();
@@ -111,6 +151,31 @@ lcg_rand(uint64_t& state, const uint64_t range) {
   return (lcg64(state) >> 32) % range;
 }
 
+#if defined(__CUDACC__)
+using rnd_state_type = curandStateXORWOW_t;
+
+SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE void rnd_init(const int       tid,
+                                                       const uint64_t  seed,
+                                                       rnd_state_type& state) {
+#if defined(__CUDA_ARCH__)
+  curand_init(seed, tid, 0, &state);
+#else
+  (void)tid;
+  (void)seed;
+  (void)state;
+#endif
+}
+
+SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE unsigned int rnd_next(
+    rnd_state_type& state) {
+#if defined(__CUDA_ARCH__)
+  return curand(&state);
+#else
+  (void)state;
+  return 0u;
+#endif
+}
+#else
 using rnd_state_type = rocrand_state_xorwow;
 
 SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE void rnd_init(const int       tid,
@@ -122,6 +187,7 @@ SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE void rnd_init(const int       tid,
 SALTATLAS_HD_HD SALTATLAS_HD_FORCEINLINE auto rnd_next(rnd_state_type& state) {
   return rocrand(&state);
 }
+#endif
 
 SALTATLAS_HD_HD inline int u64_to_commas(uint64_t v, char* out) {
   // Max for uint64: "18,446,744,073,709,551,615" -> 26 chars + '\0' => 27
@@ -164,20 +230,126 @@ align_up(const size_t size, const size_t alignment) {
   return (size + mask) & ~mask;
 }
 
+// Note on CUDA masks: teams (sub-warp groups) in the same warp can diverge
+// (e.g., different loop trip counts per team), so the full-warp constant mask
+// would be illegal. __activemask() names exactly the lanes executing the
+// intrinsic; exchanges stay within a team (width), whose lanes never diverge
+// at these call sites. This matches HIP's implicit active-lane semantics.
 template <typename T>
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE T shfl_up(T v, int delta) {
+#if defined(__CUDACC__)
+  return __shfl_up_sync(__activemask(), v, delta);
+#else
   // HIP has __shfl_up for int/float; for other types, specialize as needed.
   return __shfl_up(v, delta);
+#endif
 }
 
-// Warp-exclusive scan for int (warp size 64 on MI300A)
+// Warp shuffle-down with an explicit width (sub-warp / team reductions).
+// CUDA requires the *_sync variants; HIP keeps the classic intrinsics.
+template <typename T>
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE T
+shfl_down(T v, int delta, int width = k_native_warp_size) {
+#if defined(__CUDACC__)
+  return __shfl_down_sync(__activemask(), v, delta, width);
+#else
+  return __shfl_down(v, delta, width);
+#endif
+}
+
+// Warp broadcast from src_lane with an explicit width.
+template <typename T>
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE T
+shfl_bcast(T v, int src_lane, int width = k_native_warp_size) {
+#if defined(__CUDACC__)
+  return __shfl_sync(__activemask(), v, src_lane, width);
+#else
+  return __shfl(v, src_lane, width);
+#endif
+}
+
+// Team-wide logical OR: "does any lane in my team satisfy this predicate?".
+// The hardware has a dedicated vote instruction for reducing a predicate, so
+// this replaces a chain of shfl_down calls followed by a broadcast. Every lane
+// receives the answer, so no broadcast is needed afterwards.
+//
+// `width` must be a power of two no larger than the native warp width, and a
+// team's lanes must be contiguous, which is how check_neighbors_kernel assigns
+// them. Unlike the shfl_* helpers above this uses an explicit team mask rather
+// than __activemask(), because a vote must not reach across team boundaries.
+#if defined(__CUDACC__)
+using team_mask_t = unsigned int;
+#else
+using team_mask_t = unsigned long long;
+#endif
+
+// Mask of the lanes belonging to this thread's team.
+//
+// This depends only on threadIdx.x, so compute it ONCE per thread and keep it
+// in a register. Calling it inside an inner loop costs several integer
+// instructions per iteration and can cancel out the saving it exists to
+// enable.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE team_mask_t
+team_mask(int width = k_native_warp_size) {
+  const int lane = static_cast<int>(threadIdx.x) & (k_native_warp_size - 1);
+  const int base = lane - (lane % width);
+  if (width >= k_native_warp_size) {
+    return ~static_cast<team_mask_t>(0);
+  }
+  return ((static_cast<team_mask_t>(1) << width) -
+          static_cast<team_mask_t>(1))
+         << base;
+}
+
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE bool team_any(bool       pred,
+                                                           team_mask_t mask) {
+#if defined(__CUDACC__)
+  return __any_sync(mask, pred);
+#else
+  // HIP's __any() spans the whole wavefront, so mask the ballot down to the
+  // team instead.
+  return (static_cast<team_mask_t>(__ballot(pred)) & mask) != 0ull;
+#endif
+}
+
+// Convenience overload that derives the mask on the spot. Prefer the two-step
+// form in hot loops.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE bool team_any(
+    bool pred, int width = k_native_warp_size) {
+  return team_any(pred, team_mask(width));
+}
+
+// Barrier across a team's lanes. Needed whenever one lane must observe another
+// lane's shared-memory writes: CUDA's independent thread scheduling does not
+// guarantee that contiguous lanes stay in lockstep. AMD wavefronts do execute
+// in lockstep, so this is a no-op there.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE void team_sync(team_mask_t mask) {
+#if defined(__CUDACC__)
+  __syncwarp(mask);
+#else
+  (void)mask;
+#endif
+}
+
+// 64-bit atomic add usable on both backends. CUDA's atomicAdd has no
+// size_t/unsigned long overload, only unsigned long long.
+SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE size_t
+atomic_add_u64(size_t* address, size_t val) {
+  static_assert(sizeof(size_t) == sizeof(unsigned long long),
+                "size_t must be 64-bit");
+  return static_cast<size_t>(
+      atomicAdd(reinterpret_cast<unsigned long long*>(address),
+                static_cast<unsigned long long>(val)));
+}
+
+// Warp-exclusive scan for int over the native warp width.
 SALTATLAS_HD_DEVICE SALTATLAS_HD_FORCEINLINE int warp_exclusive_scan_int_64(
     int x) {
-  int lane = threadIdx.x & 63;
+  int lane = threadIdx.x & (k_native_warp_size - 1);
   int sum  = x;  // inclusive scan first
 #pragma unroll
-  for (int d = 1; d < 64; d <<= 1) {
-    int y = __shfl_up(sum, d);
+  for (int d = 1; d < k_native_warp_size; d <<= 1) {
+    int y = shfl_up(sum, d);
     if (lane >= d) sum += y;
   }
   return sum - x;  // exclusive

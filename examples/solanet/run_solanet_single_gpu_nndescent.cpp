@@ -3,27 +3,57 @@
 //
 // SPDX-License-Identifier: MIT
 
+// SOLANET (lock-free NN-Descent) on a single NVIDIA GPU.
+// The kernels are the same apu_nn sources used on MI300A; they compile for
+// CUDA through the backend layer in apu_nn/utils.hpp. Unlike the APU driver,
+// points are staged in pinned host memory and copied to the device
+// explicitly, and the built KNNG is copied back before scoring/dumping.
+
+#define SALTATLAS_SOLANET_APU_NND_TEAM_SIZE 8
+
 #include <unistd.h>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <new>
+#include <random>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include <cuda_runtime.h>
+
+// Optional RMM pool, mirroring run_cuvs_single_gpu_nndescent.cpp.
+//
+// OFF by default, deliberately. SOLANET allocates its dozen large buffers
+// directly through apu_nn/memory.hpp (cudaMalloc) and never asks RMM for
+// anything, so the pool cannot speed this driver up; it exists only for
+// stylistic parity with the cuVS driver. Meanwhile RMM's pool API is a moving
+// target across versions (headers moved rmm/mr/device/... -> rmm/mr/..., and
+// the constructor went from <Upstream>+pointer to CTAD+device_async_resource_ref),
+// which has broken this build against both cuVS 25.10 and 26.02.
+//
+// Enable explicitly if you route apu_nn's allocator through RMM later:
+//   -DSALTATLAS_SOLANET_ENABLE_RMM_POOL
+#if defined(SALTATLAS_SOLANET_ENABLE_RMM_POOL) &&        \
+    __has_include(<rmm/mr/pool_memory_resource.hpp>) &&  \
+    __has_include(<rmm/mr/per_device_resource.hpp>)
+#define SALTATLAS_SOLANET_USE_RMM 1
 #include <rmm/cuda_device.hpp>
 #include <rmm/mr/per_device_resource.hpp>
 #include <rmm/mr/pool_memory_resource.hpp>
+#endif
 
 #include <saltatlas/dnnd/detail/utilities/file.hpp>
 #include <saltatlas/shm_knng_query/data_reader.hpp>
-#include <saltatlas/solanet/detail/cuvs_nn/common.hpp>
+#include <saltatlas/solanet/detail/apu_nn/matrix.hpp>
+#include <saltatlas/solanet/detail/apu_nn/memory.hpp>
+#include <saltatlas/solanet/detail/apu_nn/nndescent.hpp>
 #include <saltatlas/solanet/singleton_time_recorder.hpp>
 
 #include "l2_normalize_points.hpp"
@@ -80,18 +110,11 @@ struct options {
   std::filesystem::path point_files_path;
   std::string           point_file_format;
   std::string           distance_function{"l2"};
-  bool                  l2_normalize{false};
   size_t                k{0};
-  double rho{0.5};  // Not used in cuVS, but kept for consistency.
-  double delta{0.0001};
-  int    max_iterations{100};
-  double rmm_pool_size_gb{-1};
-  // Distance-compute dtype: auto | fp32 | fp16.
-  // cuVS defaults to AUTO, which selects the fp16 tensor-core kernel
-  // (local_join_kernel_wmma) whenever dim > 16. fp32 forces the scalar
-  // kernel (local_join_kernel_simt), which is what SOLANET uses.
-  std::string dist_dtype{"auto"};
-  bool        optimize{false};
+  double                rho{0.5};
+  double                delta{0.0001};
+  int                   max_iterations{100};
+  double                rmm_pool_size_gb{-1};
   std::filesystem::path output_path{};
   bool                  dump_distance{false};
   bool                  verbose{false};
@@ -101,14 +124,11 @@ struct options {
     std::cout << "point_files_path: " << point_files_path << std::endl;
     std::cout << "point_file_format: " << point_file_format << std::endl;
     std::cout << "distance_function: " << distance_function << std::endl;
-    std::cout << "l2_normalize: " << l2_normalize << std::endl;
     std::cout << "k: " << k << std::endl;
     std::cout << "rho: " << rho << std::endl;
     std::cout << "delta: " << delta << std::endl;
     std::cout << "max_iterations: " << max_iterations << std::endl;
     std::cout << "rmm_pool_size_gb: " << rmm_pool_size_gb << std::endl;
-    std::cout << "dist_dtype: " << dist_dtype << std::endl;
-    std::cout << "optimize: " << optimize << std::endl;
     std::cout << "output_path: " << output_path << std::endl;
     std::cout << "dump_distance: " << dump_distance << std::endl;
     std::cout << "verbose: " << verbose << std::endl;
@@ -117,7 +137,7 @@ struct options {
 
 bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
   int p;
-  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:T:oG:N:Dvh")) != -1) {
+  while ((p = getopt(argc, argv, "i:p:f:k:d:r:m:M:G:Dvh")) != -1) {
     switch (p) {
       case 'i':
         opt.point_files_path = std::filesystem::path(optarg);
@@ -127,9 +147,6 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'f':
         opt.distance_function = optarg;
-        break;
-      case 'N':
-        opt.l2_normalize = true;
         break;
       case 'k':
         opt.k = std::stoul(optarg);
@@ -145,12 +162,6 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
         break;
       case 'M':
         opt.rmm_pool_size_gb = std::stod(optarg);
-        break;
-      case 'T':
-        opt.dist_dtype = optarg;
-        break;
-      case 'o':
-        opt.optimize = true;
         break;
       case 'G':
         opt.output_path = optarg;
@@ -180,6 +191,10 @@ bool parse_options(int argc, char* argv[], options& opt, bool& show_usage) {
               << opt.distance_function << std::endl;
     return false;
   }
+  if (opt.max_iterations <= 0) {
+    std::cerr << "Error: max_iterations must be > 0." << std::endl;
+    return false;
+  }
   return true;
 }
 
@@ -195,19 +210,16 @@ void show_usage(const char* prog_name) {
   std::cout << "  -p <point_file_format>: Format of point files (required)"
             << std::endl;
   std::cout << "  -f <distance_function>: Distance function. l2 or ip (inner "
-               "product), default: l2."
+               "product), default: l2. Points are L2 normalized "
+               "automatically for ip."
             << std::endl;
-  std::cout
-      << "  -N: L2 normalize points before building the index (default: false)"
-      << std::endl;
   std::cout << "  -k <k>: Number of neighbors (required)" << std::endl;
   std::cout
       << "  -d <delta>: Termination threshold for nn-descent (default: 0.0001)"
       << std::endl;
-  std::cout
-      << "  -r <rho>: Sampling rate for candidate neighbors in nn-descent "
-         "(default: 0.5, not used in cuVS)"
-      << std::endl;
+  std::cout << "  -r <rho>: Sampling rate for candidate neighbors in "
+               "nn-descent (default: 0.5)"
+            << std::endl;
   std::cout
       << "  -m <max_iterations>: Maximum iterations for nn-descent (default: "
          "100)"
@@ -216,21 +228,12 @@ void show_usage(const char* prog_name) {
       << "  -M <rmm_pool_size_gb>: RMM pool size in GB (default: use all free "
          "memory with some margin)"
       << std::endl;
-  std::cout
-      << "  -T <auto|fp32|fp16>: dtype for distance computation (default: "
-         "auto, which uses fp16 tensor cores when dim > 16)"
-      << std::endl;
-  std::cout
-      << "  -o: Optimize the kNNG by pruning high-degree points and keeping "
-         "only the closest neighbors (default: false)"
-      << std::endl;
-  std::cout << "  -G <output_path>: Directory path to dump the built kNNG."
-               "(default: empty, no dumping)"
+  std::cout << "  -G <output_path>: If specified, dump the KNNG to the given "
+               "path. Distance will be dumped if -D is also specified."
             << std::endl;
-  std::cout
-      << "  -D: Dump distances along with neighbor IDs when dumping kNNG with "
-         "-G option (default: false)"
-      << std::endl;
+  std::cout << "  -D: Dump distances along with neighbor IDs when dumping "
+               "KNNG. Only effective if -G is also specified."
+            << std::endl;
   std::cout << "  -v: Verbose output (default: false)" << std::endl;
   std::cout << "  -h: Show this help message and exit" << std::endl;
 }
@@ -270,6 +273,7 @@ int main(int argc, char* argv[]) {
               << " GB)" << std::endl;
   }
 
+#ifdef SALTATLAS_SOLANET_USE_RMM
   double pool_size = 0.0;
   if (opt.rmm_pool_size_gb > 0) {
     pool_size = opt.rmm_pool_size_gb * (1ULL << 30);
@@ -280,24 +284,18 @@ int main(int argc, char* argv[]) {
     std::cout << "RMM pool size (GB): "
               << pool_size / static_cast<double>(1ULL << 30) << std::endl;
   }
-  // RMM's pool constructor that takes a device_async_resource_ref is a
-  // template whose Upstream parameter cannot be deduced from the ref, so name
-  // it explicitly. (Class template argument deduction works only with the
-  // Upstream* overload.)
-  //
-  // The pool is allocated with `new` and deliberately never deleted. cuVS and
-  // RAFT release device memory from static destructors, which run *after*
-  // main's locals are gone. A stack-allocated pool would be destroyed while
-  // still registered as the current device resource, leaving that resource
-  // dangling and hanging the process at exit (after all output has been
-  // printed, so it looks like a mid-run hang). The OS reclaims the pool at
-  // process exit, so leaking it is the cheap, correct fix here.
-  auto* rmm_pool =
-      new rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource>(
-          rmm::mr::get_current_device_resource_ref(),
-          static_cast<std::size_t>(pool_size));
-  // RMM 26.02 takes a pointer here (newer RMM added a reference overload).
+  rmm::mr::pool_memory_resource rmm_pool(
+      rmm::mr::get_current_device_resource_ref(),
+      static_cast<std::size_t>(pool_size));
   rmm::mr::set_current_device_resource(rmm_pool);
+#else
+  (void)opt.rmm_pool_size_gb;
+  if (opt.verbose) {
+    std::cout << "RMM pool: disabled (SOLANET allocates via cudaMalloc; "
+                 "build with -DSALTATLAS_SOLANET_ENABLE_RMM_POOL to enable)"
+              << std::endl;
+  }
+#endif
 
   std::cout << "\nLoad point" << std::endl;
   const auto point_file_paths =
@@ -313,84 +311,50 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  if (opt.l2_normalize) {
+  if (opt.distance_function == "ip") {
+    std::cout << "!!! L2 normalizing points for inner product search... !!"
+              << std::endl;
     l2_normalize_points(points.data(), points.num_points(),
                         points.num_dimensions());
   }
 
-  using namespace saltatlas::solanet::cuvs_nn;
-  raft::resources        host_res;
-  raft::device_resources dev_res;
+  using namespace saltatlas::solanet;
 
   const size_t n_points = points.num_points();
   const size_t n_dims   = points.num_dimensions();
 
-  // cuVS CUDA path requires explicit host-to-device copy before building.
-  auto h_dataset = raft::make_host_matrix<fe_type, int64_t>(n_points, n_dims);
-  raft::copy(h_dataset.data_handle(), points.data(), n_points * n_dims,
-             raft::resource::get_cuda_stream(dev_res));
-  raft::resource::sync_stream(dev_res,
-                              raft::resource::get_cuda_stream(dev_res));
-
-  cuvs::distance::DistanceType dist_func =
-      (opt.distance_function == "l2")
-          ? cuvs::distance::DistanceType::L2Expanded
-          : ((opt.distance_function == "ip")
-                 ? cuvs::distance::DistanceType::InnerProduct
-                 : cuvs::distance::DistanceType::L2Expanded);
-
   std::cout << "\nBuild KNNG" << std::endl;
   saltatlas::rec_time().start("Build-knng");
 
-  auto nnd_params =
-      cuvs::neighbors::cagra::graph_build_params::nn_descent_params(opt.k,
-                                                                    dist_func);
-  nnd_params.graph_degree              = opt.k;
-  nnd_params.intermediate_graph_degree = opt.k;
-  nnd_params.return_distances          = true;
-  nnd_params.max_iterations            = opt.max_iterations;
-  nnd_params.termination_threshold     = opt.delta;
-
-  // Distance dtype selection. cuVS gained `dist_comp_dtype` after v25.10, so
-  // detect it at compile time and degrade gracefully on older installs
-  // (25.10 has only the fp16 WMMA local-join kernel; there is no fp32 path).
-  if constexpr (requires { nnd_params.dist_comp_dtype; }) {
-    using DCT = std::decay_t<decltype(nnd_params.dist_comp_dtype)>;
-    if (opt.dist_dtype == "fp32") {
-      nnd_params.dist_comp_dtype = DCT::FP32;  // -> local_join_kernel_simt
-    } else if (opt.dist_dtype == "fp16") {
-      nnd_params.dist_comp_dtype = DCT::FP16;  // -> local_join_kernel_wmma
-    }  // "auto" keeps the cuVS default
-  } else if (opt.dist_dtype != "auto") {
-    std::cerr << "WARNING: installed cuVS has no dist_comp_dtype; -T ignored. "
-                 "Distances are computed in fp16 on tensor cores."
-              << std::endl;
-  }
-
+  // Discrete GPU: copy the point store to device memory explicitly.
   saltatlas::rec_time().start("Copy-pstore-to-dev");
-  auto d_pstore = copy_to_dev(make_host_matrix_view(h_dataset), dev_res);
+  auto d_pstore = apu_nn::make_hip_array<fe_type>(n_points * n_dims);
+  SALTATLAS_HIP_CHECK(cudaMemcpy(d_pstore.get(), points.data(),
+                                 n_points * n_dims * sizeof(fe_type),
+                                 cudaMemcpyHostToDevice));
   saltatlas::rec_time().stop();
 
-  saltatlas::rec_time().start("nnd-kernel");
-  auto index = cuvs::neighbors::nn_descent::build(
-      dev_res, nnd_params, make_const_matrix_view(d_pstore));
-  saltatlas::rec_time().stop();
+  apu_nn::matrix_view<fe_type> pstore_view(d_pstore.get(), n_points, n_dims);
+  auto [knn_ids, knn_dists] =
+      apu_nn::build_index<id_type, fe_type, dist_type>(
+          pstore_view, opt.distance_function, opt.k, opt.rho, opt.delta,
+          std::random_device{}(), opt.max_iterations);
 
-  if (!index.distances().has_value()) {
-    std::cerr << "nn_descent index does not contain distances." << std::endl;
-    return EXIT_FAILURE;
-  }
-
+  // Copy the built KNNG back to (pinned) host memory.
   saltatlas::rec_time().start("Copy-knng-to-host");
-  auto h_nids  = copy_to_host(index.graph(), host_res, dev_res);
-  auto h_dists = copy_to_host(*index.distances(), host_res, dev_res);
+  std::vector<id_type, cuda_pinned_allocator<id_type>> h_ids(n_points * opt.k);
+  std::vector<dist_type, cuda_pinned_allocator<dist_type>> h_dists(n_points *
+                                                                   opt.k);
+  SALTATLAS_HIP_CHECK(cudaMemcpy(h_ids.data(), knn_ids.data(),
+                                 h_ids.size() * sizeof(id_type),
+                                 cudaMemcpyDeviceToHost));
+  SALTATLAS_HIP_CHECK(cudaMemcpy(h_dists.data(), knn_dists.data(),
+                                 h_dists.size() * sizeof(dist_type),
+                                 cudaMemcpyDeviceToHost));
   saltatlas::rec_time().stop();
-  saltatlas::rec_time().stop();  // build_knng
+  saltatlas::rec_time().stop();  // Build-knng
 
-  auto h_nids_view  = make_host_matrix_view(h_nids);
-  auto h_dists_view = make_host_matrix_view(h_dists);
-
-  // show_index_score(h_dists.data_handle(), n_points, opt.k, false);
+  // show_index_score(h_dists.data(), n_points, opt.k, false);
 
   print_time_table();
   saltatlas::rec_time().reset();
@@ -398,9 +362,9 @@ int main(int argc, char* argv[]) {
   if (!opt.output_path.empty()) {
     std::cout << "\nDump KNNG to " << opt.output_path << std::endl;
     const auto ids_view =
-        host_matrix_view<id_type>(h_nids_view.data_handle(), n_points, opt.k);
-    const auto dists_view = host_matrix_view<dist_type>(
-        h_dists_view.data_handle(), n_points, opt.k);
+        host_matrix_view<id_type>(h_ids.data(), n_points, opt.k);
+    const auto dists_view =
+        host_matrix_view<dist_type>(h_dists.data(), n_points, opt.k);
     dump_knng(ids_view, dists_view, opt.output_path, opt.dump_distance);
   }
 

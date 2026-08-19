@@ -7,7 +7,9 @@
 
 #include <memory>
 
+#if !defined(__CUDACC__)
 #include <hip/hip_runtime.h>
+#endif
 #include <spdlog/spdlog.h>
 
 #include "saltatlas/solanet/detail/apu_nn/utils.hpp"

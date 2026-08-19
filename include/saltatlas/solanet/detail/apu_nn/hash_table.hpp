@@ -13,7 +13,9 @@
 #include <type_traits>
 #include <utility>
 
+#if !defined(__CUDACC__)
 #include <hip/hip_runtime.h>
+#endif
 
 #include "saltatlas/solanet/detail/apu_nn/utils.hpp"
 
