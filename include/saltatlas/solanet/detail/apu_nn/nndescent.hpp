@@ -15,7 +15,7 @@
 #define SALTATLAS_SOLANET_APU_NND_TEAM_SIZE 4
 #endif
 
-// Minimum blocks per SM requested from the compiler at kOptLevel >= 5.
+// Minimum blocks per SM requested from the compiler.
 // Registers otherwise limit find_new_neighbor_candidates to 9 blocks (about 57
 // registers per thread), and its dominant stall is waiting on L1TEX, which more
 // resident warps would hide. Capping registers trades spills for occupancy, so
@@ -606,26 +606,17 @@ SALTATLAS_HD_GLOBAL void init_neighbor_check_data(
 // A single warp works on a pair of neighbor lists (nbs1 and nbs2) to find
 // better neighbors for points in nbs1.
 //
-// kOptLevel selects cumulative optimizations. 0 is the unmodified baseline;
-// each level includes every lower one.
-//   1 : team_any() vote in place of the shfl_down chain + broadcast
-//   2 : 32-bit induction variable in the distance loop
-//   3 : nid1's feature vector staged in shared memory (needs shared_vecs)
-//   4 : level 2 plus 128-bit vector loads in the distance loop
-//   6 : reverse push on the asymmetric pass, so (old,new) can be dropped
-//   7 : level 6 plus the upper-triangle loop on the symmetric pass
-//
 // kSymmetricPass says whether nbs1 and nbs2 are the same list. The launcher
 // knows this and the kernel cannot cheaply detect it.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel = 0, bool kSymmetricPass = false>
+          bool kSymmetricPass = false>
 SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
     const IDType* const nbs1, const int n_nbs1, const IDType* const nbs2,
     const int n_nbs2, const matrix_view<FEType>& pstore,
     matrix_view<IDType> candidates_ids, matrix_view<DistType> candidates_dists,
     span<int> candidates_counts, matrix_view<IDType> knng_ids,
     matrix_view<DistType> knng_dists, IDType* shared_knng_ids,
-    FEType* shared_vecs) {
+    FEType*) {
   static constexpr auto k_invalid_id = std::numeric_limits<IDType>::max();
   // const int    g_tid = static_cast<int>(blockIdx.x * blockDim.x +
   // threadIdx.x);
@@ -644,7 +635,7 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 
   // Push each distance to nid2's candidate list as well as nid1's. On the
   // asymmetric pass this replaces the separate (old,new) launch entirely.
-  constexpr bool k_reverse_push = (kOptLevel >= 6) && !kSymmetricPass;
+  constexpr bool k_reverse_push = !kSymmetricPass;
 
   // Each point in nbs1 is processed by a different team of threads
   for (int i = team_id; i < n_nbs1; i += n_teams) {
@@ -667,17 +658,7 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
     // n_nbs2 global reads of the same bytes. Unlike team_knng_ids above this
     // does need a team barrier: a partially written vector would produce a
     // wrong distance rather than merely a missed skip.
-    const FEType* nid1_vec = pstore(nid1);
-    if constexpr (kOptLevel == 3) {
-      const int     n_dims = static_cast<int>(pstore.n_cols());
-      FEType* const team_vec =
-          shared_vecs + static_cast<size_t>(block_team_id) * pstore.n_cols();
-      for (int d = tl_lane_id; d < n_dims; d += k_team_size) {
-        team_vec[d] = nid1_vec[d];
-      }
-      team_sync(t_mask);
-      nid1_vec = team_vec;
-    }
+    const FEType* const nid1_vec = pstore(nid1);
 
     // All points in nbs2 are processed by the same team, and the team keeps
     // top-k_top_candidates best neighbors among them.
@@ -706,34 +687,19 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
       }
 
       // Reduce to a single "nid2 already in KNNG" flag within the team.
-      bool in_knng;
-      if constexpr (kOptLevel >= 1) {
-        // Step 1: one vote instruction in place of (k_team_size - 1)
-        // shfl_down calls plus a broadcast. The result already lands in every
-        // lane, so nothing has to be broadcast back.
-        in_knng = team_any(l_in_knng, t_mask);
-      } else {
-        int           in_knng_flag  = l_in_knng ? 1 : 0;
-        constexpr int team_lead_lane = 0;
-        // Gather the in_knng flag to the team leader lane
-#pragma unroll
-        for (int kk = 1; kk < k_team_size; ++kk) {
-          in_knng_flag |= shfl_down(in_knng_flag, kk, k_team_size);
-        }
-        // Broadcast the in_knng flag from the team leader lane to all team
-        // members
-        in_knng_flag = shfl_bcast(in_knng_flag, team_lead_lane, k_team_size);
-        in_knng      = (in_knng_flag != 0);
-      }
+      // One vote instruction in place of (k_team_size - 1) shfl_down calls
+      // plus a broadcast. The result already lands in every lane, so nothing
+      // has to be broadcast back.
+      const bool in_knng = team_any(l_in_knng, t_mask);
       if (in_knng) {
         // Already connected in current KNNG; skip expensive distance op.
         continue;
       }
 
       DistType dist =
-          dist_op.template team<FEType, k_team_size, (kOptLevel >= 2),
-                                (kOptLevel >= 4)>(nid1_vec, pstore(nid2),
-                                                  pstore.n_cols());
+          dist_op.template team<FEType, k_team_size, /*kNarrowIdx=*/true,
+                                /*kVecLoad=*/true>(nid1_vec, pstore(nid2),
+                                                   pstore.n_cols());
       // This distance is a candidate for nid2 just as much as for nid1, and on
       // a symmetric or merged pass nobody else will compute it. There is no
       // per-nid2 accumulator in this loop shape, so filter by distance against
@@ -816,34 +782,19 @@ SALTATLAS_HD_DEVICE inline void check_neighbors_kernel(
 // Calls check_neighbors_with_global_atomic_per_warp() for each point in
 // parallel.
 //
-// kOptLevel is forwarded to check_neighbors_kernel; 0 reproduces the baseline
-// exactly.
-//
-// The body lives in a device function so that two entry points can share it.
-// __launch_bounds__ cannot be conditionally absent within a single template,
-// and it is not neutral when present: stating (1024, 1) changed register
-// allocation measurably at both level 0 and level 4, in opposite directions.
-// Keeping the attribute off the ordinary entry point is what preserves level 0
-// as the exact baseline.
+// __launch_bounds__ is not codegen-neutral: stating (1024, 1) changed
+// register allocation measurably, in opposite directions depending on which
+// optimizations were enabled. The value used here was tuned as blocks per SM
+// on an H100 and is selected by dimensionality; see the macro definition.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel, bool kSymmetricPass>
+          bool kSymmetricPass>
 SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
     const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
-  // Dynamic shared memory holds the per-team KNNG id scratch, followed (at
-  // kOptLevel >= 3) by one staged feature vector per team. The launcher sizes
-  // the allocation to match.
+  // Dynamic shared memory holds the per-team KNNG id scratch.
   extern __shared__ IDType shared_knng_ids[];
-  FEType*                  shared_vecs = nullptr;
-  if constexpr (kOptLevel == 3) {
-    const size_t n_teams_per_block =
-        static_cast<size_t>(blockDim.x) / static_cast<size_t>(k_team_size);
-    shared_vecs = reinterpret_cast<FEType*>(shared_knng_ids +
-                                            n_teams_per_block *
-                                                knng_ids.n_cols());
-  }
   const size_t             g_tid =
       static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x) +
       static_cast<size_t>(threadIdx.x);
@@ -856,33 +807,18 @@ SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
   }
 
   for (size_t sid = g_warp_id; sid < pstore.n_rows(); sid += n_global_warps) {
-    check_neighbors_kernel<IDType, FEType, DistType, DistOp, kOptLevel,
+    check_neighbors_kernel<IDType, FEType, DistType, DistOp,
                            kSymmetricPass>(
         nbs1(sid), nbs1.n_cols(), nbs2(sid), nbs2.n_cols(), pstore,
         candidates_ids, candidates_dists, candidates_counts, knng_ids,
-        knng_dists, shared_knng_ids, shared_vecs);
+        knng_dists, shared_knng_ids, nullptr);
   }
-}
-
-// Ordinary entry point, levels 0-4. No launch bound, so codegen matches what
-// the kernel produced before any of this parameterisation existed.
-template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel = 0, bool kSymmetricPass = false>
-SALTATLAS_HD_GLOBAL void find_new_neighbor_candidates(
-    const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
-    const matrix_view<FEType> pstore, matrix_view<IDType> candidates_ids,
-    matrix_view<DistType> candidates_dists, span<int> candidates_counts,
-    matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
-  find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
-                                    kOptLevel, kSymmetricPass>(
-      nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
-      knng_ids, knng_dists);
 }
 
 // Level 5 entry point: same body, with registers capped so more blocks fit per
 // SM. The dominant stall is waiting on L1TEX, which resident warps hide.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
-          int kOptLevel, int kMinBlocks, bool kSymmetricPass>
+          int kMinBlocks, bool kSymmetricPass>
 SALTATLAS_HD_GLOBAL SALTATLAS_SOLANET_NND_LAUNCH_CAP(kMinBlocks) void
 find_new_neighbor_candidates_capped(
     const matrix_view<IDType> nbs1, const matrix_view<IDType> nbs2,
@@ -890,7 +826,7 @@ find_new_neighbor_candidates_capped(
     matrix_view<DistType> candidates_dists, span<int> candidates_counts,
     matrix_view<IDType> knng_ids, matrix_view<DistType> knng_dists) {
   find_new_neighbor_candidates_impl<IDType, FEType, DistType, DistOp,
-                                    kOptLevel, kSymmetricPass>(
+                                    kSymmetricPass>(
       nbs1, nbs2, pstore, candidates_ids, candidates_dists, candidates_counts,
       knng_ids, knng_dists);
 }
@@ -1627,21 +1563,6 @@ void build_index_main_loop(
             "increase team size.");
       }
 
-      // Level 3 stages one feature vector per team alongside the id scratch.
-      // High-dimensional data can push that past the per-block limit, in which
-      // case fall back to level 2 rather than failing: the staging is an
-      // optimization, not a requirement.
-      int effective_opt = nnd_opt_level;
-      if (effective_opt == 3) {
-        const size_t vec_bytes =
-            n_teams_per_block * pstore.n_cols() * sizeof(FEType);
-        if (ck_shared_bytes + vec_bytes <= device_prop.sharedMemPerBlock) {
-          ck_shared_bytes += vec_bytes;
-        } else {
-          effective_opt = 2;
-        }
-      }
-
       rec_time().start("init neighbor checks");
       SALTATLAS_HIP_CHECK(
           hipMemset(candidate_counts_buf.get(), 0, n_points * sizeof(int)));
@@ -1649,112 +1570,38 @@ void build_index_main_loop(
       rec_time().stop();  // init neighbor checks
 
       rec_time().start("neighbor_checks");
-      // One instantiation per optimization level. Keeping them as distinct
-      // template arguments means level 0 compiles to exactly the original
-      // kernel, so the baseline stays available for comparison.
-#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(KERNEL, LEVEL)                    \
-  do {                                                                    \
-    if (symmetric_pass) {                                                 \
-      hipLaunchKernelGGL(                                                 \
-          (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL), true>),      \
-          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
-          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
-          candidate_counts, knng_ids, knng_dists);                        \
-    } else {                                                              \
-      hipLaunchKernelGGL(                                                 \
-          (KERNEL<IDType, FEType, DistType, DistOp, (LEVEL), false>),     \
-          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
-          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
-          candidate_counts, knng_ids, knng_dists);                        \
-    }                                                                     \
-  } while (0)
+      // The register cap is selected by dimensionality: high-dimensional
+      // data spills more, so it wants a lower blocks-per-SM target.
+      const int ck_min_blocks =
+          (pstore.n_cols() <= SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD)
+              ? SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM
+              : SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM;
+#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK(MIN_BLOCKS, SYMMETRIC)            \
+  hipLaunchKernelGGL(                                                     \
+      (find_new_neighbor_candidates_capped<IDType, FEType, DistType,      \
+                                           DistOp, (MIN_BLOCKS),          \
+                                           (SYMMETRIC)>),                 \
+      grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,      \
+      pstore, candidate_ids.get_view(), candidate_dists.get_view(),       \
+      candidate_counts, knng_ids, knng_dists)
 
-#define SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(LEVEL, MIN_BLOCKS)         \
-  do {                                                                    \
-    if (symmetric_pass) {                                                 \
-      hipLaunchKernelGGL(                                                 \
-          (find_new_neighbor_candidates_capped<                           \
-              IDType, FEType, DistType, DistOp, (LEVEL), (MIN_BLOCKS),    \
-              true>),                                                     \
-          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
-          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
-          candidate_counts, knng_ids, knng_dists);                        \
-    } else {                                                              \
-      hipLaunchKernelGGL(                                                 \
-          (find_new_neighbor_candidates_capped<                           \
-              IDType, FEType, DistType, DistOp, (LEVEL), (MIN_BLOCKS),    \
-              false>),                                                    \
-          grid_warp_points, block, ck_shared_bytes, nullptr, nbs1, nbs2,  \
-          pstore, candidate_ids.get_view(), candidate_dists.get_view(),   \
-          candidate_counts, knng_ids, knng_dists);                        \
-    }                                                                     \
-  } while (0)
-
-      // Level 5 is level 4's body behind the register-capped entry point.
-      switch (effective_opt) {
-        case 0:
-          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 0);
-          break;
-        case 1:
-          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 1);
-          break;
-        case 2:
-          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 2);
-          break;
-        case 3:
-          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 3);
-          break;
-        case 4:
-          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(find_new_neighbor_candidates, 4);
-          break;
-        case 5:
-          // Level 5 is level 4's kernel behind the register-capped entry point.
-          // It must not pick up level 6's reverse push: the launcher still runs
-          // the (old,new) pass at this level, and the two together would
-          // double-count candidates.
-          if (pstore.n_cols() <=
-              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
-          } else {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                4, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
-          }
-          break;
-        case 6:
-          if (pstore.n_cols() <=
-              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
-          } else {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
-          }
-          break;
-        case 8:
-        case 9:
-        case 10:
-        case 11:
-        case 12:
-        case 13:
-        case 14:
-        case 15:
-        default:
-          // Levels >= 8 change update_knng only, so the neighbour check runs
-          // exactly as at level 6. Never fall through to a lower level here:
-          // the launcher has already dropped the (old,new) pass, so a kernel
-          // without the reverse push silently produces a worse graph.
-          if (pstore.n_cols() <=
-              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_DIM_THRESHOLD) {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM);
-          } else {
-            SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED(
-                6, SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM);
-          }
-          break;
+      if (ck_min_blocks == SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM) {
+        if (symmetric_pass) {
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM, true);
+        } else {
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_LOW_DIM, false);
+        }
+      } else {
+        if (symmetric_pass) {
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM, true);
+        } else {
+          SALTATLAS_LAUNCH_NEIGHBOR_CHECK(
+              SALTATLAS_SOLANET_APU_NND_MIN_BLOCKS_HIGH_DIM, false);
+        }
       }
-#undef SALTATLAS_LAUNCH_NEIGHBOR_CHECK_CAPPED
 #undef SALTATLAS_LAUNCH_NEIGHBOR_CHECK
       SALTATLAS_HIP_CHECK(hipGetLastError());
       SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
@@ -1772,9 +1619,6 @@ void build_index_main_loop(
     // is redundant and its update_knng_with_candidates launch goes with it.
     neighbor_checker(new_ng, new_ng, /*symmetric_pass=*/true);
     neighbor_checker(new_ng, old_ng, /*symmetric_pass=*/false);
-    if (nnd_opt_level < 6) {
-      neighbor_checker(old_ng, new_ng, /*symmetric_pass=*/false);
-    }
 
 #ifdef SALTATLAS_SOLANET_APU_NND_PROFILE
     size_t total_candidates = 0;
