@@ -29,8 +29,8 @@
 //   nytimes (256d)   1.68 s      1.94 s      1.65 s     1.52 s
 //
 // so the cap is selected at launch from the feature dimensionality. Two data
-// points on one GPU; the fallback at any size is the uncapped level 4 path.
-// From level 6 the neighbour check pushes each distance to both endpoints'
+// points on one GPU.
+// The neighbour check pushes each distance to both endpoints'
 // candidate lists within a single pass, where the old scheme spread them over
 // two passes with a buffer reset in between. The per-point buffer therefore has
 // to hold roughly twice as many entries, and overflow is discarded silently by
@@ -377,11 +377,11 @@ __global__ void add_reverse_neighbors(matrix_view<IDType> ng_ids,
   }
 }
 
-// Level 13: one warp per point, list staged in shared memory.
+// One warp per point, list staged in shared memory.
 //
 // The kernel above is the same shape update_knng_with_candidates had before
-// level 12: one thread per point running an O(n^2) selection sort with random
-// access straight into global memory. It is 14.7% of the build at level 12,
+// one thread per point running an O(n^2) selection sort with random
+// access straight into global memory. That was 14.7% of the build,
 // second only to the two local-join passes and the update kernel, and it is
 // pure bookkeeping.
 //
@@ -389,12 +389,12 @@ __global__ void add_reverse_neighbors(matrix_view<IDType> ng_ids,
 // moves the sort's working set to a latency roughly twenty times lower, and the
 // load and store become coalesced because 32 lanes read consecutive elements of
 // one row rather than 32 threads reading 32 different rows. The sort itself is
-// still lane 0's serial loop; parallelising it is a later step, and level 12
-// showed placement matters far more than the division of work here.
+// still lane 0's serial loop; moving the working set into shared memory
+// mattered far more than the division of work here.
 template <typename IDType>
 __global__ void remove_duplicate_neighbors_warp_kernel(
     matrix_view<IDType> ng_ids) {
-  // Elements per lane for the bitonic network at level 14. warp_bitonic_sort
+  // Elements per lane for the bitonic network. warp_bitonic_sort
   // supports 1..8, so the largest power-of-two run it can sort is
   // 8 * warp width: 256 on NVIDIA, 512 on AMD. Longer lists fall back to the
   // serial sort.
@@ -450,7 +450,7 @@ __global__ void remove_duplicate_neighbors_warp_kernel(
     }
     sync_warp();
 
-    // Level 14: sort the whole warp instead of lane 0.
+    // Sort across the whole warp instead of on lane 0.
     //
     // This sort exists only to make equal IDs adjacent for the dedup below, so
     // the relative order of equal keys does not matter and the missing
@@ -757,7 +757,7 @@ SALTATLAS_HD_DEVICE inline void find_new_neighbor_candidates_impl(
   }
 }
 
-// Level 5 entry point: same body, with registers capped so more blocks fit per
+// Registers are capped so more blocks fit per
 // SM. The dominant stall is waiting on L1TEX, which resident warps hide.
 template <typename IDType, typename FEType, typename DistType, typename DistOp,
           int kMinBlocks, bool kSymmetricPass>
@@ -787,7 +787,7 @@ SALTATLAS_HD_DEVICE inline int update_dedup_filter(
     int n_candidates, const IDType* const nids, const int k) {
   n_candidates = remove_duplicate_neighbors<IDType, DistType>(
       candidate_ids, candidate_dists, n_candidates);
-  // Level 9: drop candidates that are already neighbours, here rather than
+  // Drop candidates that are already neighbours here, rather than
   // inside the merge below.
   //
   // The merge re-scans the whole KNNG row for every candidate it examines,
@@ -885,58 +885,55 @@ SALTATLAS_HD_DEVICE inline int update_merge_row(
       ++knng_idx;
     }
   }
-  {
-      // Level 11: the merge already leaves two sorted runs, so combine them in
-      // O(k) instead of re-sorting the whole row in O(k^2).
-      //
-      //   [0 .. knng_tail]      untouched prefix, still ascending
-      //   [knng_tail+1 .. k-1]  the insertions, DESCENDING: the best candidate
-      //                         was written first, at the highest index, and
-      //                         each later one at a lower index
-      //
-      // The full re-sort was 34% of this kernel at three iterations. Level 10
-      // tried to skip it when nothing was written, which bought nothing: with
-      // one thread per point, a warp takes the branch if any of its 32 threads
-      // has an update, so the test almost never skips. This wins per thread
-      // regardless of what the rest of the warp is doing.
-      constexpr int k_tmp_max = 64;
-      const int     n_ins     = k - 1 - knng_tail;
-      if (n_ins > 0 && n_ins <= k_tmp_max) {
-        IDType   t_ids[k_tmp_max];
-        DistType t_dists[k_tmp_max];
-        // Reverse the insertions into the temp so both runs run ascending.
-        for (int j = 0; j < n_ins; ++j) {
-          t_ids[j]   = nids[k - 1 - j];
-          t_dists[j] = dists[k - 1 - j];
-        }
-        // Merge from the back. w is always >= i, so writing at w never
-        // clobbers a prefix element still to be read.
-        int i = knng_tail;
-        int j = n_ins - 1;
-        int w = k - 1;
-        while (j >= 0) {
-          bool take_prefix = false;
-          if (i >= 0) {
-            // Match sort_neighbors_single_thread: ascending distance, ties
-            // broken by ascending ID.
-            take_prefix = nearly_equal(dists[i], t_dists[j])
-                              ? (clear_msb(nids[i]) > clear_msb(t_ids[j]))
-                              : (dists[i] > t_dists[j]);
-          }
-          if (take_prefix) {
-            nids[w]  = nids[i];
-            dists[w] = dists[i];
-            --i;
-          } else {
-            nids[w]  = t_ids[j];
-            dists[w] = t_dists[j];
-            --j;
-          }
-          --w;
-        }
-      } else if (n_ins > k_tmp_max) {
-        sort_neighbors_single_thread(nids, dists, k);
+  // The merge above already leaves two sorted runs, so combine them in
+  // O(k) instead of re-sorting the whole row in O(k^2).
+  //
+  //   [0 .. knng_tail]      untouched prefix, still ascending
+  //   [knng_tail+1 .. k-1]  the insertions, DESCENDING: the best candidate
+  //                         was written first, at the highest index, and
+  //                         each later one at a lower index
+  //
+  // The full re-sort was 34% of this kernel at three iterations. Skipping it
+  // for untouched rows was measured and bought nothing: the branch is per
+  // thread and the warp is not, so it almost never skips. Merging wins per
+  // thread regardless of what the rest of the warp is doing.
+  constexpr int k_tmp_max = 64;
+  const int     n_ins     = k - 1 - knng_tail;
+  if (n_ins > 0 && n_ins <= k_tmp_max) {
+    IDType   t_ids[k_tmp_max];
+    DistType t_dists[k_tmp_max];
+    // Reverse the insertions into the temp so both runs run ascending.
+    for (int j = 0; j < n_ins; ++j) {
+      t_ids[j]   = nids[k - 1 - j];
+      t_dists[j] = dists[k - 1 - j];
+    }
+    // Merge from the back. w is always >= i, so writing at w never
+    // clobbers a prefix element still to be read.
+    int i = knng_tail;
+    int j = n_ins - 1;
+    int w = k - 1;
+    while (j >= 0) {
+      bool take_prefix = false;
+      if (i >= 0) {
+        // Match sort_neighbors_single_thread: ascending distance, ties
+        // broken by ascending ID.
+        take_prefix = nearly_equal(dists[i], t_dists[j])
+                          ? (clear_msb(nids[i]) > clear_msb(t_ids[j]))
+                          : (dists[i] > t_dists[j]);
       }
+      if (take_prefix) {
+        nids[w]  = nids[i];
+        dists[w] = dists[i];
+        --i;
+      } else {
+        nids[w]  = t_ids[j];
+        dists[w] = t_dists[j];
+        --j;
+      }
+      --w;
+    }
+  } else if (n_ins > k_tmp_max) {
+    sort_neighbors_single_thread(nids, dists, k);
   }
   return l_n_updates;
 }
@@ -960,11 +957,11 @@ SALTATLAS_HD_DEVICE inline int update_one_point(
       candidate_ids, candidate_dists, n_candidates, nids, dists, k);
 }
 
-// One warp per point (level 12).
+// One warp per point.
 //
 // Stage 1 of the warp-collective restructuring: the launch shape and the
 // shared-memory staging are in place, but the body between them is still the
-// serial algorithm run by lane 0. This is EXPECTED TO BE SLOWER than level 11,
+// serial algorithm run by lane 0.
 // the same serial work with a thirty-second of the point-level parallelism. It
 // exists so that when the sorts and the merge move to the whole warp in the
 // stages after this one, a change in behaviour can be attributed to the
@@ -992,7 +989,7 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
 
   const int cw = static_cast<int>(candidates_ids_table.n_cols());
   const int k  = static_cast<int>(knng_ids.n_cols());
-  // Level 15 pads the candidate run to a power of two for the bitonic network,
+  // The candidate run is padded to a power of two for the bitonic network,
   // so the candidate region is allocated at that size.
   int cap = 1;
   while (cap < cw) {
@@ -1040,7 +1037,7 @@ SALTATLAS_HD_DEVICE inline void update_knng_with_candidates_warp_impl(
 
     int l_n_updates = 0;
     {
-      // Level 15: the two candidate sorts run across the whole warp; only the
+      // The two candidate sorts run across the whole warp; only the
       // dedup, the duplicate filter and the merge stay on lane 0.
       int n_pad = 1;
       while (n_pad < n_cand) {
@@ -1366,9 +1363,9 @@ void build_index_main_loop(
     // pairs.
     // (old, new) computes no distance that (new, old) has not already
     // computed: the metric is symmetric. It exists only because the kernel
-    // writes results to nid1's list and never to nid2's. From level 6 the
-    // kernel pushes both directions on the asymmetric pass, so the third launch
-    // is redundant and its update_knng_with_candidates launch goes with it.
+    // writes results to nid1's list and never to nid2's. The kernel pushes
+    // both directions on the asymmetric pass, so the third launch is
+    // redundant and its update_knng_with_candidates launch goes with it.
     neighbor_checker(new_ng, new_ng, /*symmetric_pass=*/true);
     neighbor_checker(new_ng, old_ng, /*symmetric_pass=*/false);
 
@@ -1449,7 +1446,7 @@ std::pair<matrix<IDType>, matrix<DistType>> build_index(
   if (n_points == 0 || dims == 0 || k == 0) {
     return {};
   }
-  if (n_points <= k) {
+  if (n_points <= static_cast<size_t>(k)) {
     throw std::invalid_argument("Number of points must be greater than k.");
   }
   if (max_iterations <= 0) {
@@ -1473,7 +1470,7 @@ std::pair<matrix<IDType>, matrix<DistType>> build_index(
   }
   // One point per thread.
   const size_t n_blocks = (n_points + block.x - 1) / block.x;
-  if (n_blocks > device_prop.maxGridSize[0]) {
+  if (n_blocks > static_cast<size_t>(device_prop.maxGridSize[0])) {
     throw std::runtime_error(
         "Grid size exceeds device limit. Reduce the number of points or "
         "increase "

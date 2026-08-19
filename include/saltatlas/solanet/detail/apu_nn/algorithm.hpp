@@ -192,7 +192,9 @@ SALTATLAS_HD_HD inline void single_kv_sort_short(KeyType* const   keys,
   }
 }
 
-// TODO: may not need this anymore.
+// Still required: the warp-collective path falls back to this for points whose
+// candidate count exceeds what the bitonic network can sort, and the merge in
+// update_merge_row uses it for runs longer than its temporary buffer.
 // Single thread version
 // Sort neighbors by distance
 // If two neighbors have the same distance, sort by ID.
