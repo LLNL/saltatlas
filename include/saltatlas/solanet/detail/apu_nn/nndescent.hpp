@@ -1585,73 +1585,29 @@ void build_index_main_loop(
       return (env != nullptr) ? std::atoi(env) : 0;
     }();
 
-    // The update launch, shared by neighbor_checker and, at level 16, by
-    // fused_neighbor_checker.
     auto launch_update_knng = [&]() {
       rec_time().start("knng_updates");
-      // Level 9 hoists the duplicate check out of the merge; it is otherwise
-      // level 6's update kernel. Level 8's register cap is not inherited,
-      // having measured neutral.
-      if (nnd_opt_level >= 12) {
-        // Level 12: one warp per point. grid_warp_points is the same grid the
-        // neighbour check uses. Shared memory holds, per warp, the candidate
-        // buffer and the KNNG row as ids then distances.
-        const size_t upd_warps_per_block =
-            static_cast<size_t>(block.x) / device_prop.warpSize;
-        size_t upd_cap = 1;
-        while (upd_cap < static_cast<size_t>(candidate_width)) {
-          upd_cap <<= 1;
-        }
-        const size_t upd_slots =
-            (nnd_opt_level >= 15 ? upd_cap
-                                 : static_cast<size_t>(candidate_width)) +
-            static_cast<size_t>(k);
-        const size_t upd_shared_bytes =
-            upd_warps_per_block * upd_slots *
-            (sizeof(IDType) + sizeof(DistType));
-        if (nnd_opt_level >= 15) {
-          hipLaunchKernelGGL(
-              (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
-                                                true, true>),
-              grid_warp_points, block, upd_shared_bytes, nullptr,
-              candidate_ids.get_view(), candidate_dists.get_view(),
-              candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
-              n_blocks);
-        } else {
-          hipLaunchKernelGGL(
-              (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
-                                                true, false>),
-              grid_warp_points, block, upd_shared_bytes, nullptr,
-              candidate_ids.get_view(), candidate_dists.get_view(),
-              candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
-              n_blocks);
-        }
-      } else if (nnd_opt_level >= 11) {
-        hipLaunchKernelGGL(
-            (update_knng_with_candidates<IDType, FEType, DistType, true, false,
-                                         true>),
-            grid_points, block, 0, nullptr, candidate_ids.get_view(),
-            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
-            n_updates_block.get());
-      } else if (nnd_opt_level >= 10) {
-        hipLaunchKernelGGL(
-            (update_knng_with_candidates<IDType, FEType, DistType, true, true>),
-            grid_points, block, 0, nullptr, candidate_ids.get_view(),
-            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
-            n_updates_block.get());
-      } else if (nnd_opt_level >= 9) {
-        hipLaunchKernelGGL(
-            (update_knng_with_candidates<IDType, FEType, DistType, true>),
-            grid_points, block, 0, nullptr, candidate_ids.get_view(),
-            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
-            n_updates_block.get());
-      } else {
-        hipLaunchKernelGGL(
-            (update_knng_with_candidates<IDType, FEType, DistType>),
-            grid_points, block, 0, nullptr, candidate_ids.get_view(),
-            candidate_dists.get_view(), candidate_counts, knng_ids, knng_dists,
-            n_updates_block.get());
+      // One warp per point, candidates staged in shared memory, and the two
+      // sorts run across the whole warp. grid_warp_points is the same grid the
+      // neighbour check uses. Shared memory holds, per warp, the candidate
+      // buffer padded to a power of two for the sorting network, then the KNNG
+      // row, each as ids followed by distances.
+      const size_t upd_warps_per_block =
+          static_cast<size_t>(block.x) / device_prop.warpSize;
+      size_t upd_cap = 1;
+      while (upd_cap < static_cast<size_t>(candidate_width)) {
+        upd_cap <<= 1;
       }
+      const size_t upd_slots = upd_cap + static_cast<size_t>(k);
+      const size_t upd_shared_bytes =
+          upd_warps_per_block * upd_slots * (sizeof(IDType) + sizeof(DistType));
+      hipLaunchKernelGGL(
+          (update_knng_with_candidates_warp<IDType, FEType, DistType, true,
+                                            true, true>),
+          grid_warp_points, block, upd_shared_bytes, nullptr,
+          candidate_ids.get_view(), candidate_dists.get_view(),
+          candidate_counts, knng_ids, knng_dists, n_updates_block.get(),
+          n_blocks);
       SALTATLAS_HIP_CHECK(hipGetLastError());
       SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
       rec_time().stop();  // knng_updates
