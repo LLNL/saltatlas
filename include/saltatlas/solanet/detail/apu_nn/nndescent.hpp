@@ -1368,17 +1368,11 @@ void build_index_main_loop(
     matrix_view<IDType> new_ng, hip_unique_ptr<int>& new_counts,
     hip_unique_ptr<int>& old_counts_wk, hip_unique_ptr<int>& new_counts_wk) {
   const size_t n_points = pstore.n_rows();
-  // Read here as well as further down, because the candidate buffers are
-  // allocated before that declaration is in scope.
-  static const int nnd_opt_level_for_alloc = [] {
-    const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
-    return (env != nullptr) ? std::atoi(env) : 0;
-  }();
+  // The reverse push sends each distance to both endpoints, so a point can
+  // receive candidates from two sources and needs more than k slots.
   const int candidate_width =
-      (nnd_opt_level_for_alloc >= 6)
-          ? (k * SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_NUM) /
-                SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN
-          : k;
+      (k * SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_NUM) /
+      SALTATLAS_SOLANET_APU_NND_CANDIDATE_WIDTH_DEN;
   matrix<IDType>   candidate_ids(n_points, candidate_width);
   matrix<DistType> candidate_dists(n_points, candidate_width);
   auto             candidate_counts_buf = make_hip_array<int>(n_points);
@@ -1419,27 +1413,17 @@ void build_index_main_loop(
 
     spdlog::trace("Remove duplicate neighbors old");
     rec_time().start("remove_dup_old");
-    // nnd_opt_level is declared further down; nnd_opt_level_for_alloc reads the
-    // same variable and is in scope here.
-    if (nnd_opt_level_for_alloc >= 13) {
-      const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
-      // Rounded up to a power of two so level 14 can pad the run it sorts.
+    {
+      const size_t dd_warps =
+          static_cast<size_t>(block.x) / device_prop.warpSize;
+      // Rounded up to a power of two: the sorting network needs it.
       size_t dd_cap = 1;
       while (dd_cap < old_ng.n_cols()) {
         dd_cap <<= 1;
       }
       const size_t dd_bytes = dd_warps * dd_cap * sizeof(IDType);
-      if (nnd_opt_level_for_alloc >= 14) {
-        hipLaunchKernelGGL(
-            (remove_duplicate_neighbors_warp_kernel<IDType, true>),
-            grid_warp_points, block, dd_bytes, nullptr, old_ng);
-      } else {
-        hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
-                           grid_warp_points, block, dd_bytes, nullptr, old_ng);
-      }
-    } else {
-      hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
-                         grid_points, block, 0, nullptr, old_ng);
+      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType, true>),
+                         grid_warp_points, block, dd_bytes, nullptr, old_ng);
     }
     SALTATLAS_HIP_CHECK(hipGetLastError());
     // SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
@@ -1463,27 +1447,17 @@ void build_index_main_loop(
 
     spdlog::trace("Remove duplicate neighbors new");
     rec_time().start("remove_dup_new");
-    // nnd_opt_level is declared further down; nnd_opt_level_for_alloc reads the
-    // same variable and is in scope here.
-    if (nnd_opt_level_for_alloc >= 13) {
-      const size_t dd_warps = static_cast<size_t>(block.x) / device_prop.warpSize;
-      // Rounded up to a power of two so level 14 can pad the run it sorts.
+    {
+      const size_t dd_warps =
+          static_cast<size_t>(block.x) / device_prop.warpSize;
+      // Rounded up to a power of two: the sorting network needs it.
       size_t dd_cap = 1;
       while (dd_cap < new_ng.n_cols()) {
         dd_cap <<= 1;
       }
       const size_t dd_bytes = dd_warps * dd_cap * sizeof(IDType);
-      if (nnd_opt_level_for_alloc >= 14) {
-        hipLaunchKernelGGL(
-            (remove_duplicate_neighbors_warp_kernel<IDType, true>),
-            grid_warp_points, block, dd_bytes, nullptr, new_ng);
-      } else {
-        hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType>),
-                           grid_warp_points, block, dd_bytes, nullptr, new_ng);
-      }
-    } else {
-      hipLaunchKernelGGL((remove_duplicate_neighbors_kernel<IDType>),
-                         grid_points, block, 0, nullptr, new_ng);
+      hipLaunchKernelGGL((remove_duplicate_neighbors_warp_kernel<IDType, true>),
+                         grid_warp_points, block, dd_bytes, nullptr, new_ng);
     }
     SALTATLAS_HIP_CHECK(hipGetLastError());
     SALTATLAS_HIP_CHECK(hipDeviceSynchronize());
@@ -1496,30 +1470,6 @@ void build_index_main_loop(
     spdlog::trace("Neighbor checks and KNNG updates");
     SALTATLAS_HIP_CHECK(
         hipMemset(n_updates_block.get(), 0, n_blocks * sizeof(size_t)));
-
-    /// Optimization level for the neighbor-check kernel, selected at run time
-    /// so that one binary can reproduce the baseline and every optimized
-    /// variant without a rebuild. 0 (the default) is the unmodified baseline.
-    ///   1 : team_any() vote in place of the shfl_down chain + broadcast
-    ///   2 : 32-bit induction variable in the distance loop
-    ///   3 : stage nid1's feature vector in shared memory. Measured slower
-    ///       than level 2 (shared and L1 are the same unit, so relocating
-    ///       loads does not relieve it); kept only for reference. NOT
-    ///       included in level 4.
-    ///   4 : level 2 plus 128-bit vector loads in the distance loop
-    ///   5 : level 4 plus a register cap, trading spills for occupancy
-    ///       (a no-op on AMD; see SALTATLAS_SOLANET_NND_LAUNCH_CAP)
-    ///   6 : reverse push on the (new, old) pass; (old, new) is not launched
-    ///   7 : level 6 plus the upper-triangle loop on the (new, new) pass
-    ///       (measured 2x slower than level 6; kept as a negative result)
-    ///   8 : level 6 plus a register cap on update_knng_with_candidates
-    ///       (measured neutral; not inherited by level 9)
-    ///   9 : level 6 with the duplicate check hoisted out of the merge in
-    ///       update_knng_with_candidates
-    static const int nnd_opt_level = [] {
-      const char* const env = std::getenv("SALTATLAS_SOLANET_NND_OPT");
-      return (env != nullptr) ? std::atoi(env) : 0;
-    }();
 
     auto launch_update_knng = [&]() {
       rec_time().start("knng_updates");
